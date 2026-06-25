@@ -1,0 +1,14 @@
+[project]
+name = "leadpoet-social-brain"
+version = "0.1.1"
+description = "Local-first Social Brain v0 for Leadpoet founder/social post generation."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+leadpoet-social-brain = "leadpoet_social_brain.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
