@@ -122,6 +122,27 @@ class ContextSection:
 
 
 @dataclass(frozen=True)
+class TrendItem:
+    title: str
+    source_type: str
+    topic: str
+    summary: str
+    why_it_matters: str
+    leadpoet_angle: str
+    suggested_hooks: str | None = None
+    source_url: str | None = None
+    urgency: str = "medium"
+    date: str | None = None
+    status: str = "unused"
+    engagement_notes: str | None = None
+    source_author: str | None = None
+    raw_text: str | None = None
+    id: str = field(default_factory=new_id)
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
 class DraftRequest:
     platform: str
     topic: str
@@ -132,6 +153,7 @@ class DraftRequest:
     call_to_action: str | None = None
     max_chars: int | None = None
     extra_context: str | None = None
+    use_trends: bool = False
 
 
 @dataclass(frozen=True)
@@ -155,13 +177,13 @@ class ContextBundle:
     patterns: list[Pattern]
     examples: list[SocialPost]
     notes_by_post_id: dict[str, PostNote]
+    metrics_by_post_id: dict[str, EngagementMetrics]
     analytics_hints: list[str]
 
     def influence_labels(self) -> list[str]:
         labels: list[str] = []
         labels.extend(f"style:{section.name}" for section in self.style_sections)
         labels.extend(f"context:{section.name}" for section in self.positioning_sections)
-        labels.extend(f"pattern:{pattern.name}" for pattern in self.patterns)
         labels.extend(f"example:{post.id}" for post in self.examples)
         labels.extend(f"analytics:{hint}" for hint in self.analytics_hints)
         return labels
@@ -190,6 +212,10 @@ class AnalyticsSummary:
     by_tone: list[PerformanceRow]
     by_cta: list[PerformanceRow]
     by_formatting: list[PerformanceRow]
+    by_trend_topic: list[PerformanceRow]
+    by_trend_source_type: list[PerformanceRow]
+    by_trend_urgency: list[PerformanceRow]
+    by_used_trend: list[PerformanceRow]
     best_examples: list[SocialPost]
     hints: list[str]
 

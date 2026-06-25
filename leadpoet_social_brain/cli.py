@@ -5,9 +5,9 @@ from pathlib import Path
 
 from leadpoet_social_brain.analytics import build_analytics_summary
 from leadpoet_social_brain.context import ContextManager
-from leadpoet_social_brain.core.models import ContextSection, DraftRequest, EngagementMetrics, Pattern
-from leadpoet_social_brain.generation import SocialBrainGenerator
-from leadpoet_social_brain.ingestion import ingest_x_batch_csv, ingest_x_post, publish_x_draft
+from leadpoet_social_brain.core.models import ContextSection, DraftRequest, EngagementMetrics, Pattern, TrendItem
+from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
+from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
 from leadpoet_social_brain.providers import load_provider_from_env
 from leadpoet_social_brain.storage.sqlite_store import DEFAULT_DB_PATH, SQLiteStore
 
@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Leadpoet Social Brain v0.1")
+    parser = argparse.ArgumentParser(description="Leadpoet Social Brain v0.2")
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="Path to SQLite database.")
     subparsers = parser.add_subparsers(required=True)
 
@@ -78,8 +78,41 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--cta")
     generate.add_argument("--extra-context")
     generate.add_argument("--max-chars", type=int)
+    generate.add_argument("--use-trends", action="store_true")
     generate.add_argument("--variants", type=int, default=3)
     generate.set_defaults(func=cmd_generate_x)
+
+    add_trend = subparsers.add_parser("add-trend", help="Manually add one trend item.")
+    add_trend.add_argument("--title", required=True)
+    add_trend.add_argument("--source-url")
+    add_trend.add_argument("--source-type", default="other")
+    add_trend.add_argument("--topic", required=True)
+    add_trend.add_argument("--summary", required=True)
+    add_trend.add_argument("--why-it-matters")
+    add_trend.add_argument("--leadpoet-angle")
+    add_trend.add_argument("--suggested-hooks")
+    add_trend.add_argument("--urgency", default="medium")
+    add_trend.add_argument("--date")
+    add_trend.add_argument("--status", default="unused")
+    add_trend.add_argument("--engagement-notes")
+    add_trend.add_argument("--source-author")
+    add_trend.add_argument("--raw-text")
+    add_trend.set_defaults(func=cmd_add_trend)
+
+    trends_batch = subparsers.add_parser("ingest-trends-batch", help="Import trend items from CSV.")
+    trends_batch.add_argument("--csv", required=True, dest="csv_path")
+    trends_batch.set_defaults(func=cmd_ingest_trends_batch)
+
+    list_trends = subparsers.add_parser("list-trends", help="List recent trends.")
+    list_trends.add_argument("--topic")
+    list_trends.add_argument("--status", default="unused")
+    list_trends.add_argument("--urgency")
+    list_trends.add_argument("--limit", type=int, default=10)
+    list_trends.set_defaults(func=cmd_list_trends)
+
+    mark_trend = subparsers.add_parser("mark-trend-used", help="Mark a trend as used.")
+    mark_trend.add_argument("--trend-id", required=True)
+    mark_trend.set_defaults(func=cmd_mark_trend_used)
 
     publish = subparsers.add_parser("publish-draft-x", help="Record a generated draft as a published X post.")
     publish.add_argument("--draft-id", required=True)
@@ -116,6 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
     prompt.add_argument("--cta")
     prompt.add_argument("--extra-context")
     prompt.add_argument("--max-chars", type=int)
+    prompt.add_argument("--use-trends", action="store_true")
     prompt.set_defaults(func=cmd_prompt_x)
 
     return parser
@@ -210,11 +244,10 @@ def cmd_add_pattern(store: SQLiteStore, args: argparse.Namespace) -> int:
 
 def cmd_generate_x(store: SQLiteStore, args: argparse.Namespace) -> int:
     provider = load_provider_from_env()
+    if not provider:
+        raise SystemExit(MISSING_PROVIDER_MESSAGE)
     generator = SocialBrainGenerator(store, provider=provider)
-    if provider:
-        print("Generator mode: configured LLM provider")
-    else:
-        print("Generator mode: demo/test template fallback")
+    print("Generator mode: configured LLM provider")
     request = DraftRequest(
         platform="x",
         topic=args.topic,
@@ -225,6 +258,7 @@ def cmd_generate_x(store: SQLiteStore, args: argparse.Namespace) -> int:
         call_to_action=args.cta,
         max_chars=args.max_chars,
         extra_context=args.extra_context,
+        use_trends=args.use_trends,
     )
     drafts = generator.generate(request, variants=args.variants)
     for index, draft in enumerate(drafts, start=1):
@@ -247,6 +281,72 @@ def cmd_publish_draft_x(store: SQLiteStore, args: argparse.Namespace) -> int:
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
     print(f"Published draft {args.draft_id} as post {post.id}")
+    return 0
+
+
+def cmd_add_trend(store: SQLiteStore, args: argparse.Namespace) -> int:
+    trend = store.save_trend_item(
+        TrendItem(
+            title=args.title,
+            source_url=args.source_url,
+            source_type=args.source_type,
+            topic=args.topic,
+            summary=args.summary,
+            why_it_matters=args.why_it_matters
+            or "Worth watching because it may affect buyer priorities or market timing.",
+            leadpoet_angle=args.leadpoet_angle
+            or "Connect the trend to practical sales context and better buyer timing.",
+            suggested_hooks=args.suggested_hooks,
+            urgency=args.urgency,
+            date=args.date,
+            status=args.status,
+            engagement_notes=args.engagement_notes,
+            source_author=args.source_author,
+            raw_text=args.raw_text,
+        )
+    )
+    print(f"Saved trend {trend.id}: {trend.title}")
+    return 0
+
+
+def cmd_ingest_trends_batch(store: SQLiteStore, args: argparse.Namespace) -> int:
+    result = ingest_trends_batch_csv(store, args.csv_path)
+    print("Imported trends batch")
+    print(f"Trends imported: {result.imported}")
+    print(f"Trends skipped: {result.skipped}")
+    if result.errors:
+        print("Errors:")
+        for error in result.errors[:20]:
+            print(f"- {error}")
+        if len(result.errors) > 20:
+            print(f"- ... {len(result.errors) - 20} more")
+    print("Top topics:")
+    print_counter(result.topics)
+    print("Top source types:")
+    print_counter(result.source_types)
+    return 0
+
+
+def cmd_list_trends(store: SQLiteStore, args: argparse.Namespace) -> int:
+    trends = store.list_trends(
+        topic=args.topic,
+        status=args.status,
+        urgency=args.urgency,
+        limit=args.limit,
+    )
+    if not trends:
+        print("No trends found.")
+        return 0
+    for trend in trends:
+        print(f"{trend.id} | {trend.status} | {trend.urgency} | {trend.source_type} | {trend.topic}")
+        print(f"  {trend.title}")
+        print(f"  {trend.leadpoet_angle}")
+    return 0
+
+
+def cmd_mark_trend_used(store: SQLiteStore, args: argparse.Namespace) -> int:
+    store.mark_trend_status(args.trend_id, "used")
+    print(f"Marked trend used: {args.trend_id}")
     return 0
 
 
@@ -302,6 +402,14 @@ def cmd_analytics(store: SQLiteStore, args: argparse.Namespace) -> int:
     print_rows(summary.by_cta)
     print("\nBy formatting")
     print_rows(summary.by_formatting)
+    print("\nBy trend topic")
+    print_rows(summary.by_trend_topic)
+    print("\nBy trend source type")
+    print_rows(summary.by_trend_source_type)
+    print("\nBy trend urgency")
+    print_rows(summary.by_trend_urgency)
+    print("\nBy used trend")
+    print_rows(summary.by_used_trend)
     return 0
 
 
@@ -317,6 +425,7 @@ def cmd_prompt_x(store: SQLiteStore, args: argparse.Namespace) -> int:
         call_to_action=args.cta,
         max_chars=args.max_chars,
         extra_context=args.extra_context,
+        use_trends=getattr(args, "use_trends", False),
     )
     print(generator.build_prompt(request))
     return 0

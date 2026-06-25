@@ -14,6 +14,7 @@ from leadpoet_social_brain.core.models import (
     PostInfluence,
     PostNote,
     SocialPost,
+    TrendItem,
     new_id,
     utc_now,
 )
@@ -136,6 +137,29 @@ class SQLiteStore:
 
             CREATE INDEX IF NOT EXISTS idx_post_influences_category
             ON post_influences(influence_type, category, name);
+
+            CREATE TABLE IF NOT EXISTS trend_items (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                source_url TEXT,
+                source_type TEXT NOT NULL,
+                topic TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                why_it_matters TEXT NOT NULL,
+                leadpoet_angle TEXT NOT NULL,
+                suggested_hooks TEXT,
+                urgency TEXT NOT NULL DEFAULT 'medium',
+                date TEXT,
+                status TEXT NOT NULL DEFAULT 'unused',
+                engagement_notes TEXT,
+                source_author TEXT,
+                raw_text TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_trend_items_lookup
+            ON trend_items(status, urgency, topic, date);
             """
         )
         self._migrate_existing_schema()
@@ -382,6 +406,147 @@ class SQLiteStore:
         )
         self.conn.commit()
         return draft
+
+    def save_trend_item(self, trend: TrendItem) -> TrendItem:
+        now = utc_now()
+        saved = TrendItem(
+            id=trend.id,
+            title=trend.title,
+            source_url=trend.source_url,
+            source_type=trend.source_type,
+            topic=trend.topic,
+            summary=trend.summary,
+            why_it_matters=trend.why_it_matters,
+            leadpoet_angle=trend.leadpoet_angle,
+            suggested_hooks=trend.suggested_hooks,
+            urgency=trend.urgency,
+            date=trend.date,
+            status=trend.status,
+            engagement_notes=trend.engagement_notes,
+            source_author=trend.source_author,
+            raw_text=trend.raw_text,
+            created_at=trend.created_at,
+            updated_at=now,
+        )
+        self.conn.execute(
+            """
+            INSERT INTO trend_items (
+                id, title, source_url, source_type, topic, summary, why_it_matters,
+                leadpoet_angle, suggested_hooks, urgency, date, status,
+                engagement_notes, source_author, raw_text, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                source_url = excluded.source_url,
+                source_type = excluded.source_type,
+                topic = excluded.topic,
+                summary = excluded.summary,
+                why_it_matters = excluded.why_it_matters,
+                leadpoet_angle = excluded.leadpoet_angle,
+                suggested_hooks = excluded.suggested_hooks,
+                urgency = excluded.urgency,
+                date = excluded.date,
+                status = excluded.status,
+                engagement_notes = excluded.engagement_notes,
+                source_author = excluded.source_author,
+                raw_text = excluded.raw_text,
+                updated_at = excluded.updated_at
+            """,
+            (
+                saved.id,
+                saved.title,
+                saved.source_url,
+                saved.source_type,
+                saved.topic,
+                saved.summary,
+                saved.why_it_matters,
+                saved.leadpoet_angle,
+                saved.suggested_hooks,
+                saved.urgency,
+                saved.date,
+                saved.status,
+                saved.engagement_notes,
+                saved.source_author,
+                saved.raw_text,
+                saved.created_at,
+                saved.updated_at,
+            ),
+        )
+        self.conn.commit()
+        return saved
+
+    def list_trends(
+        self,
+        *,
+        topic: str | None = None,
+        status: str | None = None,
+        urgency: str | None = None,
+        limit: int = 20,
+    ) -> list[TrendItem]:
+        clauses: list[str] = []
+        params: list[object] = []
+        if topic:
+            clauses.append("(topic = ? OR topic LIKE ? OR title LIKE ? OR summary LIKE ?)")
+            params.extend([topic, f"%{topic}%", f"%{topic}%", f"%{topic}%"])
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if urgency:
+            clauses.append("urgency = ?")
+            params.append(urgency)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self.conn.execute(
+            f"""
+            SELECT * FROM trend_items
+            {where}
+            ORDER BY
+                CASE urgency WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+                COALESCE(date, created_at) DESC,
+                created_at DESC
+            LIMIT ?
+            """,
+            (*params, limit),
+        ).fetchall()
+        return [self._row_to_trend(row) for row in rows]
+
+    def relevant_trends(
+        self,
+        *,
+        topic: str,
+        angle: str | None = None,
+        limit: int = 3,
+    ) -> list[TrendItem]:
+        candidates = self.list_trends(topic=topic, status="unused", limit=20)
+        if not candidates:
+            candidates = self.list_trends(status="unused", limit=20)
+        terms = _keywords(f"{topic} {angle or ''}")
+        scored: list[tuple[int, TrendItem]] = []
+        for trend in candidates:
+            haystack = " ".join(
+                [
+                    trend.title,
+                    trend.topic,
+                    trend.summary,
+                    trend.why_it_matters,
+                    trend.leadpoet_angle,
+                    trend.suggested_hooks or "",
+                ]
+            ).lower()
+            score = sum(1 for term in terms if term in haystack)
+            if trend.urgency == "high":
+                score += 2
+            elif trend.urgency == "medium":
+                score += 1
+            scored.append((score, trend))
+        return [trend for _, trend in sorted(scored, key=lambda item: item[0], reverse=True)[:limit]]
+
+    def mark_trend_status(self, trend_id: str, status: str) -> None:
+        self.conn.execute(
+            "UPDATE trend_items SET status = ?, updated_at = ? WHERE id = ?",
+            (status, utc_now(), trend_id),
+        )
+        self.conn.commit()
 
     def get_generated_draft(self, draft_id: str) -> GeneratedDraft | None:
         row = self.conn.execute(
@@ -704,6 +869,27 @@ class SQLiteStore:
             updated_at=row["updated_at"],
         )
 
+    def _row_to_trend(self, row: sqlite3.Row) -> TrendItem:
+        return TrendItem(
+            id=row["id"],
+            title=row["title"],
+            source_url=row["source_url"],
+            source_type=row["source_type"],
+            topic=row["topic"],
+            summary=row["summary"],
+            why_it_matters=row["why_it_matters"],
+            leadpoet_angle=row["leadpoet_angle"],
+            suggested_hooks=row["suggested_hooks"],
+            urgency=row["urgency"],
+            date=row["date"],
+            status=row["status"],
+            engagement_notes=row["engagement_notes"],
+            source_author=row["source_author"],
+            raw_text=row["raw_text"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
     def _sync_note_influences(self, note: PostNote) -> None:
         self.conn.execute(
             """
@@ -866,7 +1052,12 @@ def draft_influences_for_post(post_id: str, draft: GeneratedDraft) -> list[PostI
                 category=_clean(pattern.get("category")) or "pattern",
                 name=name,
                 ref_id=_clean(pattern.get("id")) or None,
-                metadata={"description": pattern.get("description")},
+                metadata={
+                    "source": "draft.selected_patterns",
+                    "source_field": pattern.get("source_field"),
+                    "description": pattern.get("description"),
+                    "source_example_id": pattern.get("source_example_id"),
+                },
             )
         )
 
@@ -915,6 +1106,27 @@ def draft_influences_for_post(post_id: str, draft: GeneratedDraft) -> list[PostI
                 )
             )
 
+    for trend in snapshot.get("selected_trends", []):
+        trend_id = _clean(trend.get("id"))
+        title = _clean(trend.get("title"))
+        if not trend_id or not title:
+            continue
+        influences.append(
+            PostInfluence(
+                post_id=post_id,
+                source_draft_id=draft.id,
+                influence_type="trend",
+                category=_clean(trend.get("source_type")) or "other",
+                name=title,
+                ref_id=trend_id,
+                metadata={
+                    "topic": trend.get("topic"),
+                    "urgency": trend.get("urgency"),
+                    "leadpoet_angle": trend.get("leadpoet_angle"),
+                },
+            )
+        )
+
     if influences:
         return influences
 
@@ -936,6 +1148,15 @@ def draft_influences_for_post(post_id: str, draft: GeneratedDraft) -> list[PostI
 
 def _clean(value: object) -> str:
     return str(value or "").strip()
+
+
+def _keywords(value: str) -> list[str]:
+    stopwords = {"the", "and", "for", "with", "that", "this", "why", "how", "into", "from"}
+    return [
+        word
+        for word in "".join(char.lower() if char.isalnum() else " " for char in value).split()
+        if len(word) > 2 and word not in stopwords
+    ]
 
 
 def default_patterns() -> list[Pattern]:

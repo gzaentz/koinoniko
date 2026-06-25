@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from collections import Counter
-
 from leadpoet_social_brain.analytics import build_analytics_summary
 from leadpoet_social_brain.core.models import ContextBundle, ContextSection
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
@@ -41,6 +39,7 @@ class ContextManager:
             max_examples=max_examples,
         )
         notes = self.store.notes_by_post_id([post.id for post in examples])
+        metrics = self.store.latest_metrics_by_post_id([post.id for post in examples])
         summary = build_analytics_summary(self.store)
         return ContextBundle(
             platform=platform,
@@ -51,38 +50,42 @@ class ContextManager:
             patterns=patterns,
             examples=examples,
             notes_by_post_id=notes,
+            metrics_by_post_id=metrics,
             analytics_hints=summary.hints[:4],
         )
 
     def rebuild_style_guide_from_examples(self, *, limit: int = 12) -> ContextSection:
         examples = self.store.top_examples(platform="x", limit=limit, imitate_only=True)
         notes = self.store.notes_by_post_id([post.id for post in examples])
-        pattern_counts = Counter()
-        for note in notes.values():
-            for value in [
-                note.pattern_name,
-                note.hook,
-                note.structure,
-                note.tone,
-                note.cta,
-                note.formatting,
-            ]:
-                if value:
-                    pattern_counts[value] += 1
-        reasons = [
-            note.worked_reason
-            for note in notes.values()
-            if note.worked_reason
-        ]
-        pattern_line = ", ".join(
-            pattern for pattern, _ in pattern_counts.most_common(6)
-        ) or "No repeated manual pattern has been marked yet."
-        reason_line = " ".join(reasons[:6]) or "No manual win notes have been added yet."
-        content = (
-            "Reusable Gavin/Leadpoet style guide derived from high-performing examples: "
-            "write in plain, founder-led language; make one specific argument; avoid hype, "
-            "cliches, em dashes, and generic AI phrasing. Repeated patterns to consider: "
-            f"{pattern_line}. Notes from winning posts: {reason_line}"
+        reasons = [note.worked_reason for note in notes.values() if note.worked_reason]
+        example_shapes = _writing_shapes_from_notes(notes.values())
+        content = "\n".join(
+            [
+                "Observed Gavin/Leadpoet Writing Guide",
+                "",
+                "Recurring voice traits:",
+                "- Plain, direct, and specific.",
+                "- Founder-led without sounding like a brand account.",
+                "- Practical enough that a buyer or investor can see the business point.",
+                "",
+                "Common natural post shapes:",
+                *[f"- {shape}" for shape in example_shapes[:4]],
+                "",
+                "What strong posts tend to do:",
+                *[f"- {reason}" for reason in reasons[:5]],
+                "",
+                "Avoid:",
+                "- Generic AI phrasing, launch theater, and vague market commentary.",
+                "- Forced CTAs when the post already makes the business point.",
+                "- Tag language or internal labels in the writing itself.",
+                "",
+                "Reusable writing principles:",
+                "- Start from a concrete observation or weak default.",
+                "- Make one sharp contrast or replacement model.",
+                "- Use plain language even when the idea is technical.",
+                "- Tie product beliefs to buyer pain, timing, or trust.",
+                "- Leave the reader with a specific point of view, not a slogan.",
+            ]
         )
         section = ContextSection(
             kind="style_guide",
@@ -136,15 +139,35 @@ class ContextManager:
                 seen.add(post.id)
             if len(exact) >= max_examples:
                 return exact
-        fallback = self.store.top_examples(
+        broad_examples = self.store.top_examples(
             platform=platform,
             limit=max_examples,
             imitate_only=True,
         )
-        for post in fallback:
+        for post in broad_examples:
             if post.id not in seen:
                 exact.append(post)
                 seen.add(post.id)
             if len(exact) >= max_examples:
                 break
         return exact
+
+
+def _writing_shapes_from_notes(notes) -> list[str]:
+    shapes: list[str] = []
+    for note in notes:
+        if note.pattern_name == "enemy_then_better_model" or note.structure == "enemy_then_better_model":
+            shapes.append("Name the weak default, then offer the sharper replacement model.")
+        if note.structure == "claim_then_list":
+            shapes.append("Make a plain claim, then list the concrete parts that make it true.")
+        if note.hook == "specific_observation":
+            shapes.append("Open with something observed in the market or product, then explain the implication.")
+        if note.cta and note.cta != "none":
+            shapes.append("Use a soft invitation only when it naturally follows from the point.")
+    if not shapes:
+        shapes.append("Make one clear product or market point in plain language.")
+    deduped: list[str] = []
+    for shape in shapes:
+        if shape not in deduped:
+            deduped.append(shape)
+    return deduped

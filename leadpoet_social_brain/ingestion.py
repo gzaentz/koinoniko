@@ -5,7 +5,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from leadpoet_social_brain.core.models import EngagementMetrics, PostNote, SocialPost
+from leadpoet_social_brain.core.models import EngagementMetrics, PostNote, SocialPost, TrendItem
 from leadpoet_social_brain.platforms.x import get_x_adapter
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 
@@ -17,6 +17,15 @@ class BatchImportResult:
     errors: list[str] = field(default_factory=list)
     topics: Counter[str] = field(default_factory=Counter)
     post_types: Counter[str] = field(default_factory=Counter)
+
+
+@dataclass(frozen=True)
+class TrendBatchImportResult:
+    imported: int = 0
+    skipped: int = 0
+    errors: list[str] = field(default_factory=list)
+    topics: Counter[str] = field(default_factory=Counter)
+    source_types: Counter[str] = field(default_factory=Counter)
 
 
 def ingest_x_post(
@@ -101,6 +110,10 @@ def publish_x_draft(
         )
     )
     store.link_post_to_draft(post.id, draft)
+    for trend in draft.context_snapshot.get("selected_trends", []):
+        trend_id = (trend.get("id") or "").strip()
+        if trend_id:
+            store.mark_trend_status(trend_id, "used")
     if metrics:
         store.add_metrics(post.id, metrics)
     return post
@@ -160,6 +173,63 @@ def ingest_x_batch_csv(
         errors=errors,
         topics=topics,
         post_types=post_types,
+    )
+
+
+def ingest_trends_batch_csv(store: SQLiteStore, csv_path: str | Path) -> TrendBatchImportResult:
+    imported = 0
+    skipped = 0
+    errors: list[str] = []
+    topics: Counter[str] = Counter()
+    source_types: Counter[str] = Counter()
+
+    with Path(csv_path).open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        for row_number, row in enumerate(reader, start=2):
+            if not any((value or "").strip() for value in row.values()):
+                continue
+            try:
+                trend = trend_from_row(row)
+                saved = store.save_trend_item(trend)
+                imported += 1
+                topics[saved.topic] += 1
+                source_types[saved.source_type] += 1
+            except Exception as exc:  # noqa: BLE001 - batch imports should collect row errors.
+                skipped += 1
+                errors.append(f"row {row_number}: {exc}")
+
+    return TrendBatchImportResult(
+        imported=imported,
+        skipped=skipped,
+        errors=errors,
+        topics=topics,
+        source_types=source_types,
+    )
+
+
+def trend_from_row(row: dict[str, str | None]) -> TrendItem:
+    title = _cell(row, "title")
+    topic = _cell(row, "topic")
+    summary = _cell(row, "summary")
+    why_it_matters = _cell(row, "why_it_matters")
+    leadpoet_angle = _cell(row, "leadpoet_angle")
+    if not title or not topic or not summary:
+        raise ValueError("title, topic, and summary are required.")
+    return TrendItem(
+        title=title,
+        source_url=_cell(row, "source_url") or None,
+        source_type=_cell(row, "source_type") or "other",
+        topic=topic,
+        summary=summary,
+        why_it_matters=why_it_matters or "Worth watching because it may affect buyer priorities or market timing.",
+        leadpoet_angle=leadpoet_angle or "Connect the trend to practical sales context and better buyer timing.",
+        suggested_hooks=_cell(row, "suggested_hooks") or None,
+        urgency=_cell(row, "urgency") or "medium",
+        date=_cell(row, "date") or None,
+        status=_cell(row, "status") or "unused",
+        engagement_notes=_cell(row, "engagement_notes") or None,
+        source_author=_cell(row, "source_author") or None,
+        raw_text=_cell(row, "raw_text") or None,
     )
 
 

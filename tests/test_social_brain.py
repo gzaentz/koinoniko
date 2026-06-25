@@ -1,16 +1,37 @@
 from __future__ import annotations
 
+import csv
+import os
 import tempfile
 import unittest
-import csv
+from unittest.mock import patch
 from pathlib import Path
 
 from leadpoet_social_brain.analytics import build_analytics_summary
-from leadpoet_social_brain.core.models import DraftRequest, EngagementMetrics
-from leadpoet_social_brain.generation import SocialBrainGenerator
-from leadpoet_social_brain.ingestion import ingest_x_batch_csv, ingest_x_post, publish_x_draft
+from leadpoet_social_brain.cli import main as cli_main
+from leadpoet_social_brain.context import ContextManager
+from leadpoet_social_brain.core.models import DraftRequest, EngagementMetrics, TrendItem
+from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
+from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
 from leadpoet_social_brain.skills import generation_skills, load_skill
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
+
+
+class FakeProvider:
+    def __init__(self, texts: list[str] | None = None):
+        self.texts = texts or [
+            "Leadpoet gets useful when sales AI knows why this account cares today.",
+            "The better sales system will win on timing, proof, and buyer context.",
+            "More outbound is easy. Better judgment is the part that compounds.",
+        ]
+        self.prompts: list[str] = []
+
+    def generate(self, prompt: str, *, variants: int) -> list[str]:
+        self.prompts.append(prompt)
+        texts = list(self.texts)
+        while len(texts) < variants:
+            texts.append(f"Provider draft {len(texts) + 1}: Leadpoet should make buyer timing obvious.")
+        return texts[:variants]
 
 
 class SocialBrainTest(unittest.TestCase):
@@ -60,6 +81,43 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("# Review Filter", prompt)
             store.close()
 
+    def test_generation_prompt_is_example_first_not_label_heavy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            ingest_x_post(
+                store,
+                text="Most sales AI is still mail merge with better adjectives.",
+                url="https://x.com/gavin/status/101",
+                date="2026-06-20",
+                author="Gavin",
+                topic="sales LLMs",
+                post_type="founder_insight",
+                metrics=EngagementMetrics(impressions=1000, likes=40, replies=5, bookmarks=15),
+                worked_reason="It named a weak default, then gave a sharper replacement model in plain language.",
+                hook="enemy_hook",
+                structure="enemy_then_better_model",
+                tone="plainspoken",
+                imitate=True,
+            )
+
+            prompt = SocialBrainGenerator(store).build_prompt(
+                DraftRequest(
+                    platform="x",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="account context beats generic automation",
+                )
+            )
+
+            self.assertIn("Study these Gavin/Leadpoet examples first:", prompt)
+            self.assertIn("Example:\nMost sales AI is still mail merge", prompt)
+            self.assertIn("Why it worked:\nIt named a weak default", prompt)
+            self.assertIn("Performance:\n1000 impressions", prompt)
+            self.assertNotIn("Labels:", prompt)
+            self.assertLess(prompt.index("Study these Gavin/Leadpoet examples first:"), prompt.index("Writing and review instructions:"))
+            store.close()
+
     def test_ingest_x_post_stores_metrics_and_notes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -99,11 +157,45 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("enemy_hook", {influence.name for influence in influences})
             store.close()
 
-    def test_generator_uses_seed_context_and_respects_x_limit(self):
+    def test_generation_fails_without_provider(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
             store.seed_defaults()
-            generator = SocialBrainGenerator(store)
+
+            with self.assertRaises(ValueError) as direct_error:
+                SocialBrainGenerator(store).generate(
+                    DraftRequest(
+                        platform="x",
+                        topic="sales LLMs",
+                        post_type="founder_insight",
+                        angle="context beats generic automation",
+                    ),
+                    variants=1,
+                )
+            self.assertEqual(str(direct_error.exception), MISSING_PROVIDER_MESSAGE)
+
+            with patch.dict(os.environ, {"SOCIAL_BRAIN_PROVIDER": ""}, clear=False):
+                with self.assertRaises(SystemExit) as cli_error:
+                    cli_main(
+                        [
+                            "--db",
+                            str(Path(tmpdir) / "cli.sqlite3"),
+                            "generate-x",
+                            "--topic",
+                            "sales LLMs",
+                            "--post-type",
+                            "founder_insight",
+                        ]
+                    )
+            self.assertEqual(str(cli_error.exception), MISSING_PROVIDER_MESSAGE)
+            store.close()
+
+    def test_generator_uses_provider_and_preserves_context_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = FakeProvider()
+            generator = SocialBrainGenerator(store, provider=provider)
 
             drafts = generator.generate(
                 DraftRequest(
@@ -116,12 +208,18 @@ class SocialBrainTest(unittest.TestCase):
             )
 
             self.assertEqual(len(drafts), 2)
+            self.assertEqual(len({draft.text for draft in drafts}), 2)
             self.assertTrue(all(len(draft.text) <= 280 for draft in drafts))
             self.assertTrue(all("—" not in draft.text for draft in drafts))
             self.assertTrue(all(draft.explanation.startswith("Influenced by") for draft in drafts))
+            self.assertEqual(len(provider.prompts), 1)
+            self.assertIn("Writing and review instructions:", provider.prompts[0])
             saved_draft = store.get_generated_draft(drafts[0].id)
             self.assertIsNotNone(saved_draft)
             self.assertEqual(saved_draft.text, drafts[0].text)
+            self.assertEqual(saved_draft.context_snapshot["generation_mode"], "provider")
+            self.assertIn("FakeProvider", saved_draft.context_snapshot["provider_name"])
+            self.assertIn("quality_notes", saved_draft.context_snapshot)
             self.assertIn("selected_patterns", saved_draft.context_snapshot)
             self.assertIn("selected_context_sections", saved_draft.context_snapshot)
             self.assertIn("skills", saved_draft.context_snapshot)
@@ -130,6 +228,31 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("skills/platforms/x.md", skill_paths)
             self.assertIn("skills/post_types/founder_insight.md", skill_paths)
             self.assertTrue(all(skill.get("sha256") for skill in saved_draft.context_snapshot["skills"]))
+            store.close()
+
+    def test_style_guide_rebuild_is_writing_guide_not_tag_report(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            ingest_x_post(
+                store,
+                text="Most sales AI is still mail merge with better adjectives.",
+                url="https://x.com/gavin/status/201",
+                date="2026-06-20",
+                author="Gavin",
+                topic="sales LLMs",
+                post_type="founder_insight",
+                metrics=EngagementMetrics(impressions=2000, likes=80),
+                worked_reason="Names the weak default and gives a sharper model.",
+                structure="enemy_then_better_model",
+                imitate=True,
+            )
+
+            section = ContextManager(store).rebuild_style_guide_from_examples()
+
+            self.assertIn("Observed Gavin/Leadpoet Writing Guide", section.content)
+            self.assertIn("Reusable writing principles", section.content)
+            self.assertNotIn("Repeated patterns to consider", section.content)
             store.close()
 
     def test_publishing_draft_preserves_source_and_analyzes_influences(self):
@@ -149,7 +272,7 @@ class SocialBrainTest(unittest.TestCase):
                 hook="specific_observation",
                 imitate=True,
             )
-            draft = SocialBrainGenerator(store).generate(
+            draft = SocialBrainGenerator(store, provider=FakeProvider()).generate(
                 DraftRequest(
                     platform="x",
                     topic="sales LLMs",
@@ -211,6 +334,43 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(summary.by_cta[0].key, "none")
             self.assertEqual(summary.by_formatting[0].key, "short_paragraphs")
             self.assertGreater(summary.by_hook[0].avg_replies, 0)
+            store.close()
+
+    def test_analytics_hints_are_human_readable_when_enough_data(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            for index in range(2):
+                ingest_x_post(
+                    store,
+                    text=f"Sales AI post {index}. The sentence is easy. The timing is the work.",
+                    url=f"https://x.com/gavin/status/30{index}",
+                    date="2026-06-25",
+                    author="Gavin",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    metrics=EngagementMetrics(impressions=2000, likes=50, replies=5, reposts=4, bookmarks=20),
+                    structure="enemy_then_better_model",
+                    hook="specific_observation",
+                    tone="plain_english_technical",
+                    imitate=True,
+                )
+
+            summary = build_analytics_summary(store)
+            prompt = SocialBrainGenerator(store).build_prompt(
+                DraftRequest(
+                    platform="x",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="context beats generic automation",
+                )
+            )
+
+            self.assertTrue(summary.hints)
+            self.assertTrue(any("weak default" in hint or "concrete observation" in hint for hint in summary.hints))
+            self.assertFalse(any(hint.startswith("Best hook") or "plain_english_technical" in hint for hint in summary.hints))
+            self.assertIn("Useful performance guidance:", prompt)
+            self.assertTrue("weak default" in prompt or "concrete observation" in prompt)
             store.close()
 
     def test_batch_import_csv_and_long_x_examples(self):
@@ -289,6 +449,124 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(result.topics["sales LLMs"], 1)
             self.assertIn("enemy_hook", {row.key for row in summary.by_hook})
             self.assertIn("short_paragraphs", {row.key for row in summary.by_formatting})
+            store.close()
+
+    def test_trend_items_manual_batch_generation_and_publish_linkage(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            ingest_x_post(
+                store,
+                text="The hard part of sales AI is not writing the sentence. It is knowing whether the sentence should exist.",
+                url="https://x.com/gavin/status/401",
+                date="2026-06-20",
+                author="Gavin",
+                topic="sales LLMs",
+                post_type="founder_insight",
+                metrics=EngagementMetrics(impressions=3000, likes=100, replies=8, reposts=12, bookmarks=40),
+                worked_reason="Plain technical framing with a concrete business point.",
+                imitate=True,
+            )
+            trend = store.save_trend_item(
+                TrendItem(
+                    title="AI SDR tools shift from volume to buyer context",
+                    source_url="https://example.com/ai-sdr-context",
+                    source_type="news",
+                    topic="sales LLMs",
+                    summary="More teams are questioning high-volume AI SDR workflows.",
+                    why_it_matters="Buyers are tuning out generic automation and rewarding timely context.",
+                    leadpoet_angle="Leadpoet can argue that sales AI needs buyer timing, not just more generated copy.",
+                    suggested_hooks="The AI SDR debate is really a context debate.",
+                    urgency="high",
+                    date="2026-06-25",
+                )
+            )
+
+            prompt = SocialBrainGenerator(store).build_prompt(
+                DraftRequest(
+                    platform="x",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="AI SDR context beats volume",
+                    use_trends=True,
+                )
+            )
+            draft = SocialBrainGenerator(store, provider=FakeProvider()).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="AI SDR context beats volume",
+                    use_trends=True,
+                ),
+                variants=1,
+            )[0]
+            post = publish_x_draft(
+                store,
+                draft_id=draft.id,
+                url="https://x.com/gavin/status/402",
+                date="2026-06-25",
+                author="Gavin",
+                metrics=EngagementMetrics(impressions=5000, likes=150, replies=12, reposts=22, bookmarks=55),
+            )
+            influences = store.list_post_influences([post.id], influence_type="trend")
+            summary = build_analytics_summary(store)
+            trends = store.list_trends(status="used")
+
+            self.assertIn("Timely market context:", prompt)
+            self.assertIn("Trend:\nAI SDR tools shift", prompt)
+            self.assertEqual(draft.context_snapshot["selected_trends"][0]["id"], trend.id)
+            self.assertEqual(influences[0].ref_id, trend.id)
+            self.assertIn("sales LLMs", {row.key for row in summary.by_trend_topic})
+            self.assertIn("news", {row.key for row in summary.by_trend_source_type})
+            self.assertIn("high", {row.key for row in summary.by_trend_urgency})
+            self.assertEqual(trends[0].id, trend.id)
+            store.close()
+
+    def test_trend_batch_import_works(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            csv_path = Path(tmpdir) / "trends.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "title",
+                        "source_url",
+                        "source_type",
+                        "topic",
+                        "summary",
+                        "why_it_matters",
+                        "leadpoet_angle",
+                        "suggested_hooks",
+                        "urgency",
+                        "date",
+                        "status",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "title": "Bittensor subnet launches new sales eval",
+                        "source_url": "https://example.com/subnet",
+                        "source_type": "Bittensor_update",
+                        "topic": "Bittensor",
+                        "summary": "A subnet is testing sales-context evaluation.",
+                        "why_it_matters": "It may make sales AI quality easier to price.",
+                        "leadpoet_angle": "Useful sales AI needs measurable context quality.",
+                        "suggested_hooks": "A useful subnet should make one sales signal better.",
+                        "urgency": "medium",
+                        "date": "2026-06-25",
+                        "status": "unused",
+                    }
+                )
+
+            result = ingest_trends_batch_csv(store, csv_path)
+            trends = store.list_trends(topic="Bittensor", status="unused")
+
+            self.assertEqual(result.imported, 1)
+            self.assertEqual(result.skipped, 0)
+            self.assertEqual(trends[0].source_type, "Bittensor_update")
             store.close()
 
 
