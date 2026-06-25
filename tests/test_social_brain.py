@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import csv
+import io
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import patch
 from pathlib import Path
 
@@ -13,6 +15,7 @@ from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.core.models import DraftRequest, EngagementMetrics, TrendItem
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
+from leadpoet_social_brain.platforms.x_api import XApiClient, normalize_x_api_post, sync_x_user_posts
 from leadpoet_social_brain.skills import generation_skills, load_skill
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 
@@ -32,6 +35,19 @@ class FakeProvider:
         while len(texts) < variants:
             texts.append(f"Provider draft {len(texts) + 1}: Leadpoet should make buyer timing obvious.")
         return texts[:variants]
+
+
+class FakeXApiClient:
+    def __init__(self, tweets):
+        self.tweets = tweets
+        self.resolved_usernames: list[str] = []
+
+    def resolve_user_id(self, username: str) -> str:
+        self.resolved_usernames.append(username)
+        return "42"
+
+    def iter_user_posts(self, user_id: str, **kwargs):
+        yield from self.tweets
 
 
 class SocialBrainTest(unittest.TestCase):
@@ -449,6 +465,206 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(result.topics["sales LLMs"], 1)
             self.assertIn("enemy_hook", {row.key for row in summary.by_hook})
             self.assertIn("short_paragraphs", {row.key for row in summary.by_formatting})
+            store.close()
+
+    def test_x_api_post_normalizes_into_import_fields(self):
+        normalized = normalize_x_api_post(
+            {
+                "id": "12345",
+                "text": "The useful version of sales AI knows why this buyer cares now.",
+                "created_at": "2026-06-25T12:00:00.000Z",
+                "public_metrics": {
+                    "impression_count": 1000,
+                    "like_count": 50,
+                    "reply_count": 4,
+                    "retweet_count": 8,
+                    "quote_count": 2,
+                    "bookmark_count": 12,
+                },
+            },
+            username="@gavinzaentz",
+            default_topic="Leadpoet",
+            default_post_type="founder_insight",
+            imitate=True,
+        )
+
+        self.assertEqual(normalized.x_post_id, "12345")
+        self.assertEqual(normalized.url, "https://x.com/gavinzaentz/status/12345")
+        self.assertEqual(normalized.date, "2026-06-25T12:00:00.000Z")
+        self.assertEqual(normalized.author, "gavinzaentz")
+        self.assertEqual(normalized.topic, "Leadpoet")
+        self.assertEqual(normalized.post_type, "founder_insight")
+        self.assertTrue(normalized.imitate)
+        self.assertEqual(normalized.metrics.impressions, 1000)
+        self.assertEqual(normalized.metrics.likes, 50)
+        self.assertEqual(normalized.metrics.replies, 4)
+        self.assertEqual(normalized.metrics.reposts, 8)
+        self.assertEqual(normalized.metrics.quotes, 2)
+        self.assertEqual(normalized.metrics.bookmarks, 12)
+
+    def test_x_api_sync_prevents_duplicates_by_url_or_x_post_id(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            ingest_x_post(
+                store,
+                text="Already imported through a legacy Twitter URL.",
+                url="https://twitter.com/gavinzaentz/status/legacy123?s=20",
+                date="2026-06-24T12:00:00.000Z",
+                author="gavinzaentz",
+                topic="Leadpoet",
+                post_type="founder_insight",
+            )
+            client = FakeXApiClient(
+                [
+                    {
+                        "id": "abc123",
+                        "text": "Leadpoet should make buyer timing obvious.",
+                        "created_at": "2026-06-25T12:00:00.000Z",
+                        "public_metrics": {"like_count": 10},
+                    },
+                    {
+                        "id": "legacy123",
+                        "text": "This tweet is already in the system.",
+                        "created_at": "2026-06-25T13:00:00.000Z",
+                    }
+                ]
+            )
+
+            first = sync_x_user_posts(
+                store,
+                client,
+                username="gavinzaentz",
+                limit=10,
+                default_topic="Leadpoet",
+                default_post_type="founder_insight",
+            )
+            second = sync_x_user_posts(
+                store,
+                client,
+                username="gavinzaentz",
+                limit=10,
+                default_topic="Leadpoet",
+                default_post_type="founder_insight",
+            )
+
+            self.assertEqual(first.imported, 1)
+            self.assertEqual(first.duplicates, 1)
+            self.assertEqual(second.imported, 0)
+            self.assertEqual(second.duplicates, 2)
+            self.assertEqual(len(store.list_posts(platform="x", limit=10)), 2)
+            store.close()
+
+    def test_x_api_client_handles_pagination(self):
+        calls = []
+
+        def request_json(path, params):
+            calls.append((path, dict(params)))
+            if path == "/users/by/username/gavinzaentz":
+                return {"data": {"id": "42"}}
+            if params.get("pagination_token") == "next-page":
+                return {
+                    "data": [
+                        {"id": "3", "text": "Third post"},
+                        {"id": "4", "text": "Fourth post"},
+                    ],
+                    "meta": {},
+                }
+            return {
+                "data": [
+                    {"id": "1", "text": "First post"},
+                    {"id": "2", "text": "Second post"},
+                ],
+                "meta": {"next_token": "next-page"},
+            }
+
+        client = XApiClient("token", request_json=request_json)
+
+        user_id = client.resolve_user_id("gavinzaentz")
+        tweets = list(
+            client.iter_user_posts(
+                user_id,
+                limit=3,
+                exclude_replies=True,
+                exclude_retweets=True,
+            )
+        )
+
+        self.assertEqual(user_id, "42")
+        self.assertEqual([tweet["id"] for tweet in tweets], ["1", "2", "3"])
+        self.assertTrue(any(params.get("pagination_token") == "next-page" for _, params in calls))
+        tweet_calls = [params for path, params in calls if path == "/users/42/tweets"]
+        self.assertEqual(tweet_calls[0]["exclude"], "replies,retweets")
+        self.assertIn("public_metrics", tweet_calls[0]["tweet.fields"])
+
+    def test_sync_x_user_dry_run_does_not_write_posts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            fake_client = FakeXApiClient(
+                [
+                    {
+                        "id": "dry123",
+                        "text": "Dry run post",
+                        "created_at": "2026-06-25T12:00:00.000Z",
+                    }
+                ]
+            )
+            output = io.StringIO()
+
+            with patch("leadpoet_social_brain.cli.XApiClient.from_env", return_value=fake_client):
+                with redirect_stdout(output):
+                    cli_main(
+                        [
+                            "--db",
+                            str(db_path),
+                            "sync-x-user",
+                            "--username",
+                            "gavinzaentz",
+                            "--limit",
+                            "10",
+                            "--exclude-replies",
+                            "--exclude-retweets",
+                            "--default-topic",
+                            "Leadpoet",
+                            "--default-post-type",
+                            "founder_insight",
+                            "--dry-run",
+                        ]
+                    )
+
+            store = SQLiteStore(db_path)
+            self.assertEqual(store.list_posts(platform="x", limit=10), [])
+            store.close()
+            self.assertIn("Dry run X user @gavinzaentz", output.getvalue())
+            self.assertIn("Would import: 1", output.getvalue())
+
+    def test_x_api_sync_missing_metrics_does_not_break_import(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            client = FakeXApiClient(
+                [
+                    {
+                        "id": "nometrics123",
+                        "text": "Metrics can arrive later.",
+                        "created_at": "2026-06-25T12:00:00.000Z",
+                    }
+                ]
+            )
+
+            result = sync_x_user_posts(
+                store,
+                client,
+                username="gavinzaentz",
+                limit=10,
+                default_topic="Leadpoet",
+                default_post_type="founder_insight",
+            )
+            posts = store.list_posts(platform="x", limit=10)
+            metrics = store.latest_metrics_by_post_id([post.id for post in posts])
+
+            self.assertEqual(result.imported, 1)
+            self.assertEqual(result.errors, [])
+            self.assertEqual(len(posts), 1)
+            self.assertEqual(metrics, {})
             store.close()
 
     def test_trend_items_manual_batch_generation_and_publish_linkage(self):

@@ -629,6 +629,33 @@ class SQLiteStore:
         row = self.conn.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
         return self._row_to_post(row) if row else None
 
+    def get_post_by_url(self, url: str) -> SocialPost | None:
+        row = self.conn.execute("SELECT * FROM posts WHERE url = ? LIMIT 1", (url,)).fetchone()
+        return self._row_to_post(row) if row else None
+
+    def get_post_by_x_post_id(self, x_post_id: str) -> SocialPost | None:
+        row = self.conn.execute(
+            """
+            SELECT *
+            FROM posts
+            WHERE platform = 'x'
+              AND (
+                url LIKE ?
+                OR url LIKE ?
+                OR url LIKE ?
+                OR url LIKE ?
+              )
+            LIMIT 1
+            """,
+            (
+                f"%/status/{x_post_id}",
+                f"%/status/{x_post_id}?%",
+                f"%/status/{x_post_id}/%",
+                f"%/status/{x_post_id}#%",
+            ),
+        ).fetchone()
+        return self._row_to_post(row) if row else None
+
     def list_posts(
         self,
         *,

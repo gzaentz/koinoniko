@@ -41,6 +41,7 @@ leadpoet_social_brain/
   core/models.py          Platform-neutral data models
   platforms/base.py       Platform adapter protocol
   platforms/x.py          X post types, URL validation, and character limits
+  platforms/x_api.py      Minimal X API client and user-post sync importer
   storage/sqlite_store.py SQLite schema, migrations, and repository functions
   ingestion.py            X example import, trend import, publish workflow
   context.py              Context retrieval and style guide rebuilds
@@ -167,6 +168,20 @@ Import your existing X corpus:
 
 ```bash
 python3 -m leadpoet_social_brain.cli ingest-x-batch --csv data/x_posts.csv
+```
+
+Or pull your own posts from the X API:
+
+```bash
+export X_BEARER_TOKEN="<your bearer token>"
+
+python3 -m leadpoet_social_brain.cli sync-x-user \
+  --username gavinzaentz \
+  --limit 100 \
+  --exclude-replies \
+  --exclude-retweets \
+  --default-topic "Leadpoet" \
+  --default-post-type founder_insight
 ```
 
 Rebuild the writing guide from posts marked `imitate=true`:
@@ -333,6 +348,70 @@ quote_tweet
 ```
 
 `bittensor` and `bittensor_update` both use `skills/post_types/bittensor_update.md`. Other supported post types still work. They use the global voice, X platform skill, review filter, retrieved examples, context, and provider.
+
+## X API Import
+
+Use `sync-x-user` when you want to pull your own X posts directly from the X API instead of building a CSV by hand.
+
+Set a bearer token in your shell:
+
+```bash
+export X_BEARER_TOKEN="<your bearer token>"
+```
+
+Run a dry run first:
+
+```bash
+python3 -m leadpoet_social_brain.cli sync-x-user \
+  --username gavinzaentz \
+  --limit 25 \
+  --exclude-replies \
+  --exclude-retweets \
+  --default-topic "Leadpoet" \
+  --default-post-type founder_insight \
+  --dry-run
+```
+
+Import posts:
+
+```bash
+python3 -m leadpoet_social_brain.cli sync-x-user \
+  --username gavinzaentz \
+  --limit 100 \
+  --exclude-replies \
+  --exclude-retweets \
+  --default-topic "Leadpoet" \
+  --default-post-type founder_insight
+```
+
+Optional time window:
+
+```bash
+python3 -m leadpoet_social_brain.cli sync-x-user \
+  --username gavinzaentz \
+  --limit 100 \
+  --start-time "2026-01-01T00:00:00Z" \
+  --end-time "2026-06-25T00:00:00Z" \
+  --default-topic "Leadpoet" \
+  --default-post-type founder_insight
+```
+
+By default, replies and retweets are excluded. Use `--include-replies` or `--include-retweets` when you want them.
+
+The importer:
+
+- resolves the username to an X user ID
+- calls `GET /2/users/:id/tweets`
+- supports pagination and `--limit`
+- normalizes API results into the existing `ingest_x_post` flow
+- avoids duplicates by canonical URL or X post ID
+- does not store `X_BEARER_TOKEN` in SQLite
+- does not guess `worked_reason`, `hook`, `structure`, `tone`, `cta`, `formatting`, or `pattern`
+- defaults `imitate` to false unless `--imitate` is passed
+
+The importer requests public metrics only. It maps available metrics into impressions, likes, replies, reposts, quotes, and bookmarks. If a metric is missing, import still succeeds.
+
+URL clicks, profile clicks, private analytics, and some impression data may require user-context auth or elevated API access. Those are intentionally not part of this simple importer.
 
 ## Context
 
@@ -754,6 +833,7 @@ Top-level commands:
 init
 ingest-x
 ingest-x-batch
+sync-x-user
 add-context
 add-pattern
 generate-x
@@ -774,6 +854,7 @@ Use built-in help for details:
 ```bash
 python3 -m leadpoet_social_brain.cli --help
 python3 -m leadpoet_social_brain.cli generate-x --help
+python3 -m leadpoet_social_brain.cli sync-x-user --help
 python3 -m leadpoet_social_brain.cli ingest-x-batch --help
 python3 -m leadpoet_social_brain.cli add-trend --help
 ```
@@ -801,6 +882,10 @@ Current tests cover:
 - example-first prompt format
 - long X example ingestion
 - batch X import
+- X API post normalization
+- X API duplicate prevention and pagination
+- `sync-x-user --dry-run`
+- missing X API metrics
 - style guide rebuild quality
 - provider-required generation behavior
 - draft-to-post source linkage

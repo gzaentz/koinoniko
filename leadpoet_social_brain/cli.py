@@ -8,6 +8,7 @@ from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.core.models import ContextSection, DraftRequest, EngagementMetrics, Pattern, TrendItem
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
+from leadpoet_social_brain.platforms.x_api import XApiClient, sync_x_user_posts
 from leadpoet_social_brain.providers import load_provider_from_env
 from leadpoet_social_brain.storage.sqlite_store import DEFAULT_DB_PATH, SQLiteStore
 
@@ -52,6 +53,21 @@ def build_parser() -> argparse.ArgumentParser:
     batch.add_argument("--csv", required=True, dest="csv_path")
     batch.add_argument("--default-author", default="Gavin")
     batch.set_defaults(func=cmd_ingest_x_batch)
+
+    sync_x = subparsers.add_parser("sync-x-user", help="Pull a user's X posts from the X API.")
+    sync_x.add_argument("--username", required=True)
+    sync_x.add_argument("--limit", type=int, default=100)
+    sync_x.add_argument("--start-time")
+    sync_x.add_argument("--end-time")
+    sync_x.add_argument("--exclude-replies", dest="exclude_replies", action="store_true", default=True)
+    sync_x.add_argument("--include-replies", dest="exclude_replies", action="store_false")
+    sync_x.add_argument("--exclude-retweets", dest="exclude_retweets", action="store_true", default=True)
+    sync_x.add_argument("--include-retweets", dest="exclude_retweets", action="store_false")
+    sync_x.add_argument("--default-topic", required=True)
+    sync_x.add_argument("--default-post-type", required=True)
+    sync_x.add_argument("--imitate", action="store_true")
+    sync_x.add_argument("--dry-run", action="store_true")
+    sync_x.set_defaults(func=cmd_sync_x_user)
 
     add_context = subparsers.add_parser("add-context", help="Add or update a context section.")
     add_context.add_argument("--kind", required=True)
@@ -210,6 +226,53 @@ def cmd_ingest_x_batch(store: SQLiteStore, args: argparse.Namespace) -> int:
     print_counter(result.topics)
     print("Top post types:")
     print_counter(result.post_types)
+    return 0
+
+
+def cmd_sync_x_user(store: SQLiteStore, args: argparse.Namespace) -> int:
+    try:
+        client = XApiClient.from_env()
+        result = sync_x_user_posts(
+            store,
+            client,
+            username=args.username,
+            limit=args.limit,
+            default_topic=args.default_topic,
+            default_post_type=args.default_post_type,
+            start_time=args.start_time,
+            end_time=args.end_time,
+            exclude_replies=args.exclude_replies,
+            exclude_retweets=args.exclude_retweets,
+            dry_run=args.dry_run,
+            imitate=args.imitate,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    mode = "Dry run" if args.dry_run else "Sync"
+    print(f"{mode} X user @{args.username}")
+    print(f"Tweets fetched: {result.fetched}")
+    if args.dry_run:
+        print(f"Would import: {result.would_import}")
+    else:
+        print(f"Posts imported: {result.imported}")
+    print(f"Duplicates skipped: {result.duplicates}")
+    print(f"Posts skipped: {result.skipped}")
+    if result.errors:
+        print("Errors:")
+        for error in result.errors[:20]:
+            print(f"- {error}")
+        if len(result.errors) > 20:
+            print(f"- ... {len(result.errors) - 20} more")
+    print("Top topics:")
+    print_counter(result.topics)
+    print("Top post types:")
+    print_counter(result.post_types)
+    if args.dry_run and result.dry_run_posts:
+        print("Dry-run preview:")
+        for post in result.dry_run_posts[:5]:
+            preview = post.text.replace("\n", " ")[:100]
+            print(f"- {post.date or 'no date'} | {post.url} | {preview}")
     return 0
 
 
