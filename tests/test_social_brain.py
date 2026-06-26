@@ -81,6 +81,18 @@ class FakeProvider:
         return texts[:variants]
 
 
+class SequentialProvider:
+    def __init__(self, texts: list[str]):
+        self.texts = list(texts)
+        self.prompts: list[str] = []
+
+    def generate(self, prompt: str, *, variants: int) -> list[str]:
+        self.prompts.append(prompt)
+        selected = self.texts[:variants]
+        self.texts = self.texts[variants:]
+        return selected
+
+
 class RoleAwareProvider:
     def __init__(self):
         self.calls: list[dict[str, str | int | None]] = []
@@ -400,6 +412,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("/api/account/sync-x-posts", app_js)
         self.assertIn("/api/account/sync-x-metrics", app_js)
         self.assertIn("/api/account/sync-x-all", app_js)
+        self.assertIn("auto_categorize", app_js)
+        self.assertIn("Recategorized", app_js)
         self.assertIn("/api/trends/refresh", app_js)
         self.assertIn("connectionRow", app_js)
         self.assertIn("status-badge", app_js)
@@ -1721,6 +1735,68 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotIn(posts[0].id, store.notes_by_post_id([posts[0].id]))
             self.assertEqual(metrics[posts[0].id].likes, 20)
             self.assertEqual(metadata.status, "success")
+            store.close()
+
+    def test_account_sync_x_posts_can_auto_categorize_and_update_default_duplicates(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            existing = ingest_x_post(
+                store,
+                text="Sales AI should know why this buyer cares today.",
+                url="https://x.com/gavinzaentz/status/accountcat1",
+                date="2026-06-24T12:00:00+00:00",
+                author="gavinzaentz",
+                topic="Leadpoet",
+                post_type="founder_insight",
+            )
+            store.close()
+            fake_client = FakeXApiClient(
+                [
+                    {
+                        "id": "accountcat1",
+                        "text": "Sales AI should know why this buyer cares today.",
+                        "created_at": "2026-06-24T12:00:00.000Z",
+                    },
+                    {
+                        "id": "accountcat2",
+                        "text": "Subnet incentives on Bittensor need to make miner behavior obvious.",
+                        "created_at": "2026-06-25T12:00:00.000Z",
+                    },
+                ]
+            )
+            provider = SequentialProvider(
+                [
+                    '{"topic":"sales LLMs","post_type":"founder_insight","confidence":0.91,"reason":"Sales AI post."}',
+                    '{"topic":"Bittensor","post_type":"bittensor_update","confidence":0.92,"reason":"Subnet incentives."}',
+                ]
+            )
+
+            with patch.dict(os.environ, {"X_BEARER_TOKEN": "read-token", "SOCIAL_BRAIN_PROVIDER": "openrouter"}, clear=False):
+                with patch("leadpoet_social_brain.web.app.XApiClient.from_env", return_value=fake_client):
+                    with patch("leadpoet_social_brain.web.app.load_provider_from_env", return_value=provider):
+                        status, payload = handle_api_request(
+                            "POST",
+                            "/api/account/sync-x-posts",
+                            json.dumps({"limit": 100, "auto_categorize": True}),
+                            db_path=db_path,
+                        )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["result"]["imported"], 1)
+            self.assertEqual(payload["result"]["duplicates"], 1)
+            self.assertEqual(payload["result"]["recategorized"], 1)
+            self.assertEqual(payload["result"]["topics"]["sales LLMs"], 1)
+            self.assertEqual(payload["result"]["topics"]["Bittensor"], 1)
+            store = SQLiteStore(db_path)
+            recategorized = store.get_post(existing.id)
+            self.assertIsNotNone(recategorized)
+            self.assertEqual(recategorized.topic, "sales LLMs")
+            self.assertEqual(recategorized.post_type, "founder_insight")
+            imported = store.get_post_by_x_post_id("accountcat2")
+            self.assertIsNotNone(imported)
+            self.assertEqual(imported.topic, "Bittensor")
+            self.assertEqual(imported.post_type, "bittensor_update")
             store.close()
 
     def test_account_sync_x_metrics_endpoint_appends_metrics_and_metadata(self):

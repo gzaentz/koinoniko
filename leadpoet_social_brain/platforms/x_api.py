@@ -12,7 +12,7 @@ import secrets
 import time
 from collections import Counter
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -64,6 +64,7 @@ XPostCategorizer = Callable[[dict[str, Any], NormalizedXApiPost], NormalizedXApi
 class XApiSyncResult:
     fetched: int = 0
     imported: int = 0
+    recategorized: int = 0
     would_import: int = 0
     skipped: int = 0
     duplicates: int = 0
@@ -328,6 +329,7 @@ def sync_x_user_posts(
     user_id = client.resolve_user_id(username)
     fetched = 0
     imported = 0
+    recategorized = 0
     would_import = 0
     skipped = 0
     duplicates = 0
@@ -360,9 +362,20 @@ def sync_x_user_posts(
                 default_post_type=default_post_type,
                 imitate=imitate,
             )
-            if is_duplicate_x_api_post(store, normalized):
+            existing_post = existing_x_api_post(store, normalized)
+            if existing_post:
                 duplicates += 1
                 skipped += 1
+                if categorizer and should_recategorize_x_post(existing_post):
+                    try:
+                        categorized = categorizer(tweet, normalized)
+                        if update_x_post_category(store, existing_post, categorized):
+                            recategorized += 1
+                            topics[categorized.topic] += 1
+                            post_types[categorized.post_type] += 1
+                    except Exception as exc:  # noqa: BLE001 - keep sync moving if one recategorization fails.
+                        tweet_id = str(tweet.get("id") or "unknown")
+                        errors.append(f"tweet {tweet_id}: {exc}")
                 continue
             if categorizer:
                 normalized = categorizer(tweet, normalized)
@@ -394,6 +407,7 @@ def sync_x_user_posts(
     return XApiSyncResult(
         fetched=fetched,
         imported=imported,
+        recategorized=recategorized,
         would_import=would_import,
         skipped=skipped,
         duplicates=duplicates,
@@ -557,10 +571,22 @@ def metrics_from_x_public_metrics(
 
 
 def is_duplicate_x_api_post(store: SQLiteStore, normalized: NormalizedXApiPost) -> bool:
-    return bool(
-        store.get_post_by_url(normalized.url)
-        or store.get_post_by_x_post_id(normalized.x_post_id)
-    )
+    return bool(existing_x_api_post(store, normalized))
+
+
+def existing_x_api_post(store: SQLiteStore, normalized: NormalizedXApiPost) -> SocialPost | None:
+    return store.get_post_by_url(normalized.url) or store.get_post_by_x_post_id(normalized.x_post_id)
+
+
+def should_recategorize_x_post(post: SocialPost) -> bool:
+    return post.topic in {DEFAULT_IMPORT_TOPIC, UNCATEGORIZED_TOPIC}
+
+
+def update_x_post_category(store: SQLiteStore, post: SocialPost, categorized: NormalizedXApiPost) -> bool:
+    if post.topic == categorized.topic and post.post_type == categorized.post_type:
+        return False
+    store.save_post(replace(post, topic=categorized.topic, post_type=categorized.post_type))
+    return True
 
 
 def normalize_username(username: str) -> str:

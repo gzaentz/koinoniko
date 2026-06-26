@@ -923,12 +923,21 @@ def run_x_posts_sync(
     started_at = utc_now()
     try:
         require_x_read_credentials()
+        auto_categorize = bool_from_payload(payload, "auto_categorize", False)
+        categorizer = None
+        if auto_categorize:
+            provider = load_configured_provider(store)
+            if not provider:
+                raise ValueError(MISSING_PROVIDER_MESSAGE)
+            categorizer = XPostLLMCategorizer(provider).categorize
         result = sync_x_user_posts(
             store,
             XApiClient.from_env(),
             username=clean_optional(payload.get("username")) or DEFAULT_X_SYNC_USERNAME,
             limit=limit,
-            default_topic=clean_optional(payload.get("default_topic")) or DEFAULT_IMPORT_TOPIC,
+            default_topic=clean_optional(payload.get("default_topic")) or (
+                UNCATEGORIZED_TOPIC if auto_categorize else DEFAULT_IMPORT_TOPIC
+            ),
             default_post_type=clean_optional(payload.get("default_post_type")) or DEFAULT_IMPORT_POST_TYPE,
             start_time=clean_optional(payload.get("start_time")),
             end_time=clean_optional(payload.get("end_time")),
@@ -936,7 +945,7 @@ def run_x_posts_sync(
             exclude_retweets=bool_from_payload(payload, "exclude_retweets", True),
             dry_run=bool_from_payload(payload, "dry_run", False),
             imitate=bool_from_payload(payload, "imitate", False),
-            categorizer=None,
+            categorizer=categorizer,
         )
         summary = sync_x_user_result_payload(result)
         metadata = store.save_sync_metadata(
@@ -1051,6 +1060,7 @@ def sync_x_user_result_payload(result) -> dict[str, Any]:
     return {
         "fetched": result.fetched,
         "imported": result.imported,
+        "recategorized": result.recategorized,
         "would_import": result.would_import,
         "skipped": result.skipped,
         "duplicates": result.duplicates,

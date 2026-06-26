@@ -846,12 +846,13 @@ async function planWeek() {
 }
 
 async function syncPosts() {
+  const autoCategorize = Boolean(state.status?.provider_configured);
   const payload = await api("/api/account/sync-x-posts", {
     method: "POST",
     body: JSON.stringify({
       username: DEFAULT_SYNC_USERNAME,
       limit: 3200,
-      default_topic: "Leadpoet",
+      ...(autoCategorize ? { auto_categorize: true } : { default_topic: "Leadpoet" }),
       default_post_type: "founder_insight",
       exclude_replies: true,
       exclude_retweets: true,
@@ -859,7 +860,7 @@ async function syncPosts() {
     }),
   });
   const result = payload.result || {};
-  showMessage(`X posts synced. Imported ${result.imported || 0}. Duplicates: ${result.duplicates || 0}.`);
+  showMessage(`X posts synced. Imported ${result.imported || 0}. Recategorized ${result.recategorized || 0}. Duplicates: ${result.duplicates || 0}.`);
   await refreshAfterAccountAction();
 }
 
@@ -874,12 +875,13 @@ async function syncMetrics() {
 }
 
 async function syncAllXData() {
+  const autoCategorize = Boolean(state.status?.provider_configured);
   const payload = await api("/api/account/sync-x-all", {
     method: "POST",
     body: JSON.stringify({
       username: DEFAULT_SYNC_USERNAME,
       limit: 3200,
-      default_topic: "Leadpoet",
+      ...(autoCategorize ? { auto_categorize: true } : { default_topic: "Leadpoet" }),
       default_post_type: "founder_insight",
       exclude_replies: true,
       exclude_retweets: true,
@@ -889,7 +891,7 @@ async function syncAllXData() {
   });
   const posts = payload.posts || {};
   const metrics = payload.metrics || {};
-  showMessage(`X data synced. Imported ${posts.imported || 0}; metrics updated ${metrics.updated || 0}.`);
+  showMessage(`X data synced. Imported ${posts.imported || 0}; recategorized ${posts.recategorized || 0}; metrics updated ${metrics.updated || 0}.`);
   await refreshAfterAccountAction();
 }
 
