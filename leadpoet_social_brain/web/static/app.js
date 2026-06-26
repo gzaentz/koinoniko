@@ -13,6 +13,7 @@ const state = {
   recentPostsSort: { key: "date", direction: "desc" },
   autoRefreshedWebTrends: false,
   webTrendsRefreshing: false,
+  trendRefreshErrors: [],
 };
 
 const RECENT_POST_SORT_COLUMNS = {
@@ -378,7 +379,12 @@ function renderDashboardTrends() {
   const groups = state.dashboard?.trend_groups || {};
   const daily = groups.daily || [];
   const weekly = groups.weekly || [];
+  const errors = state.trendRefreshErrors || [];
+  const warning = errors.length
+    ? `<p class="muted">Trend refresh warning: ${escapeHtml(errors.join(" "))}</p>`
+    : "";
   const content = [
+    warning,
     dashboardTrendGroup("Top daily trends", daily),
     dashboardTrendGroup("Top weekly trends", weekly),
   ].filter(Boolean).join("");
@@ -890,8 +896,11 @@ async function refreshWebTrends({ silent = false } = {}) {
   state.webTrendsRefreshing = true;
   try {
     const payload = await api("/api/trends/refresh", { method: "POST", body: "{}" });
+    state.trendRefreshErrors = payload.errors || [];
     if (state.dashboard) state.dashboard.trend_groups = payload.trend_groups || {};
-    if (!silent) showMessage("Web trends refreshed.");
+    if (!silent) {
+      showMessage(state.trendRefreshErrors.length ? "Web trends refreshed with warnings." : "Web trends refreshed.", Boolean(state.trendRefreshErrors.length));
+    }
     await refresh();
     if (!$("trendsModal").classList.contains("hidden")) await loadTrends();
   } finally {

@@ -651,7 +651,7 @@ def route_api(
             groups = refresh_web_trends(store)
         except Exception as exc:  # noqa: BLE001 - web trend sources can fail independently of the app.
             return 502, {"error": f"Could not refresh web trends: {exc}"}
-        return 200, {"trend_groups": trend_groups_payload(groups)}
+        return 200, trend_refresh_payload(groups)
     if method == "POST" and parts == ["api", "trends"]:
         trend = store.save_trend_item(trend_from_payload(payload))
         return 200, {"item": trend_payload(trend)}
@@ -1511,6 +1511,14 @@ def trend_groups_payload(groups) -> dict[str, list[dict[str, Any]]]:
     return {
         "daily": [trend_payload(trend) for trend in groups.daily],
         "weekly": [trend_payload(trend) for trend in groups.weekly],
+    }
+
+
+def trend_refresh_payload(groups) -> dict[str, Any]:
+    return {
+        "trend_groups": trend_groups_payload(groups),
+        "errors": list(getattr(groups, "errors", []) or []),
+        "sources": list(getattr(groups, "sources", []) or []),
     }
 
 
