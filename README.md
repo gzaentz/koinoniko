@@ -227,7 +227,7 @@ For a new hosted database:
 4. Run `python -m leadpoet_social_brain.cli init` against that DB if seed context is needed.
 5. Run `python -m leadpoet_social_brain.cli set-web-login --username gavinz444`.
 6. Set `X_BEARER_TOKEN`.
-7. Run `sync-x-user` or import posts another way.
+7. Run `sync-x-user --auto-categorize` or import posts another way.
 8. Use `update-post-notes` to mark strongest examples with `imitate=true`.
 9. Run `rebuild-style-guide`.
 10. Set `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, and `SOCIAL_BRAIN_PROVIDER`.
@@ -243,6 +243,7 @@ Social Brain does not run a scheduler or background worker. On Railway, approved
 You can trigger the same core jobs through protected HTTP task endpoints:
 
 ```text
+POST /api/tasks/sync-x-user
 POST /api/tasks/publish-due-x
 POST /api/tasks/sync-x-metrics
 POST /api/tasks/weekly-report-x
@@ -261,6 +262,11 @@ curl -X POST "$SOCIAL_BRAIN_URL/api/tasks/publish-due-x" \
   -H "Authorization: Bearer $SOCIAL_BRAIN_TASK_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"limit":20}'
+
+curl -X POST "$SOCIAL_BRAIN_URL/api/tasks/sync-x-user" \
+  -H "Authorization: Bearer $SOCIAL_BRAIN_TASK_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"gavinzaentz","limit":100,"auto_categorize":true,"exclude_replies":true,"exclude_retweets":true}'
 
 curl -X POST "$SOCIAL_BRAIN_URL/api/tasks/sync-x-metrics" \
   -H "Authorization: Bearer $SOCIAL_BRAIN_TASK_TOKEN" \
@@ -355,7 +361,7 @@ python3 -m leadpoet_social_brain.cli --db /private/tmp/social_brain_demo.sqlite3
 
 The normal v0.2 loop is:
 
-1. `sync-x-user` to import posts.
+1. `sync-x-user --auto-categorize` to import posts with provider-backed topic/post-type labels.
 2. `list-posts` to review them.
 3. `update-post-notes` to mark the strongest posts with `imitate=true` and `worked_reason`.
 4. `rebuild-style-guide`.
@@ -615,6 +621,14 @@ Set a bearer token in your shell:
 export X_BEARER_TOKEN="<your bearer token>"
 ```
 
+For LLM categorization, also configure your generation provider. With OpenRouter:
+
+```bash
+export OPENROUTER_API_KEY="<your OpenRouter key>"
+export OPENROUTER_MODEL="<any OpenRouter model slug>"
+export SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider"
+```
+
 Run a dry run first:
 
 ```bash
@@ -623,8 +637,7 @@ python3 -m leadpoet_social_brain.cli sync-x-user \
   --limit 25 \
   --exclude-replies \
   --exclude-retweets \
-  --default-topic "Leadpoet" \
-  --default-post-type founder_insight \
+  --auto-categorize \
   --dry-run
 ```
 
@@ -636,8 +649,7 @@ python3 -m leadpoet_social_brain.cli sync-x-user \
   --limit 100 \
   --exclude-replies \
   --exclude-retweets \
-  --default-topic "Leadpoet" \
-  --default-post-type founder_insight
+  --auto-categorize
 ```
 
 Optional time window:
@@ -648,11 +660,12 @@ python3 -m leadpoet_social_brain.cli sync-x-user \
   --limit 100 \
   --start-time "2026-01-01T00:00:00Z" \
   --end-time "2026-06-25T00:00:00Z" \
-  --default-topic "Leadpoet" \
-  --default-post-type founder_insight
+  --auto-categorize
 ```
 
 By default, replies and retweets are excluded. Use `--include-replies` or `--include-retweets` when you want them.
+
+`--auto-categorize` uses the configured LLM provider to classify only `topic` and `post_type`. It does not guess `worked_reason`, hooks, structures, tone, CTAs, formatting, patterns, or `imitate`.
 
 The importer:
 
@@ -662,6 +675,7 @@ The importer:
 - normalizes API results into the existing `ingest_x_post` flow
 - avoids duplicates by canonical URL or X post ID
 - does not store `X_BEARER_TOKEN` in SQLite
+- can use an LLM provider for `topic` and `post_type` when `--auto-categorize` is passed
 - does not guess `worked_reason`, `hook`, `structure`, `tone`, `cta`, `formatting`, or `pattern`
 - defaults `imitate` to false unless `--imitate` is passed
 
@@ -1360,6 +1374,7 @@ Current tests cover:
 - long X example ingestion
 - batch X import
 - X API post normalization
+- provider-backed X import categorization
 - X API duplicate prevention and pagination
 - `sync-x-user --dry-run`
 - missing X API metrics

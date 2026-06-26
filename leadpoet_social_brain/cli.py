@@ -13,6 +13,7 @@ from leadpoet_social_brain.content_queue import (
     require_queue_item,
     weekly_report_text,
 )
+from leadpoet_social_brain.categorization import XPostLLMCategorizer
 from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.core.models import (
     ContentQueueItem,
@@ -29,6 +30,9 @@ from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBra
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
 from leadpoet_social_brain.platforms.x import get_x_adapter
 from leadpoet_social_brain.platforms.x_api import (
+    DEFAULT_IMPORT_POST_TYPE,
+    DEFAULT_IMPORT_TOPIC,
+    UNCATEGORIZED_TOPIC,
     MISSING_X_WRITE_CREDENTIALS_MESSAGE,
     XApiClient,
     XWriteClient,
@@ -100,8 +104,9 @@ def build_parser() -> argparse.ArgumentParser:
     sync_x.add_argument("--include-replies", dest="exclude_replies", action="store_false")
     sync_x.add_argument("--exclude-retweets", dest="exclude_retweets", action="store_true", default=True)
     sync_x.add_argument("--include-retweets", dest="exclude_retweets", action="store_false")
-    sync_x.add_argument("--default-topic", required=True)
-    sync_x.add_argument("--default-post-type", required=True)
+    sync_x.add_argument("--default-topic")
+    sync_x.add_argument("--default-post-type", default=DEFAULT_IMPORT_POST_TYPE)
+    sync_x.add_argument("--auto-categorize", action="store_true")
     sync_x.add_argument("--imitate", action="store_true")
     sync_x.add_argument("--dry-run", action="store_true")
     sync_x.set_defaults(func=cmd_sync_x_user)
@@ -357,12 +362,21 @@ def cmd_ingest_x_batch(store: SQLiteStore, args: argparse.Namespace) -> int:
 def cmd_sync_x_user(store: SQLiteStore, args: argparse.Namespace) -> int:
     try:
         client = XApiClient.from_env()
+        categorizer = None
+        if args.auto_categorize:
+            provider = load_provider_from_env()
+            if not provider:
+                raise SystemExit(MISSING_PROVIDER_MESSAGE)
+            categorizer = XPostLLMCategorizer(provider).categorize
+        default_topic = args.default_topic or (
+            UNCATEGORIZED_TOPIC if args.auto_categorize else DEFAULT_IMPORT_TOPIC
+        )
         result = sync_x_user_posts(
             store,
             client,
             username=args.username,
             limit=args.limit,
-            default_topic=args.default_topic,
+            default_topic=default_topic,
             default_post_type=args.default_post_type,
             start_time=args.start_time,
             end_time=args.end_time,
@@ -370,12 +384,14 @@ def cmd_sync_x_user(store: SQLiteStore, args: argparse.Namespace) -> int:
             exclude_retweets=args.exclude_retweets,
             dry_run=args.dry_run,
             imitate=args.imitate,
+            categorizer=categorizer,
         )
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
 
     mode = "Dry run" if args.dry_run else "Sync"
     print(f"{mode} X user @{args.username}")
+    print(f"Auto categorize: {'on' if args.auto_categorize else 'off'}")
     print(f"Tweets fetched: {result.fetched}")
     if args.dry_run:
         print(f"Would import: {result.would_import}")
@@ -397,7 +413,7 @@ def cmd_sync_x_user(store: SQLiteStore, args: argparse.Namespace) -> int:
         print("Dry-run preview:")
         for post in result.dry_run_posts[:5]:
             preview = post.text.replace("\n", " ")[:100]
-            print(f"- {post.date or 'no date'} | {post.url} | {preview}")
+            print(f"- {post.date or 'no date'} | {post.topic} | {post.post_type} | {post.url} | {preview}")
     return 0
 
 

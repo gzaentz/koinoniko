@@ -19,6 +19,7 @@ from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
 from leadpoet_social_brain.analytics import build_analytics_summary
+from leadpoet_social_brain.categorization import XPostLLMCategorizer
 from leadpoet_social_brain.content_queue import (
     accept_queued_post_version,
     approve_queue_item,
@@ -37,9 +38,13 @@ from leadpoet_social_brain.core.models import (
 )
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
 from leadpoet_social_brain.platforms.x_api import (
+    DEFAULT_IMPORT_POST_TYPE,
+    DEFAULT_IMPORT_TOPIC,
+    UNCATEGORIZED_TOPIC,
     XApiClient,
     XWriteClient,
     sync_x_metrics,
+    sync_x_user_posts,
 )
 from leadpoet_social_brain.providers import load_provider_from_env
 from leadpoet_social_brain.storage.sqlite_store import (
@@ -530,6 +535,8 @@ def route_api(
         return 200, publish_due_payload(store, payload)
     if method == "POST" and parts == ["api", "tasks", "sync-x-metrics"]:
         return 200, sync_metrics_payload(store, payload)
+    if method == "POST" and parts == ["api", "tasks", "sync-x-user"]:
+        return 200, sync_x_user_payload(store, payload)
     if method == "POST" and parts == ["api", "tasks", "weekly-report-x"]:
         return 200, weekly_report_payload(store, payload)
     if method == "GET" and parts == ["api", "trends"]:
@@ -576,6 +583,63 @@ def sync_metrics_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[st
         dry_run=bool(payload.get("dry_run", False)),
     )
     return {"result": asdict(result)}
+
+
+def sync_x_user_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    username = clean_optional(payload.get("username"))
+    if not username:
+        raise ValueError("username is required.")
+    auto_categorize = bool(payload.get("auto_categorize", False))
+    categorizer = None
+    if auto_categorize:
+        provider = load_provider_from_env()
+        if not provider:
+            raise ValueError(MISSING_PROVIDER_MESSAGE)
+        categorizer = XPostLLMCategorizer(provider).categorize
+    default_topic = clean_optional(payload.get("default_topic")) or (
+        UNCATEGORIZED_TOPIC if auto_categorize else DEFAULT_IMPORT_TOPIC
+    )
+    client = XApiClient.from_env()
+    result = sync_x_user_posts(
+        store,
+        client,
+        username=username,
+        limit=int(payload.get("limit") or 100),
+        default_topic=default_topic,
+        default_post_type=clean_optional(payload.get("default_post_type")) or DEFAULT_IMPORT_POST_TYPE,
+        start_time=clean_optional(payload.get("start_time")),
+        end_time=clean_optional(payload.get("end_time")),
+        exclude_replies=bool(payload.get("exclude_replies", True)),
+        exclude_retweets=bool(payload.get("exclude_retweets", True)),
+        dry_run=bool(payload.get("dry_run", False)),
+        imitate=bool(payload.get("imitate", False)),
+        categorizer=categorizer,
+    )
+    return {"result": sync_x_user_result_payload(result)}
+
+
+def sync_x_user_result_payload(result) -> dict[str, Any]:
+    return {
+        "fetched": result.fetched,
+        "imported": result.imported,
+        "would_import": result.would_import,
+        "skipped": result.skipped,
+        "duplicates": result.duplicates,
+        "errors": result.errors,
+        "topics": dict(result.topics),
+        "post_types": dict(result.post_types),
+        "dry_run_posts": [
+            {
+                "x_post_id": post.x_post_id,
+                "url": post.url,
+                "date": post.date,
+                "topic": post.topic,
+                "post_type": post.post_type,
+                "text": post.text,
+            }
+            for post in result.dry_run_posts[:10]
+        ],
+    }
 
 
 def weekly_report_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:

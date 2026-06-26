@@ -39,6 +39,10 @@ MISSING_X_WRITE_CREDENTIALS_MESSAGE = (
     "No X write credentials configured. Set X write auth credentials before posting."
 )
 
+DEFAULT_IMPORT_TOPIC = "Leadpoet"
+DEFAULT_IMPORT_POST_TYPE = "founder_insight"
+UNCATEGORIZED_TOPIC = "uncategorized"
+
 
 @dataclass(frozen=True)
 class NormalizedXApiPost:
@@ -51,6 +55,9 @@ class NormalizedXApiPost:
     post_type: str
     metrics: EngagementMetrics | None = None
     imitate: bool = False
+
+
+XPostCategorizer = Callable[[dict[str, Any], NormalizedXApiPost], NormalizedXApiPost]
 
 
 @dataclass(frozen=True)
@@ -316,6 +323,7 @@ def sync_x_user_posts(
     exclude_retweets: bool = True,
     dry_run: bool = False,
     imitate: bool = False,
+    categorizer: XPostCategorizer | None = None,
 ) -> XApiSyncResult:
     user_id = client.resolve_user_id(username)
     fetched = 0
@@ -356,6 +364,8 @@ def sync_x_user_posts(
                 duplicates += 1
                 skipped += 1
                 continue
+            if categorizer:
+                normalized = categorizer(tweet, normalized)
             if dry_run:
                 would_import += 1
                 dry_run_posts.append(normalized)
@@ -514,9 +524,10 @@ def normalize_x_api_post(
     if not x_post_id:
         raise ValueError("X API tweet is missing id.")
     clean_username = normalize_username(username)
+    text = str(tweet.get("text") or "").strip()
     return NormalizedXApiPost(
         x_post_id=x_post_id,
-        text=str(tweet.get("text") or "").strip(),
+        text=text,
         url=f"https://x.com/{clean_username}/status/{x_post_id}",
         date=str(tweet.get("created_at") or "").strip() or None,
         author=clean_username,

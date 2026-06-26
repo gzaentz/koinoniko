@@ -11,6 +11,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 from leadpoet_social_brain.analytics import build_analytics_summary
+from leadpoet_social_brain.categorization import XPostLLMCategorizer, parse_x_category_response
 from leadpoet_social_brain.content_queue import plan_week_x, post_queue_item_x
 from leadpoet_social_brain.cli import main as cli_main
 from leadpoet_social_brain.context import ContextManager
@@ -772,6 +773,47 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Weekly X report: last 30 days", payload["report"])
             self.assertIn("sales LLMs", payload["report"])
 
+    def test_task_endpoint_sync_x_user_can_auto_categorize(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+            fake_client = FakeXApiClient(
+                [
+                    {
+                        "id": "taskcat123",
+                        "text": "A subnet should make the incentive obvious.",
+                        "created_at": "2026-06-25T12:00:00.000Z",
+                    }
+                ]
+            )
+            provider = FakeProvider([
+                '{"topic":"Bittensor","post_type":"bittensor_update","confidence":0.9,"reason":"Subnet post."}'
+            ])
+
+            with patch("leadpoet_social_brain.web.app.XApiClient.from_env", return_value=fake_client):
+                with patch("leadpoet_social_brain.web.app.load_provider_from_env", return_value=provider):
+                    status, payload = handle_api_request(
+                        "POST",
+                        "/api/tasks/sync-x-user",
+                        json.dumps(
+                            {
+                                "username": "gavinzaentz",
+                                "limit": 100,
+                                "auto_categorize": True,
+                            }
+                        ),
+                        db_path=db_path,
+                    )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["result"]["imported"], 1)
+            self.assertEqual(payload["result"]["topics"]["Bittensor"], 1)
+            store = SQLiteStore(db_path)
+            post = store.list_posts(platform="x", limit=1)[0]
+            self.assertEqual(post.topic, "Bittensor")
+            self.assertEqual(post.post_type, "bittensor_update")
+            store.close()
+
     def test_web_llm_edit_does_not_overwrite_until_accepted(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"
@@ -1232,6 +1274,38 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(normalized.metrics.quotes, 2)
         self.assertEqual(normalized.metrics.bookmarks, 12)
 
+    def test_llm_categorizer_sets_topic_and_post_type(self):
+        normalized = normalize_x_api_post(
+            {
+                "id": "cat123",
+                "text": "A good subnet is an incentive system, not a Discord with emissions.",
+                "created_at": "2026-06-25T12:00:00.000Z",
+            },
+            username="gavinzaentz",
+            default_topic="uncategorized",
+            default_post_type="founder_insight",
+        )
+        provider = FakeProvider([
+            '{"topic":"Bittensor","post_type":"bittensor_update","confidence":0.92,"reason":"Subnet incentives."}'
+        ])
+
+        categorized = XPostLLMCategorizer(provider).categorize({"referenced_tweets": []}, normalized)
+
+        self.assertEqual(categorized.topic, "Bittensor")
+        self.assertEqual(categorized.post_type, "bittensor_update")
+        self.assertIn("Return only valid JSON", provider.prompts[0])
+        self.assertIn("A good subnet is an incentive system", provider.prompts[0])
+
+    def test_category_response_normalizes_aliases(self):
+        parsed = parse_x_category_response(
+            '{"topic":"sales","post_type":"technical"}',
+            default_topic="uncategorized",
+            default_post_type="founder_insight",
+        )
+
+        self.assertEqual(parsed["topic"], "sales LLMs")
+        self.assertEqual(parsed["post_type"], "technical_explanation")
+
     def test_x_api_sync_prevents_duplicates_by_url_or_x_post_id(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -1282,6 +1356,39 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(second.imported, 0)
             self.assertEqual(second.duplicates, 2)
             self.assertEqual(len(store.list_posts(platform="x", limit=10)), 2)
+            store.close()
+
+    def test_x_api_sync_can_use_llm_categorizer(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            client = FakeXApiClient(
+                [
+                    {
+                        "id": "salescat123",
+                        "text": "The hard part of sales AI is knowing why this buyer cares now.",
+                        "created_at": "2026-06-25T12:00:00.000Z",
+                    }
+                ]
+            )
+            provider = FakeProvider([
+                '{"topic":"sales LLMs","post_type":"founder_insight","confidence":0.96,"reason":"Sales AI post."}'
+            ])
+
+            result = sync_x_user_posts(
+                store,
+                client,
+                username="gavinzaentz",
+                limit=10,
+                default_topic="uncategorized",
+                default_post_type="founder_insight",
+                categorizer=XPostLLMCategorizer(provider).categorize,
+            )
+            post = store.list_posts(platform="x", limit=1)[0]
+
+            self.assertEqual(result.imported, 1)
+            self.assertEqual(result.topics["sales LLMs"], 1)
+            self.assertEqual(post.topic, "sales LLMs")
+            self.assertEqual(post.post_type, "founder_insight")
             store.close()
 
     def test_x_api_client_handles_pagination(self):
