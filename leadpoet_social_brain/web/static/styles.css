@@ -604,6 +604,9 @@ main {
 .action-menu button {
   width: 100%;
   justify-content: flex-start;
+  background: var(--white);
+  color: var(--ink);
+  border-color: var(--line);
 }
 
 .count-pill,

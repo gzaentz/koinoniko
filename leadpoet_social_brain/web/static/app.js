@@ -85,7 +85,7 @@ const views = {
     meta: "What has been posted, what is current, and what is working.",
   },
   reviewer: {
-    title: "Content Reviewer",
+    title: "Queue",
     meta: "Review, improve, approve, and schedule X posts.",
   },
   account: {

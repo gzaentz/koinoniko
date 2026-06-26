@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260626-reviewer-actions">
+    <link rel="stylesheet" href="/static/styles.css?v=20260626-queue-label">
   </head>
   <body>
     <aside class="sidebar">
@@ -19,7 +19,7 @@
       <nav>
         <button class="nav-button active" data-view="dashboard">Dashboard</button>
         <button class="nav-button nav-with-badge" data-view="reviewer">
-          <span>Content Reviewer</span>
+          <span>Queue</span>
           <span id="reviewNavBadge" class="nav-badge">0</span>
         </button>
       </nav>
@@ -122,7 +122,7 @@
                 <div class="add-menu-wrap">
                   <button class="icon-button board-add-button" id="reviewAddButton" aria-label="Create content" aria-haspopup="true" aria-expanded="false">+</button>
                   <div class="action-menu hidden" id="reviewAddMenu">
-                    <button id="reviewAddPostButton">Create Post</button>
+                    <button class="secondary" id="reviewAddPostButton">Create Post</button>
                     <button class="secondary" id="reviewAddPlanButton">Create Weekly Plan</button>
                   </div>
                 </div>
@@ -223,7 +223,7 @@
       <div class="modal-card wide">
         <div class="modal-header">
           <div>
-            <span class="eyebrow">Content Reviewer</span>
+            <span class="eyebrow">Queue</span>
             <h2 id="queueModalTitle">Review post</h2>
           </div>
           <button class="icon-button" data-close-modal="queueModal" aria-label="Close">x</button>
@@ -237,7 +237,7 @@
       <div class="modal-card">
         <div class="modal-header">
           <div>
-            <span class="eyebrow">Content Reviewer</span>
+            <span class="eyebrow">Queue</span>
             <h2>Create Post</h2>
           </div>
           <button class="icon-button" data-close-modal="createPostModal" aria-label="Close">x</button>
@@ -339,6 +339,6 @@
       </div>
     </section>
 
-    <script src="/static/app.js?v=20260626-reviewer-actions"></script>
+    <script src="/static/app.js?v=20260626-queue-label"></script>
   </body>
 </html>
