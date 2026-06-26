@@ -1592,6 +1592,37 @@ class SocialBrainTest(unittest.TestCase):
             self.assertGreater(summary.by_hook[0].avg_replies, 0)
             store.close()
 
+    def test_analytics_handles_metrics_without_engagement_rate(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            post_without_rate = ingest_x_post(
+                store,
+                text="X may return likes without impressions, so engagement rate can be unavailable.",
+                url="https://x.com/gavin/status/no-rate",
+                date="2026-06-25",
+                author="Gavin",
+                topic="Leadpoet",
+                post_type="founder_insight",
+                metrics=EngagementMetrics(likes=40, replies=4),
+            )
+            post_with_rate = ingest_x_post(
+                store,
+                text="This post has impressions and a calculable engagement rate.",
+                url="https://x.com/gavin/status/with-rate",
+                date="2026-06-26",
+                author="Gavin",
+                topic="Leadpoet",
+                post_type="founder_insight",
+                metrics=EngagementMetrics(impressions=1000, likes=30, replies=3),
+            )
+
+            summary = build_analytics_summary(store)
+
+            self.assertEqual(summary.by_topic[0].key, "Leadpoet")
+            self.assertIn(post_without_rate.id, {example.id for example in summary.best_examples})
+            self.assertIn(post_with_rate.id, {example.id for example in summary.best_examples})
+            store.close()
+
     def test_analytics_hints_are_human_readable_when_enough_data(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)

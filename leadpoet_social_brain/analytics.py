@@ -201,13 +201,17 @@ def _group_trend_performance(
 
 
 def _best_posts(posts: list[SocialPost], metrics_by_post_id: dict[str, EngagementMetrics]) -> list[SocialPost]:
+    def sort_key(post: SocialPost) -> tuple[float, int, str]:
+        metrics = metrics_by_post_id.get(post.id)
+        return (
+            metrics.engagement_rate if metrics and metrics.engagement_rate is not None else 0.0,
+            metrics.total_engagements() if metrics else 0,
+            post.created_at,
+        )
+
     return sorted(
         posts,
-        key=lambda post: (
-            metrics_by_post_id.get(post.id).engagement_rate if metrics_by_post_id.get(post.id) else 0.0,
-            metrics_by_post_id.get(post.id).total_engagements() if metrics_by_post_id.get(post.id) else 0,
-            post.created_at,
-        ),
+        key=sort_key,
         reverse=True,
     )
 
