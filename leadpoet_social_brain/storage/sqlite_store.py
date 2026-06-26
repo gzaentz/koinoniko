@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
@@ -23,19 +24,34 @@ from leadpoet_social_brain.core.models import (
 
 
 DEFAULT_DB_PATH = Path("data/social_brain.sqlite3")
+DB_ENV_VAR = "SOCIAL_BRAIN_DB"
+
+
+def resolve_db_path(path: str | Path | None = None) -> Path:
+    if path:
+        return Path(path)
+    env_path = os.getenv(DB_ENV_VAR)
+    if env_path:
+        return Path(env_path)
+    return DEFAULT_DB_PATH
 
 
 class SQLiteStore:
-    def __init__(self, path: str | Path = DEFAULT_DB_PATH):
-        self.path = Path(path)
+    def __init__(self, path: str | Path | None = None):
+        self.path = resolve_db_path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA foreign_keys = ON")
+        self._configure_connection()
         self.initialize()
 
     def close(self) -> None:
         self.conn.close()
+
+    def _configure_connection(self) -> None:
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA busy_timeout=5000")
+        self.conn.execute("PRAGMA foreign_keys=ON")
 
     def initialize(self) -> None:
         self.conn.executescript(

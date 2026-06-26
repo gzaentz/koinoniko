@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 from leadpoet_social_brain.analytics import build_analytics_summary
 from leadpoet_social_brain.content_queue import (
@@ -51,7 +50,13 @@ def main(argv: list[str] | None = None) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Leadpoet Social Brain v0.2")
-    parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="Path to SQLite database.")
+    parser.add_argument(
+        "--db",
+        help=(
+            "Path to SQLite database. Defaults to SOCIAL_BRAIN_DB, "
+            f"then {DEFAULT_DB_PATH}."
+        ),
+    )
     subparsers = parser.add_subparsers(required=True)
 
     init_parser = subparsers.add_parser("init", help="Initialize DB and seed editable defaults.")
@@ -285,7 +290,7 @@ def add_metric_args(parser: argparse.ArgumentParser) -> None:
 
 def cmd_init(store: SQLiteStore, args: argparse.Namespace) -> int:
     store.seed_defaults()
-    print(f"Initialized Social Brain DB at {Path(args.db)}")
+    print(f"Initialized Social Brain DB at {store.path}")
     return 0
 
 

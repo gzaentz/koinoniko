@@ -89,10 +89,22 @@ The default database path is:
 data/social_brain.sqlite3
 ```
 
+Database path resolution is:
+
+1. explicit `--db`
+2. `SOCIAL_BRAIN_DB`
+3. `data/social_brain.sqlite3`
+
 Use `--db` when you want a separate test or demo database:
 
 ```bash
 python3 -m leadpoet_social_brain.cli --db /private/tmp/social_brain_demo.sqlite3 init
+```
+
+Use `SOCIAL_BRAIN_DB` when the app should share one configured SQLite path across CLI and UI:
+
+```bash
+export SOCIAL_BRAIN_DB="/app/data/social_brain.sqlite3"
 ```
 
 Use a fresh database path when you want clean demo output.
@@ -161,10 +173,22 @@ The app reads Railway's `PORT` environment variable automatically. Locally it st
 Required Railway settings:
 
 - Deploy from the `main` branch of `gzaentz/koinonikos`.
+- Add a Railway Volume and mount it at `/app/data`.
+- Set `SOCIAL_BRAIN_DB=/app/data/social_brain.sqlite3`.
+- Keep service replicas at `1` while using SQLite.
 - Set `X_BEARER_TOKEN` if you want X import and metric sync.
 - Set `SOCIAL_BRAIN_PROVIDER=module.path:create_provider` before using generation, planning, or AI edits.
 - Set X write credentials only if you want approved posts to be posted from Railway.
-- Add a Railway volume or external database later if you need persistent SQLite data across redeploys. Without a volume, Railway filesystem data can be ephemeral.
+
+SQLite notes for Railway:
+
+- The app creates the DB parent directory before opening SQLite.
+- SQLite opens with WAL mode, a `5000ms` busy timeout, and foreign keys enabled.
+- Do not write or initialize the DB during build or pre-deploy steps; Railway volumes are mounted at runtime.
+- Opening the app safely runs schema creation/migrations at runtime.
+- Run `python -m leadpoet_social_brain.cli init` once after deploy if you need the default context/pattern seed data.
+- Do not add Postgres for v0.2.
+- Do not store secrets in SQLite. Keep tokens in Railway environment variables.
 
 If Railway shows "Unexposed service", open the service settings and generate a public domain after the deployment succeeds. The build/start config makes the app listen on the correct host and port; the domain is still a Railway service setting.
 

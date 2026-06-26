@@ -34,7 +34,7 @@ from leadpoet_social_brain.platforms.x_api import (
     sync_x_metrics,
 )
 from leadpoet_social_brain.providers import load_provider_from_env
-from leadpoet_social_brain.storage.sqlite_store import DEFAULT_DB_PATH, SQLiteStore
+from leadpoet_social_brain.storage.sqlite_store import DEFAULT_DB_PATH, SQLiteStore, resolve_db_path
 
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -43,13 +43,19 @@ JSON_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Leadpoet Social Brain local UI")
-    parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="Path to SQLite database.")
+    parser.add_argument(
+        "--db",
+        help=(
+            "Path to SQLite database. Defaults to SOCIAL_BRAIN_DB, "
+            f"then {DEFAULT_DB_PATH}."
+        ),
+    )
     parser.add_argument("--host", default=os.getenv("HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8787")))
     parser.add_argument("--env-file", default=".env", help="Optional local env file to load.")
     args = parser.parse_args(argv)
     load_local_env(args.env_file)
-    serve(db_path=Path(args.db), host=args.host, port=args.port)
+    serve(db_path=resolve_db_path(args.db), host=args.host, port=args.port)
     return 0
 
 
@@ -114,7 +120,7 @@ def handle_api_request(
     raw_path: str,
     body: bytes | str | None = None,
     *,
-    db_path: str | Path = DEFAULT_DB_PATH,
+    db_path: str | Path | None = None,
 ) -> tuple[int, dict[str, Any]]:
     parsed = urlparse(raw_path)
     path = parsed.path.rstrip("/") or "/"

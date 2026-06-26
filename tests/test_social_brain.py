@@ -27,7 +27,7 @@ from leadpoet_social_brain.platforms.x_api import (
     sync_x_user_posts,
 )
 from leadpoet_social_brain.skills import generation_skills, load_skill
-from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
+from leadpoet_social_brain.storage.sqlite_store import DB_ENV_VAR, SQLiteStore, resolve_db_path
 from leadpoet_social_brain.web.app import handle_api_request
 
 
@@ -85,6 +85,38 @@ class FakeXWriteClient:
 class SocialBrainTest(unittest.TestCase):
     def make_store(self, tmpdir: str) -> SQLiteStore:
         return SQLiteStore(Path(tmpdir) / "brain.sqlite3")
+
+    def test_sqlite_store_resolves_env_db_and_sets_pragmas(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_db = Path(tmpdir) / "volume" / "social_brain.sqlite3"
+            explicit_db = Path(tmpdir) / "explicit" / "brain.sqlite3"
+            with patch.dict(os.environ, {DB_ENV_VAR: str(env_db)}, clear=False):
+                self.assertEqual(resolve_db_path(), env_db)
+                self.assertEqual(resolve_db_path(explicit_db), explicit_db)
+
+                store = SQLiteStore()
+                self.assertEqual(store.path, env_db)
+                self.assertTrue(env_db.parent.exists())
+                self.assertEqual(store.conn.execute("PRAGMA foreign_keys").fetchone()[0], 1)
+                self.assertEqual(store.conn.execute("PRAGMA busy_timeout").fetchone()[0], 5000)
+                self.assertEqual(store.conn.execute("PRAGMA journal_mode").fetchone()[0].lower(), "wal")
+                store.close()
+
+                explicit_store = SQLiteStore(explicit_db)
+                self.assertEqual(explicit_store.path, explicit_db)
+                self.assertTrue(explicit_db.parent.exists())
+                explicit_store.close()
+
+    def test_cli_uses_social_brain_db_when_db_arg_is_omitted(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "railway-volume" / "social_brain.sqlite3"
+            with patch.dict(os.environ, {DB_ENV_VAR: str(db_path)}, clear=False):
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    cli_main(["init"])
+
+            self.assertTrue(db_path.exists())
+            self.assertIn(str(db_path), output.getvalue())
 
     def test_skill_files_load_correctly(self):
         skill = load_skill("global_voice.md")
