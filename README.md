@@ -137,15 +137,13 @@ python3 -m leadpoet_social_brain.web.app \
 
 The UI loads `.env` by default if present. It only reads environment variables into the local process; it does not display token values.
 
-The UI requires login. Set the password in environment variables before exposing the service:
+The UI requires login. The username and password hash are stored in SQLite, not in environment variables.
 
 ```bash
-export SOCIAL_BRAIN_AUTH_USERNAME="gavinz444"
-export SOCIAL_BRAIN_AUTH_PASSWORD="<set this in Railway Variables>"
-export SOCIAL_BRAIN_AUTH_SECRET="<long random session signing secret>"
+python3 -m leadpoet_social_brain.cli set-web-login --username gavinz444
 ```
 
-`SOCIAL_BRAIN_AUTH_USERNAME` defaults to `gavinz444` if omitted. `SOCIAL_BRAIN_AUTH_PASSWORD` is required; if it is missing, the app fails closed and shows a configuration-required login page. Do not commit the password to the repo or store it in SQLite.
+The command prompts for the password and stores only a salted PBKDF2 hash in the configured SQLite database. If no web login has been stored yet, the app fails closed and shows a configuration-required login page.
 
 The UI supports:
 
@@ -183,9 +181,6 @@ The app reads Railway's `PORT` environment variable automatically. Locally it st
 Required Railway settings:
 
 - Deploy from the `main` branch of `gzaentz/koinonikos`.
-- Set `SOCIAL_BRAIN_AUTH_USERNAME=gavinz444`.
-- Set `SOCIAL_BRAIN_AUTH_PASSWORD` in Railway Variables.
-- Set `SOCIAL_BRAIN_AUTH_SECRET` to a long random value for session signing.
 - Add a Railway Volume and mount it at `/app/data`.
 - Set `SOCIAL_BRAIN_DB=/app/data/social_brain.sqlite3`.
 - Keep service replicas at `1` while using SQLite.
@@ -200,8 +195,9 @@ SQLite notes for Railway:
 - Do not write or initialize the DB during build or pre-deploy steps; Railway volumes are mounted at runtime.
 - Opening the app safely runs schema creation/migrations at runtime.
 - Run `python -m leadpoet_social_brain.cli init` once after deploy if you need the default context/pattern seed data.
+- Run `python -m leadpoet_social_brain.cli set-web-login --username gavinz444` once against the mounted volume to store the web login.
 - Do not add Postgres for v0.2.
-- Do not store secrets in SQLite. Keep tokens in Railway environment variables.
+- Do not store API tokens in SQLite. Keep X/API tokens in Railway environment variables.
 
 If Railway shows "Unexposed service", open the service settings and generate a public domain after the deployment succeeds. The build/start config makes the app listen on the correct host and port; the domain is still a Railway service setting.
 
@@ -1158,6 +1154,7 @@ SQLite tables:
 - `trend_items`: optional timely market context
 - `patterns`: reusable named patterns
 - `context_sections`: modular Leadpoet context and style guide sections
+- `web_auth_users`: one local web login with salted password hash metadata
 
 The most important linkage:
 
@@ -1175,6 +1172,7 @@ Top-level commands:
 
 ```text
 init
+set-web-login
 ingest-x
 ingest-x-batch
 sync-x-user
@@ -1207,6 +1205,7 @@ Use built-in help for details:
 
 ```bash
 python3 -m leadpoet_social_brain.cli --help
+python3 -m leadpoet_social_brain.cli set-web-login --help
 python3 -m leadpoet_social_brain.cli generate-x --help
 python3 -m leadpoet_social_brain.cli sync-x-user --help
 python3 -m leadpoet_social_brain.cli sync-x-metrics --help
@@ -1249,6 +1248,7 @@ Current tests cover:
 - `update-post-notes` field preservation and `imitate=true` workflow
 - style guide rebuild quality
 - provider-required generation behavior
+- storage-backed web login setup and signed session cookies
 - weekly X planning into a local review queue
 - local UI API queue listing, editing, approval, AI revise, revision acceptance, and safety guards
 - trend-required planning guard and evergreen opt-in

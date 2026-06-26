@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import os
+import secrets
 import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
@@ -18,6 +22,7 @@ from leadpoet_social_brain.core.models import (
     QueuedPostVersion,
     SocialPost,
     TrendItem,
+    WebAuthUser,
     new_id,
     utc_now,
 )
@@ -25,6 +30,8 @@ from leadpoet_social_brain.core.models import (
 
 DEFAULT_DB_PATH = Path("data/social_brain.sqlite3")
 DB_ENV_VAR = "SOCIAL_BRAIN_DB"
+DEFAULT_WEB_AUTH_USERNAME = "gavinz444"
+PASSWORD_HASH_ITERATIONS = 310_000
 
 
 def resolve_db_path(path: str | Path | None = None) -> Path:
@@ -214,6 +221,15 @@ class SQLiteStore:
 
             CREATE INDEX IF NOT EXISTS idx_queued_post_versions_queue_id
             ON queued_post_versions(queue_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS web_auth_users (
+                username TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL,
+                salt TEXT NOT NULL,
+                iterations INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             """
         )
         self._migrate_existing_schema()
@@ -404,6 +420,69 @@ class SQLiteStore:
             (queue_id, limit),
         ).fetchall()
         return [self._row_to_queue_version(row) for row in rows]
+
+    def save_web_auth_user(self, username: str, password: str) -> WebAuthUser:
+        clean_username = username.strip()
+        if not clean_username:
+            raise ValueError("Username is required.")
+        if not password:
+            raise ValueError("Password is required.")
+        existing = self.get_web_auth_user(clean_username)
+        salt, password_hash, iterations = hash_password(password)
+        now = utc_now()
+        user = WebAuthUser(
+            username=clean_username,
+            password_hash=password_hash,
+            salt=salt,
+            iterations=iterations,
+            created_at=existing.created_at if existing else now,
+            updated_at=now,
+        )
+        self.conn.execute(
+            """
+            INSERT INTO web_auth_users (
+                username, password_hash, salt, iterations, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(username) DO UPDATE SET
+                password_hash = excluded.password_hash,
+                salt = excluded.salt,
+                iterations = excluded.iterations,
+                updated_at = excluded.updated_at
+            """,
+            (
+                user.username,
+                user.password_hash,
+                user.salt,
+                user.iterations,
+                user.created_at,
+                user.updated_at,
+            ),
+        )
+        self.conn.commit()
+        return user
+
+    def get_web_auth_user(self, username: str) -> WebAuthUser | None:
+        row = self.conn.execute(
+            "SELECT * FROM web_auth_users WHERE username = ?",
+            (username.strip(),),
+        ).fetchone()
+        return self._row_to_web_auth_user(row) if row else None
+
+    def has_web_auth_user(self) -> bool:
+        row = self.conn.execute("SELECT 1 FROM web_auth_users LIMIT 1").fetchone()
+        return bool(row)
+
+    def verify_web_auth_user(self, username: str, password: str) -> bool:
+        user = self.get_web_auth_user(username)
+        if not user or not password:
+            return False
+        _, candidate_hash, _ = hash_password(
+            password,
+            salt=user.salt,
+            iterations=user.iterations,
+        )
+        return hmac.compare_digest(candidate_hash, user.password_hash)
 
     def _ensure_column(self, table: str, column: str, ddl: str) -> None:
         rows = self.conn.execute(f"PRAGMA table_info({table})").fetchall()
@@ -1209,6 +1288,16 @@ class SQLiteStore:
             created_at=row["created_at"],
         )
 
+    def _row_to_web_auth_user(self, row: sqlite3.Row) -> WebAuthUser:
+        return WebAuthUser(
+            username=row["username"],
+            password_hash=row["password_hash"],
+            salt=row["salt"],
+            iterations=row["iterations"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
     def _sync_note_influences(self, note: PostNote) -> None:
         self.conn.execute(
             """
@@ -1467,6 +1556,24 @@ def draft_influences_for_post(post_id: str, draft: GeneratedDraft) -> list[PostI
 
 def _clean(value: object) -> str:
     return str(value or "").strip()
+
+
+def hash_password(
+    password: str,
+    *,
+    salt: str | None = None,
+    iterations: int = PASSWORD_HASH_ITERATIONS,
+) -> tuple[str, str, int]:
+    salt_bytes = base64.b64decode(salt.encode("ascii")) if salt else secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt_bytes,
+        iterations,
+    )
+    encoded_salt = base64.b64encode(salt_bytes).decode("ascii")
+    encoded_hash = base64.b64encode(digest).decode("ascii")
+    return encoded_salt, encoded_hash, iterations
 
 
 def _keywords(value: str) -> list[str]:

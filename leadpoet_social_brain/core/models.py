@@ -175,6 +175,16 @@ class QueuedPostVersion:
 
 
 @dataclass(frozen=True)
+class WebAuthUser:
+    username: str
+    password_hash: str
+    salt: str
+    iterations: int
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
 class DraftRequest:
     platform: str
     topic: str

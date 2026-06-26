@@ -41,20 +41,22 @@ from leadpoet_social_brain.platforms.x_api import (
     sync_x_metrics,
 )
 from leadpoet_social_brain.providers import load_provider_from_env
-from leadpoet_social_brain.storage.sqlite_store import DEFAULT_DB_PATH, SQLiteStore, resolve_db_path
+from leadpoet_social_brain.storage.sqlite_store import (
+    DEFAULT_DB_PATH,
+    DEFAULT_WEB_AUTH_USERNAME,
+    SQLiteStore,
+    resolve_db_path,
+)
 
 
 STATIC_DIR = Path(__file__).with_name("static")
 JSON_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
-AUTH_USERNAME_ENV = "SOCIAL_BRAIN_AUTH_USERNAME"
-AUTH_PASSWORD_ENV = "SOCIAL_BRAIN_AUTH_PASSWORD"
-AUTH_SECRET_ENV = "SOCIAL_BRAIN_AUTH_SECRET"
 AUTH_COOKIE_SECURE_ENV = "SOCIAL_BRAIN_AUTH_COOKIE_SECURE"
-DEFAULT_AUTH_USERNAME = "gavinz444"
+DEFAULT_AUTH_USERNAME = DEFAULT_WEB_AUTH_USERNAME
 SESSION_COOKIE = "social_brain_session"
 SESSION_TTL_SECONDS = 60 * 60 * 12
 AUTH_REQUIRED_MESSAGE = "Authentication required."
-AUTH_CONFIG_MESSAGE = "Social Brain login is not configured. Set SOCIAL_BRAIN_AUTH_PASSWORD."
+AUTH_CONFIG_MESSAGE = "Social Brain login is not configured. Run set-web-login once."
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -91,10 +93,14 @@ def make_handler(db_path: Path):
     class SocialBrainHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802 - stdlib hook.
             if self.path.startswith("/login"):
-                if request_is_authenticated(self.headers):
-                    self._redirect("/")
-                else:
-                    self._serve_login()
+                store = SQLiteStore(db_path)
+                try:
+                    if request_is_authenticated(self.headers, store):
+                        self._redirect("/")
+                    else:
+                        self._serve_login(configured=auth_is_configured(store))
+                finally:
+                    store.close()
                 return
             if not self._require_auth():
                 return
@@ -120,19 +126,23 @@ def make_handler(db_path: Path):
             self._serve_api("PATCH")
 
         def _require_auth(self) -> bool:
-            if not auth_is_configured():
+            store = SQLiteStore(db_path)
+            try:
+                if not auth_is_configured(store):
+                    if self.path.startswith("/api/"):
+                        self._serve_json(503, {"error": AUTH_CONFIG_MESSAGE})
+                    else:
+                        self._redirect("/login")
+                    return False
+                if request_is_authenticated(self.headers, store):
+                    return True
                 if self.path.startswith("/api/"):
-                    self._serve_json(503, {"error": AUTH_CONFIG_MESSAGE})
+                    self._serve_json(401, {"error": AUTH_REQUIRED_MESSAGE})
                 else:
                     self._redirect("/login")
                 return False
-            if request_is_authenticated(self.headers):
-                return True
-            if self.path.startswith("/api/"):
-                self._serve_json(401, {"error": AUTH_REQUIRED_MESSAGE})
-            else:
-                self._redirect("/login")
-            return False
+            finally:
+                store.close()
 
         def _serve_api(self, method: str) -> None:
             body = self.rfile.read(int(self.headers.get("Content-Length", "0") or 0))
@@ -166,14 +176,21 @@ def make_handler(db_path: Path):
             fields = parse_qs(body)
             username = (fields.get("username") or [""])[0]
             password = (fields.get("password") or [""])[0]
-            if verify_credentials(username, password):
-                token = create_session_cookie_value(auth_username())
-                self._redirect("/", extra_headers=[session_cookie_header(token)])
-                return
-            self._serve_login(error="Invalid username or password.")
+            store = SQLiteStore(db_path)
+            try:
+                if verify_credentials(store, username, password):
+                    token = create_session_cookie_value(store, username)
+                    self._redirect("/", extra_headers=[session_cookie_header(token)])
+                    return
+                self._serve_login(
+                    error="Invalid username or password.",
+                    configured=auth_is_configured(store),
+                )
+            finally:
+                store.close()
 
-        def _serve_login(self, error: str | None = None) -> None:
-            content = login_page(error=error).encode("utf-8")
+        def _serve_login(self, error: str | None = None, *, configured: bool = False) -> None:
+            content = login_page(error=error, configured=configured).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
@@ -194,75 +211,59 @@ def make_handler(db_path: Path):
     return SocialBrainHandler
 
 
-def auth_username() -> str:
-    return os.getenv(AUTH_USERNAME_ENV, DEFAULT_AUTH_USERNAME)
+def auth_is_configured(store: SQLiteStore) -> bool:
+    return store.has_web_auth_user()
 
 
-def auth_password() -> str | None:
-    value = os.getenv(AUTH_PASSWORD_ENV)
-    return value if value else None
+def verify_credentials(store: SQLiteStore, username: str, password: str) -> bool:
+    return store.verify_web_auth_user(username, password)
 
 
-def auth_secret() -> str | None:
-    return os.getenv(AUTH_SECRET_ENV) or auth_password()
-
-
-def auth_is_configured() -> bool:
-    return bool(auth_password())
-
-
-def verify_credentials(username: str, password: str) -> bool:
-    configured_password = auth_password()
-    if not configured_password:
-        return False
-    return hmac.compare_digest(username, auth_username()) and hmac.compare_digest(password, configured_password)
-
-
-def create_session_cookie_value(username: str) -> str:
-    secret = auth_secret()
-    if not secret:
+def create_session_cookie_value(store: SQLiteStore, username: str) -> str:
+    user = store.get_web_auth_user(username)
+    if not user:
         raise ValueError(AUTH_CONFIG_MESSAGE)
     payload = {
-        "u": username,
+        "u": user.username,
         "e": int(time.time()) + SESSION_TTL_SECONDS,
         "n": secrets.token_urlsafe(16),
     }
     payload_text = base64.urlsafe_b64encode(
         json.dumps(payload, separators=(",", ":")).encode("utf-8")
     ).decode("ascii").rstrip("=")
-    return f"{payload_text}.{session_signature(payload_text, secret)}"
+    return f"{payload_text}.{session_signature(payload_text, user.password_hash)}"
 
 
-def validate_session_cookie_value(value: str | None) -> bool:
+def validate_session_cookie_value(store: SQLiteStore, value: str | None) -> bool:
     if not value or "." not in value:
         return False
-    secret = auth_secret()
-    if not secret:
-        return False
     payload_text, signature = value.rsplit(".", 1)
-    expected = session_signature(payload_text, secret)
-    if not hmac.compare_digest(signature, expected):
-        return False
     try:
         padded = payload_text + ("=" * (-len(payload_text) % 4))
         payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
     except (ValueError, json.JSONDecodeError):
         return False
+    user = store.get_web_auth_user(str(payload.get("u") or ""))
+    if not user:
+        return False
+    expected = session_signature(payload_text, user.password_hash)
+    if not hmac.compare_digest(signature, expected):
+        return False
     return (
-        payload.get("u") == auth_username()
+        payload.get("u") == user.username
         and isinstance(payload.get("e"), int)
         and payload["e"] >= int(time.time())
     )
 
 
-def request_is_authenticated(headers: Mapping[str, str]) -> bool:
+def request_is_authenticated(headers: Mapping[str, str], store: SQLiteStore) -> bool:
     cookie = SimpleCookie()
     try:
         cookie.load(headers.get("Cookie", ""))
     except CookieError:
         return False
     morsel = cookie.get(SESSION_COOKIE)
-    return validate_session_cookie_value(morsel.value if morsel else None)
+    return validate_session_cookie_value(store, morsel.value if morsel else None)
 
 
 def session_signature(payload_text: str, secret: str) -> str:
@@ -293,8 +294,7 @@ def auth_cookie_secure() -> bool:
     return bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID"))
 
 
-def login_page(*, error: str | None = None) -> str:
-    configured = auth_is_configured()
+def login_page(*, error: str | None = None, configured: bool = False) -> str:
     error_html = f'<p class="error">{html.escape(error)}</p>' if error else ""
     config_html = (
         ""

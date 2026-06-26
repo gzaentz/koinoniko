@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 
 from leadpoet_social_brain.analytics import build_analytics_summary
 from leadpoet_social_brain.content_queue import (
@@ -35,7 +36,7 @@ from leadpoet_social_brain.platforms.x_api import (
     sync_x_user_posts,
 )
 from leadpoet_social_brain.providers import load_provider_from_env
-from leadpoet_social_brain.storage.sqlite_store import DEFAULT_DB_PATH, SQLiteStore
+from leadpoet_social_brain.storage.sqlite_store import DEFAULT_DB_PATH, DEFAULT_WEB_AUTH_USERNAME, SQLiteStore
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -61,6 +62,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     init_parser = subparsers.add_parser("init", help="Initialize DB and seed editable defaults.")
     init_parser.set_defaults(func=cmd_init)
+
+    web_login = subparsers.add_parser("set-web-login", help="Set or reset the single web UI login.")
+    web_login.add_argument("--username", default=DEFAULT_WEB_AUTH_USERNAME)
+    web_login.add_argument("--password", help="Optional. Prefer omitting this and entering the password prompt.")
+    web_login.set_defaults(func=cmd_set_web_login)
 
     ingest = subparsers.add_parser("ingest-x", help="Ingest an X post example.")
     ingest.add_argument("--text", required=True)
@@ -291,6 +297,18 @@ def add_metric_args(parser: argparse.ArgumentParser) -> None:
 def cmd_init(store: SQLiteStore, args: argparse.Namespace) -> int:
     store.seed_defaults()
     print(f"Initialized Social Brain DB at {store.path}")
+    return 0
+
+
+def cmd_set_web_login(store: SQLiteStore, args: argparse.Namespace) -> int:
+    password = args.password
+    if password is None:
+        password = getpass.getpass("Password: ")
+        confirmation = getpass.getpass("Confirm password: ")
+        if password != confirmation:
+            raise SystemExit("Passwords did not match.")
+    user = store.save_web_auth_user(args.username, password)
+    print(f"Saved web login for {user.username} in {store.path}")
     return 0
 
 
