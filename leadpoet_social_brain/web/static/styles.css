@@ -354,13 +354,17 @@ main {
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
-  gap: 18px;
-  align-items: start;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+  min-height: 0;
 }
 
 .recent-posts-panel {
-  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-top: 0;
 }
 
 .table-tools {
@@ -376,6 +380,12 @@ main {
   max-height: clamp(320px, calc(100vh - 430px), 700px);
   overflow: auto;
   border-bottom: 1px solid var(--line);
+}
+
+.recent-posts-panel .table-wrap {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
 }
 
 .sync-line {
@@ -488,6 +498,19 @@ main {
   margin-top: 16px;
 }
 
+.trend-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.trend-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
 .trend-row,
 .trend-card,
 .queue-card,
@@ -502,21 +525,7 @@ main {
 
 .trend-row {
   display: grid;
-  gap: 8px;
-}
-
-.trend-group {
-  display: grid;
-  gap: 10px;
-}
-
-.trend-group h3 {
-  font-size: 14px;
-}
-
-.trend-group-list {
-  display: grid;
-  gap: 10px;
+  gap: 7px;
 }
 
 .trend-refresh-card {
@@ -534,6 +543,10 @@ main {
 .trend-row p {
   color: var(--muted);
   font-size: 13px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .trend-row strong {
@@ -549,6 +562,15 @@ main {
 .signal-list p:last-child {
   border-bottom: 0;
   padding-bottom: 0;
+}
+
+#dashboardView.view.active {
+  display: grid;
+  grid-template-rows: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: 16px;
+  height: calc(100vh - 119px);
+  overflow: hidden;
+  padding: 24px 38px;
 }
 
 .reviewer-intro {
@@ -838,6 +860,20 @@ main {
   .board,
   .two-column {
     grid-template-columns: 1fr;
+  }
+
+  #dashboardView.view.active {
+    display: block;
+    height: auto;
+    overflow: visible;
+  }
+
+  .dashboard-grid {
+    margin-bottom: 18px;
+  }
+
+  .trend-scroll {
+    max-height: 320px;
   }
 
   .table-tools {

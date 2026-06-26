@@ -161,7 +161,7 @@ The command prompts for the password and stores only a salted PBKDF2 hash in the
 
 The UI supports:
 
-- a focused Dashboard for recent posts, current trends, and performance signals
+- a focused Dashboard for daily trends, weekly trends, and recent posts
 - a Content Reviewer board for review, edit, approve, skip, schedule, and approved-only post-now
 - an Account page for connection status, model routing, provider testing, and X account sync
 - inline AI revisions and Best Version rewrites for queued posts through the configured provider
@@ -305,6 +305,7 @@ POST /tasks/sync-x-posts
 POST /tasks/sync-x-metrics
 POST /tasks/sync-x-all
 POST /tasks/sync-x-daily
+POST /tasks/refresh-trends
 ```
 
 These endpoints use `TASK_SECRET`:
@@ -318,13 +319,15 @@ Recommended Railway Cron setup for a fresh dashboard:
 ```text
 X post sync:    every 30 minutes    */30 * * * *
 X metrics sync: every 2 hours        15 */2 * * *
+Trend refresh:  daily                25 6 * * *
 ```
 
-Create two Railway Cron services that run these start commands and exit:
+Create Railway Cron services that run these start commands and exit:
 
 ```bash
 python -m leadpoet_social_brain.web.task_client sync-x-posts
 python -m leadpoet_social_brain.web.task_client sync-x-metrics
+python -m leadpoet_social_brain.web.task_client refresh-trends
 ```
 
 Set these variables on each Cron service:
@@ -345,6 +348,7 @@ Authorization: Bearer <TASK_SECRET>
 ```
 
 `sync-x-posts` imports recent authored posts from X and skips duplicates by X post ID/canonical URL. `sync-x-metrics` appends fresh public metric snapshots for stored posts. The Dashboard reads the latest stored data and shows `Last X sync`.
+`refresh-trends` pulls the top 5 daily and top 5 weekly AI, sales, and lead generation trends through Scrapingdog when `SCRAPINGDOG_API_KEY` is configured, with the no-key fallback still available.
 
 If you prefer one job instead of two, run this hourly:
 
@@ -1194,7 +1198,7 @@ No X write credentials configured. Set X write auth credentials before posting.
 
 ## Trend Scout
 
-Trend Scout stores timely market/news/product context for generation and planning. The web UI can refresh the top 5 daily and top 5 weekly web trends across AI, sales, and lead generation, then saves them as reusable trend items.
+Trend Scout stores timely market/news/product context for generation and planning. The hosted task `refresh-trends` refreshes the top 5 daily and top 5 weekly web trends across AI, sales, and lead generation, then saves them as reusable trend items.
 
 Use it for timely context around:
 

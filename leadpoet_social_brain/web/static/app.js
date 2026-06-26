@@ -11,9 +11,6 @@ const state = {
   draggedQueueId: "",
   queueDetail: null,
   recentPostsSort: { key: "date", direction: "desc" },
-  autoRefreshedWebTrends: false,
-  webTrendsRefreshing: false,
-  trendRefreshErrors: [],
 };
 
 const RECENT_POST_SORT_COLUMNS = {
@@ -226,9 +223,7 @@ function updateGlobalControls() {
 function renderDashboard() {
   renderRecentPosts();
   renderDashboardTrends();
-  renderSignals();
   renderDashboardSyncLine();
-  maybeAutoRefreshWebTrends();
 }
 
 function renderRecentPosts() {
@@ -377,76 +372,27 @@ window.openPostDetails = (id) => {
 
 function renderDashboardTrends() {
   const groups = state.dashboard?.trend_groups || {};
-  const daily = groups.daily || [];
-  const weekly = groups.weekly || [];
-  const errors = state.trendRefreshErrors || [];
-  const warning = errors.length
-    ? `<p class="muted">Trend refresh warning: ${escapeHtml(errors.join(" "))}</p>`
-    : "";
-  const content = [
-    warning,
-    dashboardTrendGroup("Top daily trends", daily),
-    dashboardTrendGroup("Top weekly trends", weekly),
-  ].filter(Boolean).join("");
-  $("dashboardTrendList").innerHTML = content || `<p class="muted">No web trends loaded yet. Refresh trends to pull current AI, sales, and lead generation signals.</p>`;
+  renderTrendList("dailyTrendList", groups.daily || [], "No daily trends loaded yet.");
+  renderTrendList("weeklyTrendList", groups.weekly || [], "No weekly trends loaded yet.");
 }
 
-function dashboardTrendGroup(title, trends) {
-  if (!trends.length) return "";
-  return `
-    <section class="trend-group">
-      <h3>${escapeHtml(title)}</h3>
-      <div class="trend-group-list">${trends.slice(0, 5).map(dashboardTrendRow).join("")}</div>
-    </section>
-  `;
+function renderTrendList(targetId, trends, emptyText) {
+  $(targetId).innerHTML = trends.length
+    ? trends.slice(0, 5).map(dashboardTrendRow).join("")
+    : `<p class="muted">${escapeHtml(emptyText)}</p>`;
 }
 
 function dashboardTrendRow(item) {
   return `
     <article class="trend-row">
       <div class="meta-row">
-        <span class="tag">${escapeHtml(item.urgency || "medium")}</span>
         <span>${escapeHtml(item.topic || "")}</span>
-        <span>${escapeHtml(label(item.source_type || "source"))}</span>
+        ${item.source_url ? `<a href="${escapeAttr(item.source_url)}" target="_blank" rel="noreferrer">Source</a>` : ""}
       </div>
       <h3>${escapeHtml(item.title)}</h3>
       <p>${escapeHtml(item.summary || "")}</p>
-      ${item.why_it_matters ? `<p><strong>Why it matters</strong> ${escapeHtml(item.why_it_matters)}</p>` : ""}
-      ${item.leadpoet_angle ? `<p><strong>Angle</strong> ${escapeHtml(item.leadpoet_angle)}</p>` : ""}
-      <div class="actions left">
-        <button class="secondary" onclick='useTrendInPlan(${jsArg(item.id)})'>Use in weekly plan</button>
-        ${item.source_url ? `<a href="${escapeAttr(item.source_url)}" target="_blank" rel="noreferrer">Source</a>` : ""}
-      </div>
     </article>
   `;
-}
-
-window.useTrendInPlan = (id) => {
-  const trend = dashboardTrendItems().find((item) => item.id === id);
-  if (trend?.topic) {
-    $("planTopicMix").value = `${trend.topic}:3,sales LLMs:2`;
-  }
-  $("planUseTrends").checked = true;
-  openModal("planModal");
-};
-
-function dashboardTrendItems() {
-  const groups = state.dashboard?.trend_groups || {};
-  return [...(groups.daily || []), ...(groups.weekly || []), ...(state.dashboard?.trends || [])];
-}
-
-function maybeAutoRefreshWebTrends() {
-  if (state.view !== "dashboard" || state.autoRefreshedWebTrends || state.webTrendsRefreshing) return;
-  if (dashboardTrendItems().length) return;
-  state.autoRefreshedWebTrends = true;
-  refreshWebTrends({ silent: true }).catch(() => {});
-}
-
-function renderSignals() {
-  const hints = (state.analytics?.hints || state.dashboard?.analytics_hints || []).slice(0, 5);
-  $("signalList").innerHTML = hints.length
-    ? hints.map((hint) => `<p>${escapeHtml(hint)}</p>`).join("")
-    : `<p class="muted">Performance signals will appear after metrics sync.</p>`;
 }
 
 function renderDashboardSyncLine() {
@@ -858,7 +804,7 @@ async function loadTrends() {
   const payload = await api("/api/trends?limit=100&status=unused");
   $("trendList").innerHTML = payload.items.length
     ? payload.items.map(trendCard).join("")
-    : `<p class="muted">No saved trends yet. Refresh web trends to pull current items.</p>`;
+    : `<p class="muted">No saved trends yet. The scheduled trend refresh will add current items.</p>`;
 }
 
 function trendCard(item) {
@@ -892,22 +838,6 @@ window.markTrend = (event, id, status) => {
   });
 };
 
-async function refreshWebTrends({ silent = false } = {}) {
-  state.webTrendsRefreshing = true;
-  try {
-    const payload = await api("/api/trends/refresh", { method: "POST", body: "{}" });
-    state.trendRefreshErrors = payload.errors || [];
-    if (state.dashboard) state.dashboard.trend_groups = payload.trend_groups || {};
-    if (!silent) {
-      showMessage(state.trendRefreshErrors.length ? "Web trends refreshed with warnings." : "Web trends refreshed.", Boolean(state.trendRefreshErrors.length));
-    }
-    await refresh();
-    if (!$("trendsModal").classList.contains("hidden")) await loadTrends();
-  } finally {
-    state.webTrendsRefreshing = false;
-  }
-}
-
 async function loadAccount() {
   state.account = await api("/api/account");
   renderAccount();
@@ -931,6 +861,7 @@ function renderAccount() {
     syncInfoCard("Last X post sync", sync.x_posts_sync),
     syncInfoCard("Last X metrics sync", sync.x_metrics_sync),
     syncInfoCard("Last daily sync", sync.x_daily_sync),
+    syncInfoCard("Last trend refresh", sync.trends_sync),
     statusCard("Total X posts stored", true, String(stats.total_x_posts_stored || 0)),
     statusCard("Latest imported X post", Boolean(stats.latest_imported_x_post_date), stats.latest_imported_x_post_date ? formatDateTime(stats.latest_imported_x_post_date) : "No X posts stored yet"),
     statusCard("Latest sync error", !(latestSyncError(sync)), latestSyncError(sync) || "None"),
@@ -970,6 +901,8 @@ function syncInfoCard(title, sync) {
   if (summary.updated !== undefined) pieces.push(`updated ${summary.updated}`);
   if (summary.new_posts_imported !== undefined) pieces.push(`imported ${summary.new_posts_imported}`);
   if (summary.metrics_updated !== undefined) pieces.push(`metrics ${summary.metrics_updated}`);
+  if (summary.daily_trends !== undefined) pieces.push(`daily ${summary.daily_trends}`);
+  if (summary.weekly_trends !== undefined) pieces.push(`weekly ${summary.weekly_trends}`);
   const detail = [
     item.last_completed_at ? formatDateTime(item.last_completed_at) : "Never",
     pieces.join(", "),
@@ -986,7 +919,7 @@ function syncInfoCard(title, sync) {
 }
 
 function latestSyncError(sync) {
-  const items = [sync?.x_daily_sync, sync?.x_posts_sync, sync?.x_metrics_sync].filter(Boolean);
+  const items = [sync?.trends_sync, sync?.x_daily_sync, sync?.x_posts_sync, sync?.x_metrics_sync].filter(Boolean);
   return items.find((item) => item.error_message)?.error_message || "";
 }
 
@@ -1179,9 +1112,7 @@ function setup() {
   document.addEventListener("click", closeReviewAddMenu);
   $("generatePostButton").addEventListener("click", (event) => runButton(event.currentTarget, "Generating...", createPost));
   $("planWeekButton").addEventListener("click", (event) => runButton(event.currentTarget, "Creating...", planWeek));
-  $("openTrendsDashboardButton").addEventListener("click", (event) => runButton(event.currentTarget, "Refreshing...", refreshWebTrends));
   $("loadTrendsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Loading...", loadTrends));
-  $("refreshTrendsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Refreshing...", refreshWebTrends));
   $("saveAccountButton").addEventListener("click", (event) => runButton(event.currentTarget, "Saving...", saveAccount));
   $("resetAccountModelsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Resetting...", resetAccountModels));
   $("testProviderButton").addEventListener("click", (event) => runButton(event.currentTarget, "Testing...", testProvider));

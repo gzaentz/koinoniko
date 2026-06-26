@@ -78,6 +78,7 @@ DAILY_X_POST_SYNC_LIMIT = 100
 X_POSTS_SYNC_KEY = "x_posts_sync"
 X_METRICS_SYNC_KEY = "x_metrics_sync"
 X_DAILY_SYNC_KEY = "x_daily_sync"
+TRENDS_SYNC_KEY = "trends_sync"
 SESSION_COOKIE = "social_brain_session"
 SESSION_TTL_SECONDS = 60 * 60 * 12
 AUTH_REQUIRED_MESSAGE = "Authentication required."
@@ -512,6 +513,8 @@ def route_api(
         return 200, sync_x_all_task_payload(store, payload)
     if method == "POST" and parts == ["tasks", "sync-x-daily"]:
         return 200, sync_x_daily_payload(store, payload)
+    if method == "POST" and parts == ["tasks", "refresh-trends"]:
+        return 200, refresh_trends_task_payload(store, payload)
     if not parts or parts[0] != "api":
         return 404, {"error": "Not found."}
 
@@ -861,6 +864,56 @@ def sync_x_daily_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[st
         raise
 
 
+def refresh_trends_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    started_at = utc_now()
+    try:
+        groups = refresh_web_trends(store, limit=int(payload.get("limit") or 5))
+        completed_at = utc_now()
+        errors = list(groups.errors)
+        summary = {
+            "daily_trends": len(groups.daily),
+            "weekly_trends": len(groups.weekly),
+            "sources": groups.sources,
+            "errors": errors,
+            "completed_at": completed_at,
+        }
+        metadata = store.save_sync_metadata(
+            SyncMetadata(
+                key=TRENDS_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=completed_at,
+                status="partial" if errors else "success",
+                summary=summary,
+                error_message="\n".join(errors[:5]) if errors else None,
+            )
+        )
+        return {
+            **summary,
+            "trend_groups": trend_groups_payload(groups),
+            "sync": sync_metadata_payload(metadata),
+        }
+    except Exception as exc:  # noqa: BLE001 - task should persist failure summary.
+        completed_at = utc_now()
+        summary = {
+            "daily_trends": 0,
+            "weekly_trends": 0,
+            "sources": [],
+            "errors": [str(exc)],
+            "completed_at": completed_at,
+        }
+        store.save_sync_metadata(
+            SyncMetadata(
+                key=TRENDS_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=completed_at,
+                status="failed",
+                summary=summary,
+                error_message=str(exc),
+            )
+        )
+        raise
+
+
 def run_x_posts_sync(
     store: SQLiteStore,
     payload: dict[str, Any],
@@ -1169,6 +1222,7 @@ def account_sync_payload(store: SQLiteStore) -> dict[str, Any]:
         X_POSTS_SYNC_KEY: sync_metadata_payload(metadata.get(X_POSTS_SYNC_KEY)),
         X_METRICS_SYNC_KEY: sync_metadata_payload(metadata.get(X_METRICS_SYNC_KEY)),
         X_DAILY_SYNC_KEY: sync_metadata_payload(metadata.get(X_DAILY_SYNC_KEY)),
+        TRENDS_SYNC_KEY: sync_metadata_payload(metadata.get(TRENDS_SYNC_KEY)),
     }
 
 

@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260626-board-empty-align">
+    <link rel="stylesheet" href="/static/styles.css?v=20260626-dashboard-trends">
   </head>
   <body>
     <aside class="sidebar">
@@ -46,25 +46,18 @@
 
       <section class="view active" id="dashboardView">
         <div class="dashboard-grid">
-          <section class="panel trends-panel">
+          <section class="panel trend-panel">
             <div class="panel-header">
-              <div>
-                <span class="eyebrow">Current Trends</span>
-                <h2>Worth considering</h2>
-              </div>
-              <button class="secondary" id="openTrendsDashboardButton">Refresh Trends</button>
+              <h2>Daily Trends</h2>
             </div>
-            <div id="dashboardTrendList" class="trend-list"></div>
+            <div id="dailyTrendList" class="trend-list trend-scroll"></div>
           </section>
 
-          <section class="panel signal-panel">
+          <section class="panel trend-panel">
             <div class="panel-header">
-              <div>
-                <span class="eyebrow">Performance Signals</span>
-                <h2>What is working</h2>
-              </div>
+              <h2>Weekly Trends</h2>
             </div>
-            <div id="signalList" class="signal-list"></div>
+            <div id="weeklyTrendList" class="trend-list trend-scroll"></div>
           </section>
         </div>
 
@@ -319,26 +312,16 @@
           </div>
           <button class="icon-button" data-close-modal="trendsModal" aria-label="Close">x</button>
         </div>
-        <div class="two-column">
-          <section class="subsection">
-            <h3>Web Trends</h3>
-            <div class="trend-refresh-card">
-              <span class="eyebrow">Daily + weekly</span>
-              <p>AI / sales / lead generation</p>
-              <button id="refreshTrendsButton">Refresh Trends</button>
-            </div>
-          </section>
-          <section class="subsection">
-            <div class="panel-header">
-              <h3>Saved Trends</h3>
-              <button class="quiet-button" id="loadTrendsButton">Refresh</button>
-            </div>
-            <div id="trendList" class="stack"></div>
-          </section>
-        </div>
+        <section class="subsection">
+          <div class="panel-header">
+            <h3>Saved Trends</h3>
+            <button class="quiet-button" id="loadTrendsButton">Refresh</button>
+          </div>
+          <div id="trendList" class="stack"></div>
+        </section>
       </div>
     </section>
 
-    <script src="/static/app.js?v=20260626-queue-label"></script>
+    <script src="/static/app.js?v=20260626-dashboard-trends"></script>
   </body>
 </html>

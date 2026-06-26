@@ -346,6 +346,13 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('id="postModal"', index_html)
         self.assertIn('id="queueModal"', index_html)
         self.assertIn('id="recentPostsTable"', index_html)
+        self.assertIn('id="dailyTrendList"', index_html)
+        self.assertIn('id="weeklyTrendList"', index_html)
+        self.assertNotIn('id="openTrendsDashboardButton"', index_html)
+        self.assertNotIn('id="refreshTrendsButton"', index_html)
+        self.assertNotIn("Performance Signals", index_html)
+        self.assertNotIn("What is working", index_html)
+        self.assertNotIn("Refresh Trends", index_html)
         self.assertNotIn('id="syncPostsButton"', index_html)
         self.assertNotIn('id="syncMetricsButton"', index_html)
         self.assertIn('id="dashboardSyncLine"', index_html)
@@ -369,8 +376,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("/api/account/sync-x-posts", app_js)
         self.assertIn("/api/account/sync-x-metrics", app_js)
         self.assertIn("/api/account/sync-x-all", app_js)
-        self.assertIn("/api/trends/refresh", app_js)
-        self.assertIn("Refresh Trends", index_html)
+        self.assertNotIn("/api/trends/refresh", app_js)
         self.assertNotIn('id="addTrendButton"', index_html)
         self.assertIn("/api/publish-due", app_js)
         self.assertIn("/api/plan-week", app_js)
@@ -1480,6 +1486,54 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["trend_groups"]["daily"][0]["title"], "Daily AI sales signal")
             self.assertEqual(payload["trend_groups"]["weekly"][0]["title"], "Weekly lead generation signal")
 
+    def test_refresh_trends_task_saves_daily_and_weekly_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+            groups = WebTrendGroups(
+                daily=[
+                    TrendItem(
+                        title="Daily AI sales signal",
+                        source_type="web_daily",
+                        topic="sales AI",
+                        summary="Daily signal.",
+                        why_it_matters="It may affect sales workflows.",
+                        leadpoet_angle="Connect it to buyer timing.",
+                    )
+                ],
+                weekly=[
+                    TrendItem(
+                        title="Weekly lead generation signal",
+                        source_type="web_weekly",
+                        topic="lead generation",
+                        summary="Weekly signal.",
+                        why_it_matters="It may affect pipeline strategy.",
+                        leadpoet_angle="Connect it to context.",
+                    )
+                ],
+                errors=["weekly GDELT fallback failed: HTTP 429 Too Many Requests"],
+                sources=["Scrapingdog Google Trends"],
+            )
+
+            with patch("leadpoet_social_brain.web.app.refresh_web_trends", return_value=groups):
+                status, payload = handle_api_request(
+                    "POST",
+                    "/tasks/refresh-trends",
+                    json.dumps({"limit": 5}),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["daily_trends"], 1)
+            self.assertEqual(payload["weekly_trends"], 1)
+            self.assertEqual(payload["errors"], groups.errors)
+            self.assertEqual(payload["sync"]["status"], "partial")
+            store = SQLiteStore(db_path)
+            metadata = store.get_sync_metadata("trends_sync")
+            self.assertEqual(metadata.status, "partial")
+            self.assertEqual(metadata.summary["daily_trends"], 1)
+            store.close()
+
     def test_web_dashboard_returns_all_posts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"
@@ -1870,6 +1924,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(TASK_DEFAULTS["sync-x-posts"], {"limit": 100})
         self.assertEqual(TASK_DEFAULTS["sync-x-metrics"]["since_days"], 90)
         self.assertEqual(TASK_DEFAULTS["sync-x-metrics"]["limit"], 3200)
+        self.assertEqual(TASK_DEFAULTS["refresh-trends"], {"limit": 5})
         with patch(
             "leadpoet_social_brain.web.task_client.post_task",
             return_value={"ok": True, "errors": []},
