@@ -252,8 +252,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertTrue((static_dir / "koinoniko-logo.svg").exists())
         self.assertIn("<title>Koinoniko</title>", index_html)
         self.assertIn('rel="icon" type="image/svg+xml" href="/static/koinoniko-logo.svg"', index_html)
-        self.assertIn('src="/static/koinoniko-logo.svg"', index_html)
-        self.assertIn("<strong>Koinoniko</strong>", index_html)
+        self.assertIn('src="/static/koinoniko-logo.svg" alt="" class="brand-logo" width="34" height="34"', index_html)
+        self.assertNotIn("<strong>Koinoniko</strong>", index_html)
         self.assertNotIn("<span>Leadpoet</span>", index_html)
         self.assertNotIn("<strong>Social Brain</strong>", index_html)
 

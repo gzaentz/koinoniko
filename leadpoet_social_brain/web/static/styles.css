@@ -96,22 +96,20 @@ label textarea {
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  width: 34px;
+  height: 34px;
+  overflow: hidden;
+  flex: 0 0 auto;
 }
 
 .brand-logo {
   width: 34px;
   height: 34px;
+  max-width: 34px;
+  max-height: 34px;
   display: block;
-  flex: 0 0 auto;
+  object-fit: contain;
   border-radius: 6px;
-}
-
-.brand strong {
-  display: block;
-  font-size: 22px;
-  letter-spacing: 0;
-  line-height: 1;
 }
 
 nav {
