@@ -345,6 +345,10 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("Koinoniko Voice", index_html)
         self.assertIn("Voice Examples", index_html)
         self.assertIn("Update Voice", index_html)
+        self.assertIn('class="voice-status-row"', index_html)
+        self.assertIn('id="voiceSuggestionsDisclosure"', index_html)
+        self.assertIn("<summary>Show suggested examples</summary>", index_html)
+        self.assertNotIn("<h2>Suggested Voice Examples</h2>", index_html)
         self.assertNotIn("<h2>Queue</h2>", index_html)
         self.assertIn('id="reviewNavBadge"', index_html)
         self.assertIn('data-view="account">Account</button>', index_html)
@@ -425,9 +429,18 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("/api/voice/examples", app_js)
         self.assertIn("/api/voice/current", app_js)
         self.assertIn("/api/voice/suggestions", app_js)
+        self.assertIn("/api/taxonomy/topics", app_js)
+        self.assertIn("/api/taxonomy/post-types", app_js)
         self.assertIn("/api/posts/", app_js)
         self.assertIn("Mark as Voice Example", app_js)
         self.assertIn("Why this worked", app_js)
+        self.assertIn("What made this post sound like Gavin and work with the audience?", app_js)
+        self.assertIn("compact-meta-row", app_js)
+        self.assertIn("compact-metrics-row", app_js)
+        self.assertIn("postFieldControl", app_js)
+        self.assertIn("postTypeOptions", app_js)
+        self.assertNotIn("postVoiceTopic", app_js)
+        self.assertNotIn("postVoicePostType", app_js)
         self.assertIn("auto_categorize", app_js)
         self.assertIn("Recategorized", app_js)
         self.assertIn("/api/trends/refresh", app_js)
@@ -1535,6 +1548,88 @@ class SocialBrainTest(unittest.TestCase):
             dashboard_status, dashboard = handle_api_request("GET", "/api/dashboard", db_path=db_path)
             self.assertEqual(dashboard_status, 200)
             self.assertEqual(dashboard["recent_posts"][0]["topic"], "Sales")
+
+    def test_web_taxonomy_options_include_existing_values_and_defaults(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            ingest_x_post(
+                store,
+                text="Sales AI needs buyer timing.",
+                url="https://x.com/gavin/status/taxonomy1",
+                date="2026-06-26T12:00:00+00:00",
+                author="Gavin",
+                topic="sales LLMs",
+                post_type="founder_insight",
+            )
+            store.save_content_queue_item(
+                ContentQueueItem(
+                    text="A queued technical post.",
+                    topic="technical depth",
+                    post_type="technical_explanation",
+                    scheduled_at="2026-06-27T12:00:00+00:00",
+                )
+            )
+            store.close()
+
+            topic_status, topics = handle_api_request("GET", "/api/taxonomy/topics", db_path=db_path)
+            type_status, post_types = handle_api_request("GET", "/api/taxonomy/post-types", db_path=db_path)
+
+            self.assertEqual(topic_status, 200)
+            self.assertEqual(type_status, 200)
+            topic_values = {item["value"] for item in topics["items"]}
+            type_values = {item["value"] for item in post_types["items"]}
+            self.assertIn("sales LLMs", topic_values)
+            self.assertIn("technical depth", topic_values)
+            self.assertIn("Leadpoet", topic_values)
+            self.assertIn("Bittensor", topic_values)
+            self.assertIn("founder_insight", type_values)
+            self.assertIn("technical_explanation", type_values)
+            self.assertIn("quote_tweet", type_values)
+
+    def test_web_can_update_post_topic_and_type_without_clearing_voice_note(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            post = ingest_x_post(
+                store,
+                text="The best sales AI knows why this buyer cares today.",
+                url="https://x.com/gavin/status/draweredit1",
+                date="2026-06-26T12:00:00+00:00",
+                author="Gavin",
+                topic="uncategorized",
+                post_type="founder_insight",
+            )
+            store.save_note(
+                PostNote(
+                    post_id=post.id,
+                    worked_reason="Clear contrast in Gavin's voice.",
+                    hook="specific_observation",
+                    structure="claim_then_reason",
+                    tone="plainspoken",
+                    cta="none",
+                    formatting="single_paragraph",
+                    pattern_name="buyer_timing",
+                    imitate=True,
+                )
+            )
+            store.close()
+
+            status, payload = handle_api_request(
+                "PATCH",
+                f"/api/posts/{post.id}",
+                json.dumps({"topic": "sales LLMs", "post_type": "quote_tweet"}),
+                db_path=db_path,
+            )
+
+            self.assertEqual(status, 200)
+            updated = payload["post"]
+            self.assertEqual(updated["topic"], "sales LLMs")
+            self.assertEqual(updated["post_type"], "quote_tweet")
+            self.assertTrue(updated["voice"]["is_voice_example"])
+            self.assertEqual(updated["voice"]["why_this_worked"], "Clear contrast in Gavin's voice.")
+            self.assertEqual(updated["voice"]["hook"], "specific_observation")
+            self.assertEqual(updated["voice"]["pattern"], "buyer_timing")
 
     def test_web_trend_scout_refreshes_daily_and_weekly_groups(self):
         with tempfile.TemporaryDirectory() as tmpdir:

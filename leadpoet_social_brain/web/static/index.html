@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260626-topic-editor">
+    <link rel="stylesheet" href="/static/styles.css?v=20260626-voice-drawer">
   </head>
   <body>
     <aside class="sidebar">
@@ -139,19 +139,10 @@
               <h2>Voice Status</h2>
               <p id="voiceStatusDescription" class="muted">Loading Voice status.</p>
             </div>
-            <div class="voice-status-grid">
-              <div class="voice-stat">
-                <span>Status</span>
-                <strong id="voiceStatusLabel">Loading</strong>
-              </div>
-              <div class="voice-stat">
-                <span>Voice Examples</span>
-                <strong id="voiceExampleCount">0</strong>
-              </div>
-              <div class="voice-stat">
-                <span>Last updated</span>
-                <strong id="voiceLastUpdated">Never</strong>
-              </div>
+            <div class="voice-status-row">
+              <span class="status-badge" id="voiceStatusLabel">Loading</span>
+              <span><strong id="voiceExampleCount">0</strong> Voice Examples</span>
+              <span>Last updated <strong id="voiceLastUpdated">Never</strong></span>
             </div>
             <div class="actions left">
               <button id="updateVoiceButton">Update Voice</button>
@@ -184,13 +175,11 @@
             <div id="voiceExamplesList" class="voice-list"></div>
           </section>
 
-          <section class="panel voice-suggestions-panel">
-            <div class="panel-header">
-              <div>
-                <h2>Suggested Voice Examples</h2>
-              </div>
-            </div>
-            <div id="voiceSuggestionsList" class="voice-list compact"></div>
+          <section class="voice-suggestions-panel">
+            <details class="voice-disclosure" id="voiceSuggestionsDisclosure">
+              <summary>Show suggested examples</summary>
+              <div id="voiceSuggestionsList" class="voice-list compact"></div>
+            </details>
           </section>
         </div>
       </section>
@@ -402,6 +391,7 @@
     </section>
 
     <datalist id="topicOptions"></datalist>
-    <script src="/static/app.js?v=20260626-topic-labels"></script>
+    <datalist id="postTypeOptions"></datalist>
+    <script src="/static/app.js?v=20260626-voice-drawer"></script>
   </body>
 </html>

@@ -179,8 +179,8 @@ The UI has four main areas:
 
 - `Dashboard`: recent X posts, daily and weekly trends, performance signals, and a quiet last-sync line
 - `Queue`: review, edit, AI revise, approve, schedule, and post approved content
-- `Voice`: selected Voice Examples, current Koinoniko Voice, update status, and suggested examples
-- `Account`: connection status, data sync actions, model routing, provider test, and account/security controls
+- `Voice`: compact Voice status, current Koinoniko Voice, selected Voice Examples, and collapsed suggested examples
+- `Account`: connection status, data sync actions, model routing, and account/security controls
 
 Account uses polished status rows for:
 
@@ -213,11 +213,20 @@ The Voice page shows:
 - status: Ready, Needs examples, Needs update, or Not updated yet
 - number of Voice Examples
 - last Voice update time
-- current Koinoniko Voice summary
-- selected Voice Examples
-- Suggested Voice Examples based on simple performance signals
+- current Koinoniko Voice summary in clean sections
+- selected Voice Examples with one simple performance signal
+- suggested Voice Examples behind `Show suggested examples`
 
-The Dashboard recent posts table can filter to `Voice Examples`. The post detail modal can mark or unmark a post as a Voice Example and edit the note.
+The Dashboard recent posts table can filter to `Voice Examples`. Clicking a post opens a clean post detail drawer with:
+
+- full post text and an `Open on X` button
+- compact metadata: date, topic, post type, and engagement rate
+- compact metrics: likes, replies, reposts, quotes, bookmarks, and impressions
+- Voice Example checkbox
+- `Why this worked` note
+- collapsed advanced fields for hook, structure, tone, CTA, formatting, and pattern
+
+Topic and Post type are editable inline inside the post drawer as compact chips. They use existing stored values plus defaults, and new typed values can be saved without clearing the Voice note.
 
 Internally this reuses existing `post_notes` and context storage. The product-facing UI uses Voice language; the older CLI names remain available for compatibility.
 
@@ -307,7 +316,7 @@ openai/gpt-4.1-mini
 google/gemini-2.5-pro
 ```
 
-The Account page can save, reset, and test provider settings. Model names are not secrets and may be stored in SQLite app settings.
+The Account page can save model settings. Model names are not secrets and may be stored in SQLite app settings.
 
 ### Custom Provider
 
@@ -950,6 +959,21 @@ content_queue.id -> queued_post_versions.queue_id
 
 This lets later metrics be analyzed against the examples, context, trends, and patterns that shaped the post.
 
+## Web API Notes
+
+The web UI uses small JSON endpoints for the current workflow:
+
+```text
+GET /api/taxonomy/topics
+GET /api/taxonomy/post-types
+PATCH /api/posts/:id
+POST /api/posts/:id/voice
+```
+
+The topic and post type option endpoints return distinct values from stored posts and queue items plus sensible defaults. They do not create a separate management system.
+
+`PATCH /api/posts/:id` can update topic and post type without changing the Voice Example flag or `Why this worked` note.
+
 ## CLI Reference
 
 Top-level commands:
@@ -1019,6 +1043,8 @@ Current tests cover:
 - metrics sync snapshots and latest-snapshot analytics
 - Voice Example note workflows
 - Voice updates from selected examples
+- Voice page and post detail drawer UI expectations
+- topic and post type option endpoints
 - skill loading and prompt assembly
 - provider-required generation
 - OpenRouter provider behavior

@@ -14,10 +14,20 @@ const state = {
   queueDetail: null,
   postDetail: null,
   editingTopicPostId: "",
+  editingPostField: null,
+  taxonomy: { topics: [], postTypes: [] },
   recentPostsSort: { key: "date", direction: "desc" },
 };
 
-const SUGGESTED_TOPICS = ["Leadpoet", "Sales", "Bittensor", "AI", "Founder/company"];
+const DEFAULT_TOPIC_OPTIONS = ["Leadpoet", "sales LLMs", "Bittensor", "product", "AI SDRs", "lead generation", "GTM"];
+const DEFAULT_POST_TYPE_OPTIONS = [
+  "founder_insight",
+  "product_update",
+  "bittensor_update",
+  "quote_tweet",
+  "technical_explanation",
+  "light_funny",
+];
 
 const RECENT_POST_SORT_COLUMNS = {
   date: {
@@ -151,6 +161,19 @@ async function runButton(button, loadingText, work) {
   }
 }
 
+async function loadTaxonomy() {
+  const [topics, postTypes] = await Promise.all([
+    api("/api/taxonomy/topics"),
+    api("/api/taxonomy/post-types"),
+  ]);
+  state.taxonomy = {
+    topics: (topics.items || []).map((item) => item.value).filter(Boolean),
+    postTypes: (postTypes.items || []).map((item) => item.value).filter(Boolean),
+  };
+  renderTopicOptions();
+  renderPostTypeOptions();
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -186,6 +209,7 @@ async function refresh() {
     api("/api/analytics"),
     loadQueueStatuses(["draft", "needs_review", "failed"]),
     api("/api/queue?limit=100&status=approved"),
+    loadTaxonomy(),
   ]);
   state.dashboard = dashboard;
   state.analytics = analytics;
@@ -393,6 +417,14 @@ function renderTopicOptions() {
     .join("");
 }
 
+function renderPostTypeOptions() {
+  const list = $("postTypeOptions");
+  if (!list) return;
+  list.innerHTML = postTypeOptions()
+    .map((type) => `<option value="${escapeAttr(type)}" label="${escapeAttr(label(type))}"></option>`)
+    .join("");
+}
+
 function topicOptions() {
   const seen = new Set();
   const options = [];
@@ -403,9 +435,30 @@ function topicOptions() {
     seen.add(key);
     options.push(topic);
   };
-  SUGGESTED_TOPICS.forEach(add);
+  DEFAULT_TOPIC_OPTIONS.forEach(add);
+  (state.taxonomy.topics || []).forEach(add);
   (state.dashboard?.recent_posts || [])
     .map((post) => post.topic)
+    .filter(Boolean)
+    .sort((first, second) => String(first).localeCompare(String(second), undefined, { sensitivity: "base" }))
+    .forEach(add);
+  return options;
+}
+
+function postTypeOptions() {
+  const seen = new Set();
+  const options = [];
+  const add = (value) => {
+    const type = String(value || "").trim();
+    const key = type.toLowerCase();
+    if (!type || seen.has(key)) return;
+    seen.add(key);
+    options.push(type);
+  };
+  DEFAULT_POST_TYPE_OPTIONS.forEach(add);
+  (state.taxonomy.postTypes || []).forEach(add);
+  (state.dashboard?.recent_posts || [])
+    .map((post) => post.post_type)
     .filter(Boolean)
     .sort((first, second) => String(first).localeCompare(String(second), undefined, { sensitivity: "base" }))
     .forEach(add);
@@ -463,6 +516,7 @@ window.savePostTopic = async (event, id) => {
       state.postDetail = payload.post;
     }
     state.editingTopicPostId = "";
+    await loadTaxonomy();
     renderRecentPosts();
     if (state.postDetail?.id === id && !$("postModal").classList.contains("hidden")) {
       renderPostModal();
@@ -485,7 +539,10 @@ function updateRecentPost(updatedPost) {
 
 window.openPostDetails = (id) => {
   runButton(null, "", async () => {
-    const payload = await api(`/api/posts/${encodeURIComponent(id)}`);
+    const [payload] = await Promise.all([
+      api(`/api/posts/${encodeURIComponent(id)}`),
+      loadTaxonomy(),
+    ]);
     state.postDetail = payload.post;
     renderPostModal();
     openModal("postModal");
@@ -499,20 +556,24 @@ function renderPostModal() {
   const voice = post.voice || {};
   $("postModalTitle").textContent = post.summary || "Post details";
   $("postModalBody").innerHTML = `
-    <div class="full-text">${escapeHtml(post.text)}</div>
-    <div class="detail-grid">
-      ${detail("Date", formatDateTime(post.published_at))}
-      ${detailHtml("Topic", topicControl(post, "detail"))}
-      ${detail("Post type", label(post.post_type))}
-      ${detail("Likes", metric(metrics.likes))}
-      ${detail("Replies", metric(metrics.replies))}
-      ${detail("Reposts", metric(metrics.reposts))}
-      ${detail("Quotes", metric(metrics.quotes))}
-      ${detail("Bookmarks", metric(metrics.bookmarks))}
-      ${detail("Impressions", metric(metrics.impressions))}
-      ${detail("Engagement rate", formatRate(metrics.engagement_rate))}
+    <div class="post-review-top">
+      <div class="full-text">${escapeHtml(post.text)}</div>
+      ${post.url ? `<a class="button-link" href="${escapeAttr(post.url)}" target="_blank" rel="noreferrer">Open on X</a>` : ""}
     </div>
-    ${post.url ? `<a class="button-link" href="${escapeAttr(post.url)}" target="_blank" rel="noreferrer">Open on X</a>` : ""}
+    <div class="compact-meta-row">
+      ${compactMeta("Date", formatDateTime(post.published_at))}
+      ${compactMetaHtml("Topic", postFieldControl(post, "topic"))}
+      ${compactMetaHtml("Post type", postFieldControl(post, "post_type"))}
+      ${compactMeta("Engagement rate", formatRate(metrics.engagement_rate))}
+    </div>
+    <div class="compact-metrics-row" aria-label="Post metrics">
+      ${compactMetric("Likes", metrics.likes)}
+      ${compactMetric("Replies", metrics.replies)}
+      ${compactMetric("Reposts", metrics.reposts)}
+      ${compactMetric("Quotes", metrics.quotes)}
+      ${compactMetric("Bookmarks", metrics.bookmarks)}
+      ${compactMetric("Impressions", metrics.impressions)}
+    </div>
     <section class="voice-edit-section">
       <div>
         <h3>Voice</h3>
@@ -525,10 +586,6 @@ function renderPostModal() {
       <label>Why this worked
         <textarea id="postWhyWorked" rows="4" placeholder="What made this post sound like Gavin and work with the audience?">${escapeHtml(voice.why_this_worked || "")}</textarea>
       </label>
-      <div class="form-grid">
-        <label>Topic<input id="postVoiceTopic" value="${escapeAttr(post.topic || "")}"></label>
-        <label>Post type<input id="postVoicePostType" value="${escapeAttr(post.post_type || "")}"></label>
-      </div>
       <details class="advanced-fields">
         <summary>Advanced fields</summary>
         <div class="form-grid">
@@ -541,11 +598,107 @@ function renderPostModal() {
         </div>
       </details>
       <div class="actions left">
-        <button onclick="savePostVoice(event)">Save Voice</button>
+        <button onclick="savePostVoice(event)">Save</button>
       </div>
     </section>
   `;
 }
+
+function compactMeta(labelText, value) {
+  return `
+    <div class="compact-meta-item">
+      <span>${escapeHtml(labelText)}</span>
+      <strong>${escapeHtml(value ?? "")}</strong>
+    </div>
+  `;
+}
+
+function compactMetaHtml(labelText, htmlValue) {
+  return `
+    <div class="compact-meta-item">
+      <span>${escapeHtml(labelText)}</span>
+      ${htmlValue}
+    </div>
+  `;
+}
+
+function compactMetric(labelText, value) {
+  return `<span><strong>${metric(value)}</strong> ${escapeHtml(labelText)}</span>`;
+}
+
+function postFieldControl(post, field) {
+  const isEditing = state.editingPostField?.postId === post.id && state.editingPostField?.field === field;
+  const currentValue = field === "topic" ? (post.topic || "uncategorized") : (post.post_type || "");
+  const displayValue = field === "topic" ? topicLabel(currentValue) : label(currentValue);
+  const fieldName = field === "topic" ? "Topic" : "Post type";
+  if (isEditing) {
+    return `
+      <form class="inline-field-editor" onsubmit='savePostField(event, ${jsArg(post.id)}, ${jsArg(field)})' onclick="event.stopPropagation()">
+        <input value="${escapeAttr(currentValue)}" list="${field === "topic" ? "topicOptions" : "postTypeOptions"}" placeholder="${escapeAttr(fieldName)}" aria-label="${escapeAttr(fieldName)}" autofocus>
+        <button class="secondary" type="submit">Save</button>
+        <button class="quiet-button" type="button" onclick="cancelPostFieldEdit(event)">Cancel</button>
+      </form>
+    `;
+  }
+  return `
+    <button
+      class="inline-field-chip${field === "topic" && currentValue.toLowerCase() === "uncategorized" ? " is-uncategorized" : ""}"
+      type="button"
+      title="Edit ${escapeAttr(fieldName)}"
+      onclick='startPostFieldEdit(event, ${jsArg(post.id)}, ${jsArg(field)})'
+    >
+      ${escapeHtml(displayValue || "Unset")}
+    </button>
+  `;
+}
+
+window.startPostFieldEdit = (event, id, field) => {
+  event.stopPropagation();
+  state.editingPostField = { postId: id, field };
+  state.editingTopicPostId = "";
+  renderPostModal();
+};
+
+window.cancelPostFieldEdit = (event) => {
+  event.stopPropagation();
+  state.editingPostField = null;
+  renderPostModal();
+};
+
+window.savePostField = async (event, id, field) => {
+  event.preventDefault();
+  event.stopPropagation();
+  const form = event.currentTarget;
+  const input = form.querySelector("input");
+  const value = input?.value.trim() || "";
+  if (!value) {
+    showMessage(field === "topic" ? "Topic is required." : "Post type is required.", true);
+    return;
+  }
+  form.querySelectorAll("button, input").forEach((node) => {
+    node.disabled = true;
+  });
+  try {
+    const payload = await api(`/api/posts/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ [field]: value }),
+    });
+    updateRecentPost(payload.post);
+    if (state.postDetail?.id === id) {
+      state.postDetail = payload.post;
+    }
+    state.editingPostField = null;
+    await loadTaxonomy();
+    renderRecentPosts();
+    renderPostModal();
+    showMessage(field === "topic" ? "Topic updated." : "Post type updated.");
+  } catch (error) {
+    showMessage(error.message, true);
+    form.querySelectorAll("button, input").forEach((node) => {
+      node.disabled = false;
+    });
+  }
+};
 
 window.savePostVoice = (event) => {
   runButton(event.currentTarget, "Saving...", async () => {
@@ -555,8 +708,6 @@ window.savePostVoice = (event) => {
       body: JSON.stringify({
         voice_example: $("postVoiceExample").checked,
         why_this_worked: $("postWhyWorked").value,
-        topic: $("postVoiceTopic").value,
-        post_type: $("postVoicePostType").value,
         hook: $("postVoiceHook").value,
         structure: $("postVoiceStructure").value,
         tone: $("postVoiceTone").value,
@@ -1147,10 +1298,10 @@ function renderVoice() {
 function renderCurrentVoice() {
   const current = state.voice?.current || {};
   if (!current.exists) {
-    $("currentVoiceSummary").innerHTML = `<p class="empty-copy">${escapeHtml(current.empty_message || "No Voice Profile yet. Mark a few strong posts as Voice Examples, then update Voice.")}</p>`;
+    $("currentVoiceSummary").innerHTML = `<p class="empty-copy">${escapeHtml(current.empty_message || "No Voice yet. Mark a few strong posts as Voice Examples, then update Voice.")}</p>`;
     return;
   }
-  const sections = current.sections || [];
+  const sections = cleanVoiceSections(current.sections || []);
   $("currentVoiceSummary").innerHTML = sections.length
     ? sections.map((section) => `
       <article class="voice-summary-section">
@@ -1159,6 +1310,32 @@ function renderCurrentVoice() {
       </article>
     `).join("")
     : `<div class="source-text">${escapeHtml(current.content || "")}</div>`;
+}
+
+function cleanVoiceSections(sections) {
+  const titles = {
+    "Recurring voice traits": "Voice traits",
+    "Voice traits": "Voice traits",
+    "What strong posts tend to do": "What strong posts tend to do",
+    "Avoid": "What to avoid",
+    "What to avoid": "What to avoid",
+    "Reusable writing principles": "Reusable writing principles",
+  };
+  const preferredOrder = [
+    "Voice traits",
+    "What strong posts tend to do",
+    "What to avoid",
+    "Reusable writing principles",
+  ];
+  const cleaned = sections
+    .map((section) => ({
+      title: titles[section.title] || "",
+      items: section.items || [],
+    }))
+    .filter((section) => section.title && section.items.length);
+  return preferredOrder
+    .map((title) => cleaned.find((section) => section.title === title))
+    .filter(Boolean);
 }
 
 function renderVoiceTopicOptions() {
@@ -1202,7 +1379,6 @@ function renderVoiceSuggestions() {
 }
 
 function voiceExampleCard(post, { removable = false } = {}) {
-  const metrics = post.metrics || {};
   return `
     <article class="voice-card">
       <div class="voice-card-main">
@@ -1210,22 +1386,15 @@ function voiceExampleCard(post, { removable = false } = {}) {
           <span>${escapeHtml(formatDate(post.published_at))}</span>
           <span>${escapeHtml(topicLabel(post.topic || "No topic"))}</span>
           <span>${escapeHtml(label(post.post_type || "post"))}</span>
+          <span>${escapeHtml(voicePerformanceSignal(post))}</span>
         </div>
         <h3>${escapeHtml(post.summary || summarize(post.text, 110))}</h3>
-        <p>${escapeHtml(post.why_this_worked || "No note yet.")}</p>
-      </div>
-      <div class="voice-metrics">
-        <span>${metric(metrics.likes)} likes</span>
-        <span>${metric(metrics.replies)} replies</span>
-        <span>${metric(metrics.reposts)} reposts</span>
-        <span>${metric(metrics.bookmarks)} bookmarks</span>
-        <span>${metric(metrics.impressions)} impressions</span>
-        <span>${formatRate(metrics.engagement_rate)} ER</span>
+        <p><strong>Why this worked:</strong> ${escapeHtml(post.why_this_worked || "No note yet.")}</p>
       </div>
       <div class="actions left">
-        <button class="secondary" onclick='openPostDetails(${jsArg(post.id)})'>Open post</button>
+        <button class="secondary" onclick='openPostDetails(${jsArg(post.id)})'>Edit</button>
         ${post.url ? `<a class="button-link secondary-link" href="${escapeAttr(post.url)}" target="_blank" rel="noreferrer">Open on X</a>` : ""}
-        ${removable ? `<button class="quiet-button" onclick='removeVoiceExample(event, ${jsArg(post.id)})'>Remove from Voice Examples</button>` : ""}
+        ${removable ? `<button class="quiet-button" onclick='removeVoiceExample(event, ${jsArg(post.id)})'>Remove</button>` : ""}
       </div>
     </article>
   `;
@@ -1256,6 +1425,16 @@ function performanceScore(post) {
     + Number(metrics.replies || 0) * 8
     + Number(metrics.reposts || 0) * 6
     + Number(metrics.impressions || 0) / 1000;
+}
+
+function voicePerformanceSignal(post) {
+  const metrics = post.metrics || {};
+  if (metrics.engagement_rate !== null && metrics.engagement_rate !== undefined) return `${formatRate(metrics.engagement_rate)} ER`;
+  if (metrics.bookmarks !== null && metrics.bookmarks !== undefined) return `${metric(metrics.bookmarks)} bookmarks`;
+  if (metrics.replies !== null && metrics.replies !== undefined) return `${metric(metrics.replies)} replies`;
+  if (metrics.reposts !== null && metrics.reposts !== undefined) return `${metric(metrics.reposts)} reposts`;
+  if (metrics.impressions !== null && metrics.impressions !== undefined) return `${metric(metrics.impressions)} impressions`;
+  return "No metrics yet";
 }
 
 async function updateVoice() {
@@ -1573,6 +1752,7 @@ function closeModal(id) {
   if (id === "postModal") {
     state.postDetail = null;
     state.editingTopicPostId = "";
+    state.editingPostField = null;
     renderRecentPosts();
   }
 }

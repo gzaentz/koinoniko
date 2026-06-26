@@ -10,6 +10,7 @@ import mimetypes
 import os
 import secrets
 import time
+from collections import Counter
 from http.cookies import CookieError, SimpleCookie
 from dataclasses import asdict, replace
 from datetime import date, datetime, timedelta, timezone
@@ -85,6 +86,23 @@ X_METRICS_SYNC_KEY = "x_metrics_sync"
 X_DAILY_SYNC_KEY = "x_daily_sync"
 TRENDS_SYNC_KEY = "trends_sync"
 VOICE_CONTEXT_NAME = "learned_from_high_performers"
+DEFAULT_TOPIC_OPTIONS = [
+    "Leadpoet",
+    "sales LLMs",
+    "Bittensor",
+    "product",
+    "AI SDRs",
+    "lead generation",
+    "GTM",
+]
+DEFAULT_POST_TYPE_OPTIONS = [
+    "founder_insight",
+    "product_update",
+    "bittensor_update",
+    "quote_tweet",
+    "technical_explanation",
+    "light_funny",
+]
 SESSION_COOKIE = "social_brain_session"
 SESSION_TTL_SECONDS = 60 * 60 * 12
 AUTH_REQUIRED_MESSAGE = "Authentication required."
@@ -545,6 +563,10 @@ def route_api(
         return 200, {"items": voice_examples_payload(store)}
     if method == "GET" and parts == ["api", "voice", "suggestions"]:
         return 200, {"items": voice_suggestions_payload(store)}
+    if method == "GET" and parts == ["api", "taxonomy", "topics"]:
+        return 200, {"items": taxonomy_options_payload(store, "topic", DEFAULT_TOPIC_OPTIONS)}
+    if method == "GET" and parts == ["api", "taxonomy", "post-types"]:
+        return 200, {"items": taxonomy_options_payload(store, "post_type", DEFAULT_POST_TYPE_OPTIONS)}
     if method == "POST" and parts == ["api", "voice", "update"]:
         limit = int(payload.get("limit") or 12)
         section = ContextManager(store).rebuild_style_guide_from_examples(limit=limit)
@@ -1255,7 +1277,7 @@ def voice_current_payload(store: SQLiteStore, *, section=None) -> dict[str, Any]
             "content": "",
             "sections": [],
             "updated_at": None,
-            "empty_message": "No Voice Profile yet. Mark a few strong posts as Voice Examples, then update Voice.",
+            "empty_message": "No Voice yet. Mark a few strong posts as Voice Examples, then update Voice.",
         }
     return {
         "exists": True,
@@ -1449,14 +1471,58 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
     }
 
 
+def taxonomy_options_payload(store: SQLiteStore, field: str, defaults: list[str]) -> list[dict[str, Any]]:
+    counts: Counter[str] = Counter()
+
+    def add(value: object, *, increment: bool = True) -> None:
+        text = clean_optional(value)
+        if not text:
+            return
+        if increment:
+            counts[text] += 1
+        else:
+            counts.setdefault(text, 0)
+
+    for post in store.list_posts(platform="x", limit=None):
+        add(getattr(post, field))
+    for item in store.list_content_queue(platform="x", limit=500):
+        add(getattr(item, field))
+    for default in defaults:
+        add(default, increment=False)
+
+    return [
+        {
+            "value": value,
+            "label": topic_label_for_payload(value) if field == "topic" else post_type_label_for_payload(value),
+            "count": count,
+        }
+        for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0].lower()))
+    ]
+
+
+def topic_label_for_payload(value: str) -> str:
+    return "Uncategorized" if value.strip().lower() == "uncategorized" else value
+
+
+def post_type_label_for_payload(value: str) -> str:
+    return value.replace("_", " ").replace("-", " ").title()
+
+
 def update_post_payload(store: SQLiteStore, post_id: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     post = store.get_post(post_id)
     if not post:
         return 404, {"error": "Post not found."}
     topic = clean_optional(payload.get("topic"))
-    if not topic:
-        return 400, {"error": "Topic is required."}
-    saved = store.save_post(replace(post, topic=topic))
+    post_type = clean_optional(payload.get("post_type"))
+    if topic is None and post_type is None:
+        return 400, {"error": "Topic or post type is required."}
+    saved = store.save_post(
+        replace(
+            post,
+            topic=topic or post.topic,
+            post_type=post_type or post.post_type,
+        )
+    )
     return 200, {"post": post_detail_payload(store, saved)}
 
 
