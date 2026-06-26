@@ -248,10 +248,16 @@ class SocialBrainTest(unittest.TestCase):
     def test_web_static_uses_logo_for_favicon_and_brand(self):
         static_dir = Path("leadpoet_social_brain/web/static")
         index_html = (static_dir / "index.html").read_text(encoding="utf-8")
+        favicon_svg = (static_dir / "koinoniko-favicon.svg").read_text(encoding="utf-8")
 
         self.assertTrue((static_dir / "koinoniko-logo.svg").exists())
+        self.assertTrue((static_dir / "koinoniko-favicon.svg").exists())
+        self.assertIn('viewBox="0 0 64 64"', favicon_svg)
+        self.assertIn('rx="13"', favicon_svg)
+        self.assertIn('fill="#ffffff"', favicon_svg)
+        self.assertIn('clip-path="url(#rounded-tile)"', favicon_svg)
         self.assertIn("<title>Koinoniko</title>", index_html)
-        self.assertIn('rel="icon" type="image/svg+xml" href="/static/koinoniko-logo.svg"', index_html)
+        self.assertIn('rel="icon" type="image/svg+xml" href="/static/koinoniko-favicon.svg"', index_html)
         self.assertIn('src="/static/koinoniko-logo.svg" alt="" class="brand-logo" width="34" height="34"', index_html)
         self.assertNotIn("<strong>Koinoniko</strong>", index_html)
         self.assertNotIn("<span>Leadpoet</span>", index_html)

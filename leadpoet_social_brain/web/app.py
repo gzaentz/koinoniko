@@ -354,6 +354,7 @@ def login_page(*, error: str | None = None, configured: bool = False) -> str:
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Koinoniko Login</title>
+    <link rel="icon" type="image/svg+xml" href="/static/koinoniko-favicon.svg">
     <style>
       * {{ box-sizing: border-box; }}
       body {{
