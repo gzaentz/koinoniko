@@ -23,6 +23,10 @@ MODEL_ENV_KEYS = {
 LEGACY_MODEL_SETTING = "llm_model"
 LEGACY_MODEL_ENV = "SOCIAL_BRAIN_MODEL"
 OPENROUTER_MODEL_ENV = "OPENROUTER_MODEL"
+BUILTIN_PROVIDER_ALIASES = {
+    "openrouter": "leadpoet_social_brain.openrouter_provider:create_provider",
+    "openrouter_provider": "leadpoet_social_brain.openrouter_provider:create_provider",
+}
 
 
 class DraftProvider(Protocol):
@@ -56,6 +60,7 @@ def load_provider_from_env(*, model_override: str | None = None) -> DraftProvide
     provider_path = os.getenv("SOCIAL_BRAIN_PROVIDER")
     if not provider_path:
         return None
+    provider_path = normalize_provider_path(provider_path)
     module_name, separator, factory_name = provider_path.partition(":")
     if not separator or not module_name or not factory_name:
         raise ValueError("SOCIAL_BRAIN_PROVIDER must look like 'module.path:create_provider'.")
@@ -73,6 +78,17 @@ def load_provider_from_env(*, model_override: str | None = None) -> DraftProvide
                 os.environ.pop(LEGACY_MODEL_ENV, None)
             else:
                 os.environ[LEGACY_MODEL_ENV] = str(previous_model)
+
+
+def normalize_provider_path(provider_path: str) -> str:
+    cleaned = provider_path.strip()
+    if cleaned in BUILTIN_PROVIDER_ALIASES:
+        return BUILTIN_PROVIDER_ALIASES[cleaned]
+    module_name, separator, factory_name = cleaned.partition(":")
+    if module_name in BUILTIN_PROVIDER_ALIASES:
+        aliased_module, _, aliased_factory = BUILTIN_PROVIDER_ALIASES[module_name].partition(":")
+        return f"{aliased_module}:{factory_name or aliased_factory}"
+    return cleaned
 
 
 def generate_with_provider(

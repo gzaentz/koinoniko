@@ -549,6 +549,28 @@ class SocialBrainTest(unittest.TestCase):
 
         self.assertEqual(provider.model, "anthropic/claude-sonnet-4.5")
 
+    def test_provider_loader_accepts_builtin_openrouter_aliases(self):
+        aliases = [
+            "openrouter_provider:create_provider",
+            "openrouter:create_provider",
+            "openrouter",
+        ]
+        for alias in aliases:
+            with self.subTest(alias=alias):
+                with patch.dict(
+                    os.environ,
+                    {
+                        "SOCIAL_BRAIN_PROVIDER": alias,
+                        "OPENROUTER_API_KEY": "test-key",
+                        "OPENROUTER_MODEL": "openai/gpt-4.1-mini",
+                        "SOCIAL_BRAIN_MODEL": "",
+                    },
+                    clear=False,
+                ):
+                    provider = load_provider_from_env()
+                self.assertIsInstance(provider, OpenRouterProvider)
+                self.assertEqual(provider.model, "openai/gpt-4.1-mini")
+
     def test_model_settings_save_load_and_priority(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
