@@ -163,8 +163,8 @@ The UI supports:
 
 - a focused Dashboard for recent posts, current trends, and performance signals
 - a Content Reviewer board for review, edit, approve, skip, schedule, and approved-only post-now
-- an Account page for connection status, model selection, and X account sync
-- inline AI revisions for queued posts through the configured provider
+- an Account page for connection status, model routing, provider testing, and X account sync
+- inline AI revisions and Best Version rewrites for queued posts through the configured provider
 - accepting a revision without auto-approval
 - weekly queue planning from a modal
 - trend add/list workflow from a modal
@@ -177,7 +177,20 @@ OPENROUTER_API_KEY="<your OpenRouter key>"
 SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider"
 ```
 
-Set the model in the web UI under `Account -> OpenRouter model`. You can still set `OPENROUTER_MODEL` as an environment fallback, but the Account setting wins when saved.
+Set model routing in the web UI under `Account -> Advanced Model Settings`. Standard mode uses the default model in one provider call. Best Version mode uses a simple strategist -> natural writer -> evaluator flow, then saves the suggested final version.
+
+Model names are not secrets and may be stored in SQLite app settings. API keys stay in environment variables only. For OpenRouter, use OpenRouter model IDs.
+
+Optional model env fallbacks:
+
+```bash
+SOCIAL_BRAIN_DEFAULT_MODEL="..."
+SOCIAL_BRAIN_STRATEGIST_MODEL="..."
+SOCIAL_BRAIN_NATURAL_WRITER_MODEL="..."
+SOCIAL_BRAIN_EVALUATOR_MODEL="..."
+```
+
+If a role-specific model is blank, Koinoniko uses the default model. If the default model is blank, the provider can use its own default. Legacy `OPENROUTER_MODEL` and `SOCIAL_BRAIN_MODEL` still work as default-model fallbacks.
 
 Posting to X requires write credentials. Read-only X import and metric sync use `X_BEARER_TOKEN`; posting needs either `X_OAUTH2_ACCESS_TOKEN` or OAuth 1.0a keys. The UI does not auto-post or auto-approve anything.
 
@@ -241,7 +254,7 @@ Required Railway settings:
 - Keep service replicas at `1` while using SQLite.
 - Set `X_BEARER_TOKEN` if you want X import and metric sync.
 - Set `OPENROUTER_API_KEY` and `SOCIAL_BRAIN_PROVIDER=leadpoet_social_brain.openrouter_provider:create_provider` before using generation, planning, or AI edits.
-- Set the OpenRouter model from the hosted app's Account page. `OPENROUTER_MODEL` remains available as an environment fallback.
+- Set model routing from the hosted app's Account page. `OPENROUTER_MODEL` remains available as a legacy default-model fallback.
 - Set X write credentials only if you want approved posts to be posted from Railway.
 - Set `TASK_SECRET` if you want Railway Cron to run protected X sync endpoints.
 - Optional: set `SOCIAL_BRAIN_TASK_TOKEN` if you want an external cron service to trigger hosted task endpoints.
@@ -274,7 +287,7 @@ For a new hosted database:
 8. Use `update-post-notes` to mark strongest examples with `imitate=true`.
 9. Run `rebuild-style-guide`.
 10. Set `OPENROUTER_API_KEY` and `SOCIAL_BRAIN_PROVIDER`.
-11. Open Account in the web UI and save the OpenRouter model.
+11. Open Account in the web UI and save model routing, or leave role models blank to use the default model.
 12. Add trends if you want timely planning context.
 13. Plan the week, review/edit, then approve only posts you are ready to publish.
 14. Set X write auth before posting from the hosted app.
@@ -442,6 +455,17 @@ python3 -m leadpoet_social_brain.cli --db /private/tmp/social_brain_demo.sqlite3
   --variants 2
 ```
 
+For a single higher-quality final draft, use Best Version mode:
+
+```bash
+python3 -m leadpoet_social_brain.cli --db /private/tmp/social_brain_demo.sqlite3 generate-x \
+  --topic "sales LLMs" \
+  --post-type founder_insight \
+  --angle "AI SDR context beats volume" \
+  --use-trends \
+  --best-version
+```
+
 Take one generated draft ID from the provider-backed output, then record it as published:
 
 ```bash
@@ -560,6 +584,17 @@ python3 -m leadpoet_social_brain.cli generate-x \
   --variants 3
 ```
 
+Best Version mode uses strategist -> natural writer -> evaluator routing and returns the suggested final version:
+
+```bash
+python3 -m leadpoet_social_brain.cli generate-x \
+  --topic "sales LLMs" \
+  --post-type founder_insight \
+  --angle "why buyer context beats AI SDR volume" \
+  --use-trends \
+  --best-version
+```
+
 Or plan a week of queued X posts:
 
 ```bash
@@ -569,7 +604,8 @@ python3 -m leadpoet_social_brain.cli plan-week-x \
   --use-trends \
   --trend-window-days 14 \
   --topic-mix "sales LLMs:3,Bittensor:2,product:2" \
-  --default-post-type founder_insight
+  --default-post-type founder_insight \
+  --best-version
 ```
 
 Review, edit, and approve:
@@ -581,6 +617,11 @@ python3 -m leadpoet_social_brain.cli update-queued-post \
   --queue-id "<queue id>" \
   --text "edited post text" \
   --scheduled-at "2026-06-30T10:00:00-04:00"
+
+python3 -m leadpoet_social_brain.cli revise-queued-post \
+  --queue-id "<queue id>" \
+  --instruction "Make this more natural and founder-led." \
+  --best-version
 
 python3 -m leadpoet_social_brain.cli approve-queued-post --queue-id "<queue id>"
 ```
@@ -1073,7 +1114,7 @@ export OPENROUTER_API_KEY="<your OpenRouter key>"
 export SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider"
 ```
 
-Then save the model slug in the web UI under `Account -> OpenRouter model`. If a model is saved there, it overrides `OPENROUTER_MODEL`. If no model is saved, `OPENROUTER_MODEL` is still used as a fallback.
+Then save model routing in the web UI under `Account -> Advanced Model Settings`. The default model is used for Standard generation. Strategist, natural writer, and evaluator models are optional and only used by Best Version mode. If a role model is blank, it falls back to the default model. If no Account model is saved, env fallbacks such as `SOCIAL_BRAIN_DEFAULT_MODEL` or legacy `OPENROUTER_MODEL` are used.
 
 Examples of model slugs might look like:
 
@@ -1098,12 +1139,14 @@ The generic provider interface remains:
 
 ```python
 class MyProvider:
-    def generate(self, prompt: str, *, variants: int) -> list[str]:
+    def generate(self, prompt: str, *, variants: int, model: str | None = None) -> list[str]:
         ...
 
 def create_provider():
     return MyProvider()
 ```
+
+Providers that only implement `generate(prompt, *, variants)` still work; Koinoniko simply calls them without the optional model argument.
 
 Custom provider example:
 

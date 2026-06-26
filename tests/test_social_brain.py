@@ -534,6 +534,28 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(routing.evaluator, "account/default")
             store.close()
 
+    def test_model_routing_uses_provider_default_when_db_and_env_are_blank(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            provider = OpenRouterProvider(api_key="test-key", model="provider/default", request_json=lambda *_: {})
+            with patch.dict(
+                os.environ,
+                {
+                    "SOCIAL_BRAIN_DEFAULT_MODEL": "",
+                    "SOCIAL_BRAIN_STRATEGIST_MODEL": "",
+                    "SOCIAL_BRAIN_NATURAL_WRITER_MODEL": "",
+                    "SOCIAL_BRAIN_EVALUATOR_MODEL": "",
+                    "SOCIAL_BRAIN_MODEL": "",
+                    "OPENROUTER_MODEL": "",
+                },
+                clear=False,
+            ):
+                routing = resolve_model_routing(store, provider)
+
+            self.assertEqual(routing.default, "provider/default")
+            self.assertEqual(routing.strategist, "provider/default")
+            store.close()
+
     def test_skill_files_load_correctly(self):
         skill = load_skill("global_voice.md")
         x_skills = generation_skills(platform="x", post_type="founder_insight")
@@ -1216,6 +1238,55 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(accepted["item"]["status"], "needs_review")
             self.assertIsNone(accepted["item"]["approved_at"])
 
+    def test_web_best_version_revision_does_not_auto_approve(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.seed_defaults()
+            store.save_app_setting("model.default", "openrouter/default")
+            store.save_app_setting("model.strategist", "openrouter/strategy")
+            store.save_app_setting("model.natural_writer", "openrouter/writer")
+            store.save_app_setting("model.evaluator", "openrouter/evaluator")
+            item = store.save_content_queue_item(
+                ContentQueueItem(
+                    text="Original approved post.",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-06-30T10:00:00-04:00",
+                    status="approved",
+                    approved_at=utc_now(),
+                )
+            )
+            store.close()
+
+            provider = RoleAwareProvider()
+            with patch("leadpoet_social_brain.web.app.load_provider_from_env", return_value=provider):
+                status, revisions = handle_api_request(
+                    "POST",
+                    f"/api/queue/{item.id}/revise",
+                    json.dumps(
+                        {
+                            "instruction": "Generate the strongest final version.",
+                            "variants": 1,
+                            "best_version": True,
+                        }
+                    ),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(len(revisions["versions"]), 1)
+            self.assertEqual(
+                [call["model"] for call in provider.calls],
+                ["openrouter/strategy", "openrouter/writer", "openrouter/evaluator"],
+            )
+            store = SQLiteStore(db_path)
+            unchanged = store.get_content_queue_item(item.id)
+            self.assertEqual(unchanged.status, "approved")
+            self.assertEqual(unchanged.text, "Original approved post.")
+            self.assertIsNotNone(unchanged.approved_at)
+            store.close()
+
     def test_web_create_post_endpoint_creates_review_item(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"
@@ -1823,7 +1894,7 @@ class SocialBrainTest(unittest.TestCase):
             {"limit": 50},
         )
 
-    def test_web_account_saves_model_and_reports_x_status(self):
+    def test_web_account_saves_resets_and_tests_model_settings(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"
             env = {
@@ -1835,11 +1906,22 @@ class SocialBrainTest(unittest.TestCase):
                 status, saved = handle_api_request(
                     "PATCH",
                     "/api/account",
-                    json.dumps({"llm_model": "anthropic/claude-sonnet-4.5"}),
+                    json.dumps(
+                        {
+                            "models": {
+                                "default": "anthropic/claude-sonnet-4.5",
+                                "strategist": "openai/gpt-4.1",
+                                "natural_writer": "anthropic/claude-opus-4.5",
+                                "evaluator": "openai/gpt-4.1-mini",
+                            }
+                        }
+                    ),
                     db_path=db_path,
                 )
                 self.assertEqual(status, 200)
-                self.assertEqual(saved["settings"]["llm_model"], "anthropic/claude-sonnet-4.5")
+                self.assertEqual(saved["settings"]["models"]["default"], "anthropic/claude-sonnet-4.5")
+                self.assertEqual(saved["settings"]["models"]["strategist"], "openai/gpt-4.1")
+                self.assertEqual(saved["settings"]["effective_models"]["natural_writer"], "anthropic/claude-opus-4.5")
                 self.assertEqual(saved["status"]["llm_model_source"], "account")
                 self.assertFalse(saved["status"]["x_read_configured"])
                 self.assertFalse(saved["status"]["x_write_configured"])
@@ -1851,8 +1933,34 @@ class SocialBrainTest(unittest.TestCase):
 
             store = SQLiteStore(db_path)
             self.assertEqual(store.get_app_setting("model.default"), "anthropic/claude-sonnet-4.5")
+            self.assertEqual(store.get_app_setting("model.strategist"), "openai/gpt-4.1")
             self.assertIsNone(store.get_app_setting("llm_model"))
             store.close()
+
+            with patch.dict(os.environ, env, clear=True):
+                with patch(
+                    "leadpoet_social_brain.web.app.load_provider_from_env",
+                    return_value=RoleAwareProvider(),
+                ):
+                    status, provider_payload = handle_api_request(
+                        "POST",
+                        "/api/account/test-provider",
+                        b"{}",
+                        db_path=db_path,
+                    )
+            self.assertEqual(status, 200)
+            self.assertTrue(provider_payload["ok"])
+
+            with patch.dict(os.environ, env, clear=True):
+                status, reset = handle_api_request(
+                    "PATCH",
+                    "/api/account",
+                    json.dumps({"reset_model_settings": True}),
+                    db_path=db_path,
+                )
+            self.assertEqual(status, 200)
+            self.assertEqual(reset["settings"]["models"]["default"], "")
+            self.assertEqual(reset["settings"]["effective_models"]["default"], "openai/gpt-4.1-mini")
 
     def test_web_missing_provider_blocks_ai_edit(self):
         with tempfile.TemporaryDirectory() as tmpdir:
