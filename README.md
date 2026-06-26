@@ -27,7 +27,7 @@ What it does well:
 - Preserves draft-to-post linkage through `source_draft_id`.
 - Tracks the examples, context sections, patterns, skill files, analytics hints, and trends used for each draft.
 - Plans a simple weekly X content queue for review and approval.
-- Provides a minimal local web UI for review, editing, weekly planning, trends, analytics, and approved-only posting.
+- Provides a minimal login-gated web UI for review, editing, weekly planning, trends, analytics, and approved-only posting.
 - Lets you refresh or add metrics after publishing and analyze what is working.
 - Requires a configured LLM provider for draft generation.
 
@@ -53,7 +53,7 @@ leadpoet_social_brain/
   providers.py            Optional provider protocol and env loader
   analytics.py            Transparent performance summaries
   cli.py                  Command-line interface
-  web/app.py              Minimal local HTTP API and static UI server
+  web/app.py              Minimal login-gated HTTP API and static UI server
   web/static/             Single-page local UI assets
 skills/
   global_voice.md
@@ -79,7 +79,7 @@ This repo currently has no third-party runtime dependencies.
 Run commands from the repo root:
 
 ```bash
-cd /Users/gavin/Code/koinonikos
+cd koinoniko
 python3 -m leadpoet_social_brain.cli --help
 ```
 
@@ -109,9 +109,9 @@ export SOCIAL_BRAIN_DB="/app/data/social_brain.sqlite3"
 
 Use a fresh database path when you want clean demo output.
 
-## Local UI
+## Web UI
 
-The local UI is a thin web layer over the same SQLite store and core functions used by the CLI. It has no auth system and is intended for local use only.
+The web UI is a thin layer over the same SQLite store and core functions used by the CLI. It is protected by a single SQLite-backed login and can run locally or on Railway.
 
 Start it from the repo root:
 
@@ -137,13 +137,13 @@ python3 -m leadpoet_social_brain.web.app \
 
 The UI loads `.env` by default if present. It only reads environment variables into the local process; it does not display token values.
 
-The UI requires login. The username and password hash are stored in SQLite, not in environment variables.
+The UI requires login. The username and password hash are stored in SQLite, not in environment variables or source code.
 
 ```bash
 python3 -m leadpoet_social_brain.cli set-web-login --username gavinz444
 ```
 
-The command prompts for the password and stores only a salted PBKDF2 hash in the configured SQLite database. If no web login has been stored yet, the app fails closed and shows a configuration-required login page.
+The command prompts for the password and stores only a salted PBKDF2 hash in the configured SQLite database. If no web login has been stored yet, the app fails closed and shows a configuration-required login page. Resetting the password updates the hash and invalidates existing sessions.
 
 The UI supports:
 
@@ -180,7 +180,7 @@ The app reads Railway's `PORT` environment variable automatically. Locally it st
 
 Required Railway settings:
 
-- Deploy from the `main` branch of `gzaentz/koinonikos`.
+- Deploy from the `main` branch of `gzaentz/koinoniko`.
 - Add a Railway Volume and mount it at `/app/data`.
 - Set `SOCIAL_BRAIN_DB=/app/data/social_brain.sqlite3`.
 - Keep service replicas at `1` while using SQLite.
@@ -195,7 +195,7 @@ SQLite notes for Railway:
 - Do not write or initialize the DB during build or pre-deploy steps; Railway volumes are mounted at runtime.
 - Opening the app safely runs schema creation/migrations at runtime.
 - Run `python -m leadpoet_social_brain.cli init` once after deploy if you need the default context/pattern seed data.
-- Run `python -m leadpoet_social_brain.cli set-web-login --username gavinz444` once against the mounted volume to store the web login.
+- Run `python -m leadpoet_social_brain.cli set-web-login --username gavinz444` once against the mounted volume to store the web login before using the public domain.
 - Do not add Postgres for v0.2.
 - Do not store API tokens in SQLite. Keep X/API tokens in Railway environment variables.
 
