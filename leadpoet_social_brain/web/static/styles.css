@@ -7,6 +7,9 @@
   --line: #e4e4e4;
   --soft: #f7f7f7;
   --white: #ffffff;
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-ui: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-accent: "Newsreader", Georgia, "Times New Roman", serif;
 }
 
 * {
@@ -17,7 +20,7 @@ body {
   margin: 0;
   color: var(--ink);
   background: var(--white);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-ui);
   line-height: 1.45;
 }
 
@@ -93,6 +96,7 @@ label {
   color: var(--muted);
   font-size: 12px;
   font-weight: 650;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
@@ -112,9 +116,17 @@ p {
   margin: 0;
 }
 
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.012em;
+}
+
 h1 {
   font-size: 30px;
   line-height: 1.05;
+  letter-spacing: -0.02em;
 }
 
 h2 {
@@ -166,8 +178,10 @@ a {
 .brand strong {
   display: block;
   color: var(--ink);
+  font-family: var(--font-display);
   font-size: 18px;
-  font-weight: 700;
+  font-weight: 500;
+  letter-spacing: -0.02em;
   line-height: 1;
   white-space: nowrap;
 }
@@ -294,10 +308,17 @@ main {
   display: block;
   color: var(--quiet);
   font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 0;
+  font-weight: 700;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   margin-bottom: 5px;
+}
+
+.serif-accent {
+  font-family: var(--font-accent);
+  font-style: italic;
+  font-weight: 420;
+  letter-spacing: 0;
 }
 
 .muted,
@@ -362,6 +383,7 @@ main {
   width: 100%;
   min-width: 1100px;
   border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
 }
 
 .posts-table th,
@@ -706,6 +728,7 @@ main {
 
 .detail-item strong {
   font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
 .full-text,
