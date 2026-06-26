@@ -1245,7 +1245,18 @@ function summarize(text, maxLength = 96) {
 }
 
 function label(value) {
-  return String(value || "").replaceAll("_", " ");
+  const acronyms = new Set(["ai", "api", "cta", "er", "llm", "url", "x"]);
+  return String(value || "")
+    .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => {
+      const normalized = word.toLowerCase();
+      if (acronyms.has(normalized)) return normalized.toUpperCase();
+      return `${normalized.slice(0, 1).toUpperCase()}${normalized.slice(1)}`;
+    })
+    .join(" ");
 }
 
 function qualityLabel(value) {
