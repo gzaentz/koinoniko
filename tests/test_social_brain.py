@@ -248,6 +248,7 @@ class SocialBrainTest(unittest.TestCase):
     def test_web_static_uses_logo_for_favicon_and_brand(self):
         static_dir = Path("leadpoet_social_brain/web/static")
         index_html = (static_dir / "index.html").read_text(encoding="utf-8")
+        app_js = (static_dir / "app.js").read_text(encoding="utf-8")
         favicon_svg = (static_dir / "koinoniko-favicon.svg").read_text(encoding="utf-8")
 
         self.assertTrue((static_dir / "koinoniko-logo.svg").exists())
@@ -262,6 +263,16 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn("<strong>Koinoniko</strong>", index_html)
         self.assertNotIn("<span>Leadpoet</span>", index_html)
         self.assertNotIn("<strong>Social Brain</strong>", index_html)
+        self.assertIn('data-view="dashboard">Dashboard</button>', index_html)
+        self.assertIn('data-view="reviewer">Content Reviewer</button>', index_html)
+        self.assertIn('id="planModal"', index_html)
+        self.assertIn('id="trendsModal"', index_html)
+        self.assertIn("Improve with AI", app_js)
+        self.assertIn("Scheduled Content", index_html)
+        self.assertNotIn("AI Edit Panel", index_html)
+        self.assertNotIn("Weekly Planner", index_html)
+        self.assertNotIn("Content Queue", index_html)
+        self.assertNotIn('id="analyticsView"', index_html)
 
     def test_openrouter_provider_uses_env_and_parses_variants(self):
         captured: dict[str, object] = {}

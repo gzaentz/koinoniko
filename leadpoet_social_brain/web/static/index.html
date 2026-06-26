@@ -14,11 +14,7 @@
       </div>
       <nav>
         <button class="nav-button active" data-view="dashboard">Dashboard</button>
-        <button class="nav-button" data-view="queue">Content Queue</button>
-        <button class="nav-button" data-view="edit">AI Edit Panel</button>
-        <button class="nav-button" data-view="planner">Weekly Planner</button>
-        <button class="nav-button" data-view="analytics">Analytics</button>
-        <button class="nav-button" data-view="trends">Trends</button>
+        <button class="nav-button" data-view="reviewer">Content Reviewer</button>
       </nav>
       <div class="status-block" id="statusBlock"></div>
       <form class="logout-form" method="post" action="/logout">
@@ -30,129 +26,137 @@
       <header class="topbar">
         <div>
           <h1 id="viewTitle">Dashboard</h1>
-          <p id="viewMeta">Local review and posting queue</p>
+          <p id="viewMeta">What needs attention, what is scheduled, and what is working.</p>
         </div>
         <div class="actions">
-          <button id="refreshButton">Refresh</button>
-          <button id="syncMetricsButton">Sync Metrics</button>
-          <button id="publishDueButton">Post Due</button>
+          <button id="createPlanButton">Create Weekly Plan</button>
+          <button class="secondary" id="syncMetricsButton">Sync Metrics</button>
+          <button class="secondary hidden" id="publishDueButton">Post Due</button>
         </div>
       </header>
 
       <section id="message" class="message hidden"></section>
 
       <section class="view active" id="dashboardView">
-        <div class="summary-grid" id="summaryGrid"></div>
-        <div class="two-column">
-          <section class="panel">
+        <div class="summary-grid" id="dashboardCards"></div>
+
+        <div class="dashboard-grid">
+          <section class="panel attention-panel">
             <div class="panel-header">
-              <h2>Due Now</h2>
+              <div>
+                <span class="eyebrow">Attention</span>
+                <h2>Needs Review</h2>
+              </div>
             </div>
-            <div id="dueList" class="stack"></div>
+            <div id="attentionList" class="stack"></div>
           </section>
-          <section class="panel">
+
+          <section class="panel schedule-panel">
             <div class="panel-header">
-              <h2>Signals</h2>
+              <div>
+                <span class="eyebrow">Schedule</span>
+                <h2>Next Up</h2>
+              </div>
             </div>
-            <div id="hintList" class="stack"></div>
+            <div id="scheduleSnapshot" class="stack"></div>
+          </section>
+
+          <section class="panel signal-panel">
+            <div class="panel-header">
+              <div>
+                <span class="eyebrow">Performance</span>
+                <h2>What Is Working</h2>
+              </div>
+              <button class="quiet-button" id="toggleAnalyticsButton">View details</button>
+            </div>
+            <div id="signalList" class="signal-list"></div>
+            <div id="bestPost" class="best-post"></div>
+            <div id="analyticsDetails" class="details-panel hidden"></div>
           </section>
         </div>
       </section>
 
-      <section class="view" id="queueView">
-        <div class="toolbar">
-          <label>
-            Status
-            <select id="queueStatus">
-              <option value="">All</option>
-              <option value="needs_review" selected>Needs review</option>
-              <option value="approved">Approved</option>
-              <option value="posted">Posted</option>
-              <option value="skipped">Skipped</option>
-              <option value="failed">Failed</option>
+      <section class="view" id="reviewerView">
+        <div class="reviewer-intro">
+          <div>
+            <span class="eyebrow">Workflow</span>
+            <h2>Review, improve, approve, schedule.</h2>
+          </div>
+          <div class="actions">
+            <button id="createPlanReviewerButton">Create Weekly Plan</button>
+            <button class="secondary" id="openTrendsButton">Trends</button>
+          </div>
+        </div>
+
+        <div class="board">
+          <section class="board-column">
+            <div class="board-header">
+              <h2>To Review</h2>
+              <span id="reviewCount" class="count-pill">0</span>
+            </div>
+            <div id="reviewList" class="card-list"></div>
+          </section>
+
+          <section class="board-column">
+            <div class="board-header">
+              <h2>Scheduled Content</h2>
+              <span id="scheduledCount" class="count-pill">0</span>
+            </div>
+            <div id="scheduledList" class="card-list"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <section class="modal hidden" id="planModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="planModal"></div>
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <span class="eyebrow">Planning</span>
+            <h2>Create Weekly Plan</h2>
+          </div>
+          <button class="icon-button" data-close-modal="planModal" aria-label="Close">x</button>
+        </div>
+        <div class="form-grid">
+          <label>Week start<input id="planWeekStart" type="date"></label>
+          <label>Posts<input id="planPosts" type="number" min="1" max="14" value="5"></label>
+          <label>Topic mix<input id="planTopicMix" value="sales LLMs:3,Bittensor:2"></label>
+          <label>Post type<input id="planPostType" value="founder_insight"></label>
+          <label>Cadence
+            <select id="planCadence">
+              <option value="weekday_mornings">Weekday mornings</option>
+              <option value="daily_mornings">Daily mornings</option>
             </select>
           </label>
-          <button id="loadQueueButton">Load Queue</button>
         </div>
-        <div id="queueList" class="queue-list"></div>
-      </section>
-
-      <section class="view" id="editView">
-        <div class="two-column edit-grid">
-          <section class="panel">
-            <div class="panel-header">
-              <h2>Queued Post</h2>
-            </div>
-            <label>
-              Queue ID
-              <input id="editQueueId" placeholder="Select a post or paste an id">
-            </label>
-            <button id="loadEditButton">Load</button>
-            <textarea id="editText" rows="10" placeholder="Queued post text"></textarea>
-            <div class="form-grid">
-              <label>Topic<input id="editTopic"></label>
-              <label>Post type<input id="editPostType"></label>
-              <label>Scheduled<input id="editScheduled"></label>
-              <label>Status<input id="editStatus"></label>
-            </div>
-            <label>Notes<textarea id="editNotes" rows="4"></textarea></label>
-            <div class="actions left">
-              <button id="saveEditButton">Save</button>
-              <button id="approveEditButton">Approve</button>
-              <button id="skipEditButton">Skip</button>
-              <button id="postNowEditButton">Post Now</button>
-            </div>
-          </section>
-          <section class="panel">
-            <div class="panel-header">
-              <h2>AI Revision</h2>
-            </div>
-            <label>
-              Instruction
-              <textarea id="revisionInstruction" rows="5" placeholder="Make it sharper and more specific to sales teams evaluating AI SDR tools."></textarea>
-            </label>
-            <button id="reviseButton">Generate Revisions</button>
-            <div id="revisionList" class="stack"></div>
-          </section>
-        </div>
-      </section>
-
-      <section class="view" id="plannerView">
-        <section class="panel planner-panel">
-          <div class="panel-header">
-            <h2>Weekly Planner</h2>
-          </div>
-          <div class="form-grid">
-            <label>Week start<input id="planWeekStart" type="date"></label>
-            <label>Posts<input id="planPosts" type="number" min="1" max="14" value="5"></label>
-            <label>Topic mix<input id="planTopicMix" value="sales LLMs:3,Bittensor:2"></label>
-            <label>Post type<input id="planPostType" value="founder_insight"></label>
-            <label>Cadence
-              <select id="planCadence">
-                <option value="weekday_mornings">Weekday mornings</option>
-                <option value="daily_mornings">Daily mornings</option>
-              </select>
-            </label>
-            <label>Trend window<input id="planTrendWindow" type="number" min="1" value="14"></label>
-          </div>
+        <div class="option-row">
           <label class="inline-check"><input id="planUseTrends" type="checkbox"> Use trends</label>
           <label class="inline-check"><input id="planAllowEvergreen" type="checkbox" checked> Allow evergreen</label>
-          <button id="planWeekButton">Create Queue</button>
-          <div id="planResult" class="stack"></div>
-        </section>
-      </section>
+        </div>
+        <label>Optional instruction<textarea id="planInstruction" rows="3" placeholder="Example: make the sales posts sharper and more founder-led."></textarea></label>
+        <div class="modal-actions">
+          <button id="planWeekButton">Create Plan</button>
+          <button class="secondary" id="manageTrendsFromPlanButton">Manage Trends</button>
+          <button class="quiet-button" data-close-modal="planModal">Cancel</button>
+        </div>
+        <div id="planResult" class="stack"></div>
+      </div>
+    </section>
 
-      <section class="view" id="analyticsView">
-        <div id="analyticsHints" class="stack"></div>
-        <div class="analytics-grid" id="analyticsGrid"></div>
-      </section>
-
-      <section class="view" id="trendsView">
+    <section class="modal hidden" id="trendsModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="trendsModal"></div>
+      <div class="modal-card wide">
+        <div class="modal-header">
+          <div>
+            <span class="eyebrow">Context</span>
+            <h2>Trends</h2>
+          </div>
+          <button class="icon-button" data-close-modal="trendsModal" aria-label="Close">x</button>
+        </div>
         <div class="two-column">
-          <section class="panel">
-            <div class="panel-header">
-              <h2>Add Trend</h2>
-            </div>
+          <section class="subsection">
+            <h3>Add Trend</h3>
             <label>Title<input id="trendTitle"></label>
             <div class="form-grid">
               <label>Topic<input id="trendTopic" value="sales LLMs"></label>
@@ -164,40 +168,23 @@
                   <option>low</option>
                 </select>
               </label>
-              <label>Status
-                <select id="trendStatus">
-                  <option>unused</option>
-                  <option>used</option>
-                  <option>skipped</option>
-                </select>
-              </label>
             </div>
             <label>Source URL<input id="trendSourceUrl"></label>
             <label>Summary<textarea id="trendSummary" rows="3"></textarea></label>
             <label>Why it matters<textarea id="trendWhy" rows="3"></textarea></label>
-            <label>Leadpoet angle<textarea id="trendAngle" rows="3"></textarea></label>
+            <label>Koinoniko angle<textarea id="trendAngle" rows="3"></textarea></label>
             <button id="addTrendButton">Add Trend</button>
           </section>
-          <section class="panel">
+          <section class="subsection">
             <div class="panel-header">
-              <h2>Trend List</h2>
-            </div>
-            <div class="toolbar">
-              <label>Status
-                <select id="trendFilterStatus">
-                  <option value="unused">Unused</option>
-                  <option value="">All</option>
-                  <option value="used">Used</option>
-                  <option value="skipped">Skipped</option>
-                </select>
-              </label>
-              <button id="loadTrendsButton">Load Trends</button>
+              <h3>Unused Trends</h3>
+              <button class="quiet-button" id="loadTrendsButton">Refresh</button>
             </div>
             <div id="trendList" class="stack"></div>
           </section>
         </div>
-      </section>
-    </main>
+      </div>
+    </section>
 
     <script src="/static/app.js"></script>
   </body>
