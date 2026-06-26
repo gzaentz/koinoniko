@@ -86,7 +86,7 @@ class OpenRouterProvider:
 def create_provider() -> OpenRouterProvider:
     return OpenRouterProvider(
         api_key=os.getenv("OPENROUTER_API_KEY", ""),
-        model=os.getenv("OPENROUTER_MODEL", ""),
+        model=os.getenv("SOCIAL_BRAIN_MODEL") or os.getenv("OPENROUTER_MODEL", ""),
         base_url=os.getenv("OPENROUTER_API_URL", OPENROUTER_API_URL),
         temperature=float(os.getenv("OPENROUTER_TEMPERATURE", "0.8")),
         max_tokens=int(os.getenv("OPENROUTER_MAX_TOKENS", "1200")),

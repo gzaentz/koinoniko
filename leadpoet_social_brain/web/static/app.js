@@ -8,6 +8,8 @@ const state = {
   revisingQueueId: "",
   itemDetails: {},
   analyticsOpen: false,
+  status: null,
+  account: null,
 };
 
 const views = {
@@ -18,6 +20,10 @@ const views = {
   reviewer: {
     title: "Content Reviewer",
     meta: "Review, improve, approve, and schedule X posts.",
+  },
+  account: {
+    title: "Account",
+    meta: "Settings, model choice, and connection status.",
   },
 };
 
@@ -96,18 +102,16 @@ async function refresh() {
     if (state.view === "reviewer") {
       await loadReviewer();
     }
+    if (state.view === "account") {
+      await loadAccount();
+    }
   } catch (error) {
     showMessage(error.message, true);
   }
 }
 
 async function loadStatus() {
-  const status = await api("/api/status");
-  $("statusBlock").innerHTML = `
-    <div class="status-pill"><span>Provider</span><strong>${status.provider_configured ? "set" : "missing"}</strong></div>
-    <div class="status-pill"><span>X read</span><strong>${status.x_read_configured ? "set" : "missing"}</strong></div>
-    <div class="status-pill"><span>X write</span><strong>${status.x_write_configured ? "set" : "missing"}</strong></div>
-  `;
+  state.status = await api("/api/status");
 }
 
 async function loadDashboardData() {
@@ -137,6 +141,11 @@ async function loadReviewer() {
 
 async function loadAnalytics() {
   state.analytics = await api("/api/analytics");
+}
+
+async function loadAccount() {
+  state.account = await api("/api/account");
+  renderAccount();
 }
 
 function updateDueButton() {
@@ -264,6 +273,63 @@ function renderReviewer() {
   $("scheduledList").innerHTML = state.scheduledItems.length
     ? state.scheduledItems.map((item) => queueCard(item, "scheduled")).join("")
     : emptyState("No approved posts scheduled yet.");
+}
+
+function renderAccount() {
+  const account = state.account || {};
+  const status = account.status || state.status || {};
+  const settings = account.settings || {};
+  $("accountStatusGrid").innerHTML = [
+    statusCard(
+      "Provider",
+      status.provider_configured,
+      status.provider_path || "Set SOCIAL_BRAIN_PROVIDER in Railway variables."
+    ),
+    statusCard(
+      "OpenRouter key",
+      status.openrouter_api_key_configured,
+      status.openrouter_api_key_configured
+        ? "OPENROUTER_API_KEY is available to the app."
+        : "Set OPENROUTER_API_KEY in Railway variables."
+    ),
+    statusCard(
+      "Model",
+      Boolean(status.llm_model),
+      status.llm_model
+        ? `${status.llm_model} (${status.llm_model_source})`
+        : "Save a model here, or set OPENROUTER_MODEL."
+    ),
+    statusCard(
+      "X read",
+      status.x_read_configured,
+      status.x_read_configured
+        ? "X_BEARER_TOKEN is available for imports and metric sync."
+        : "Missing X_BEARER_TOKEN. Add it in Railway variables to import posts and sync metrics."
+    ),
+    statusCard(
+      "X write",
+      status.x_write_configured,
+      status.x_write_configured
+        ? "X write credentials are available for posting."
+        : "Missing write auth. Set X_OAUTH2_ACCESS_TOKEN, or OAuth 1.0a key/secret/token/token secret."
+    ),
+  ].join("");
+  $("accountModel").value = settings.llm_model || status.llm_model || "";
+  $("accountModelMeta").textContent = settings.llm_model
+    ? `Saved in account settings. Effective model: ${settings.effective_llm_model || settings.llm_model}.`
+    : "Model is saved to SQLite. API keys stay in Railway variables.";
+}
+
+function statusCard(title, configured, detail) {
+  return `
+    <article class="account-card">
+      <div>
+        <span>${escapeHtml(title)}</span>
+        <strong>${configured ? "set" : "missing"}</strong>
+      </div>
+      <p>${escapeHtml(detail)}</p>
+    </article>
+  `;
 }
 
 function queueCard(item, column) {
@@ -538,6 +604,17 @@ async function addTrend() {
   await loadTrends();
 }
 
+async function saveAccount() {
+  state.account = await api("/api/account", {
+    method: "PATCH",
+    body: JSON.stringify({
+      llm_model: $("accountModel").value,
+    }),
+  });
+  renderAccount();
+  showMessage("Account settings saved.");
+}
+
 async function syncMetrics() {
   const payload = await api("/api/sync-metrics", {
     method: "POST",
@@ -630,6 +707,7 @@ function setup() {
   $("manageTrendsFromPlanButton").addEventListener("click", () => window.openTrendsModal().catch((error) => showMessage(error.message, true)));
   $("loadTrendsButton").addEventListener("click", () => loadTrends().catch((error) => showMessage(error.message, true)));
   $("addTrendButton").addEventListener("click", () => addTrend().catch((error) => showMessage(error.message, true)));
+  $("saveAccountButton").addEventListener("click", () => saveAccount().catch((error) => showMessage(error.message, true)));
   $("toggleAnalyticsButton").addEventListener("click", () => {
     state.analyticsOpen = !state.analyticsOpen;
     $("toggleAnalyticsButton").textContent = state.analyticsOpen ? "Hide details" : "View details";

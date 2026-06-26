@@ -159,22 +159,24 @@ The command prompts for the password and stores only a salted PBKDF2 hash in the
 
 The UI supports:
 
-- dashboard status, queue counts, due posts, and analytics hints
-- content queue review, edit, approve, skip, and approved-only post-now
-- AI revisions for queued posts through the configured provider
+- a focused Dashboard for attention, schedule, and performance signals
+- a Content Reviewer board for review, edit, approve, skip, schedule, and approved-only post-now
+- an Account page for connection status and model selection
+- inline AI revisions for queued posts through the configured provider
 - accepting a revision without auto-approval
-- weekly queue planning
-- analytics views
-- trend add/list workflow
+- weekly queue planning from a modal
+- analytics details behind a Dashboard disclosure
+- trend add/list workflow from a modal
 - manual X metrics sync
 
 Generation and AI editing require a provider. For OpenRouter:
 
 ```bash
 OPENROUTER_API_KEY="<your OpenRouter key>"
-OPENROUTER_MODEL="<any OpenRouter model slug>"
 SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider"
 ```
+
+Set the model in the web UI under `Account -> OpenRouter model`. You can still set `OPENROUTER_MODEL` as an environment fallback, but the Account setting wins when saved.
 
 Posting to X requires write credentials. Read-only X import and metric sync use `X_BEARER_TOKEN`; posting needs either `X_OAUTH2_ACCESS_TOKEN` or OAuth 1.0a keys. The UI does not auto-post or auto-approve anything.
 
@@ -199,7 +201,8 @@ Required Railway settings:
 - Set `SOCIAL_BRAIN_DB=/app/data/social_brain.sqlite3`, or rely on Railway's automatic `RAILWAY_VOLUME_MOUNT_PATH=/app/data` variable.
 - Keep service replicas at `1` while using SQLite.
 - Set `X_BEARER_TOKEN` if you want X import and metric sync.
-- Set `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, and `SOCIAL_BRAIN_PROVIDER=leadpoet_social_brain.openrouter_provider:create_provider` before using generation, planning, or AI edits.
+- Set `OPENROUTER_API_KEY` and `SOCIAL_BRAIN_PROVIDER=leadpoet_social_brain.openrouter_provider:create_provider` before using generation, planning, or AI edits.
+- Set the OpenRouter model from the hosted app's Account page. `OPENROUTER_MODEL` remains available as an environment fallback.
 - Set X write credentials only if you want approved posts to be posted from Railway.
 - Optional: set `SOCIAL_BRAIN_TASK_TOKEN` if you want an external cron service to trigger hosted task endpoints.
 
@@ -230,11 +233,12 @@ For a new hosted database:
 7. Run `sync-x-user --auto-categorize` or import posts another way.
 8. Use `update-post-notes` to mark strongest examples with `imitate=true`.
 9. Run `rebuild-style-guide`.
-10. Set `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, and `SOCIAL_BRAIN_PROVIDER`.
-11. Add trends if you want timely planning context.
-12. Plan the week, review/edit, then approve only posts you are ready to publish.
-13. Set X write auth before posting from the hosted app.
-14. Set `SOCIAL_BRAIN_TASK_TOKEN` only if an external scheduler will call task endpoints.
+10. Set `OPENROUTER_API_KEY` and `SOCIAL_BRAIN_PROVIDER`.
+11. Open Account in the web UI and save the OpenRouter model.
+12. Add trends if you want timely planning context.
+13. Plan the week, review/edit, then approve only posts you are ready to publish.
+14. Set X write auth before posting from the hosted app.
+15. Set `SOCIAL_BRAIN_TASK_TOKEN` only if an external scheduler will call task endpoints.
 
 ## Hosted Task Triggers
 
@@ -321,8 +325,9 @@ python3 -m leadpoet_social_brain.cli --db /private/tmp/social_brain_demo.sqlite3
 
 ```bash
 export OPENROUTER_API_KEY="<your OpenRouter key>"
-export OPENROUTER_MODEL="<any OpenRouter model slug>"
 export SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider"
+# Optional CLI fallback if no model is saved in Account:
+# export OPENROUTER_MODEL="<any OpenRouter model slug>"
 
 python3 -m leadpoet_social_brain.cli --db /private/tmp/social_brain_demo.sqlite3 generate-x \
   --topic "sales LLMs" \
@@ -434,8 +439,9 @@ Configure OpenRouter before generating:
 
 ```bash
 export OPENROUTER_API_KEY="<your OpenRouter key>"
-export OPENROUTER_MODEL="<any OpenRouter model slug>"
 export SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider"
+# Optional CLI fallback if no model is saved in Account:
+# export OPENROUTER_MODEL="<any OpenRouter model slug>"
 ```
 
 Generate standalone X drafts:
@@ -625,8 +631,9 @@ For LLM categorization, also configure your generation provider. With OpenRouter
 
 ```bash
 export OPENROUTER_API_KEY="<your OpenRouter key>"
-export OPENROUTER_MODEL="<any OpenRouter model slug>"
 export SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider"
+# Optional CLI fallback if no model is saved in Account:
+# export OPENROUTER_MODEL="<any OpenRouter model slug>"
 ```
 
 Run a dry run first:
@@ -820,8 +827,9 @@ Generate drafts:
 
 ```bash
 export OPENROUTER_API_KEY="<your OpenRouter key>"
-export OPENROUTER_MODEL="<any OpenRouter model slug>"
 export SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider"
+# Optional CLI fallback if no model is saved in Account:
+# export OPENROUTER_MODEL="<any OpenRouter model slug>"
 
 python3 -m leadpoet_social_brain.cli generate-x \
   --topic "sales LLMs" \
@@ -942,9 +950,10 @@ OpenRouter support is built in. Set:
 
 ```bash
 export OPENROUTER_API_KEY="<your OpenRouter key>"
-export OPENROUTER_MODEL="<any OpenRouter model slug>"
 export SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider"
 ```
+
+Then save the model slug in the web UI under `Account -> OpenRouter model`. If a model is saved there, it overrides `OPENROUTER_MODEL`. If no model is saved, `OPENROUTER_MODEL` is still used as a fallback.
 
 Examples of model slugs might look like:
 

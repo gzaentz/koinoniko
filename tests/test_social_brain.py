@@ -28,6 +28,7 @@ from leadpoet_social_brain.platforms.x_api import (
     sync_x_metrics,
     sync_x_user_posts,
 )
+from leadpoet_social_brain.providers import load_provider_from_env
 from leadpoet_social_brain.skills import generation_skills, load_skill
 from leadpoet_social_brain.storage.sqlite_store import (
     DB_ENV_VAR,
@@ -266,10 +267,15 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn("<strong>Social Brain</strong>", index_html)
         self.assertIn('data-view="dashboard">Dashboard</button>', index_html)
         self.assertIn('data-view="reviewer">Content Reviewer</button>', index_html)
+        self.assertIn('data-view="account">Account</button>', index_html)
+        self.assertIn('id="accountView"', index_html)
+        self.assertIn('id="accountModel"', index_html)
         self.assertIn('id="planModal"', index_html)
         self.assertIn('id="trendsModal"', index_html)
         self.assertIn("Improve with AI", app_js)
+        self.assertIn("saveAccount", app_js)
         self.assertIn("Scheduled Content", index_html)
+        self.assertNotIn('id="statusBlock"', index_html)
         self.assertNotIn("AI Edit Panel", index_html)
         self.assertNotIn("Weekly Planner", index_html)
         self.assertNotIn("Content Queue", index_html)
@@ -337,6 +343,22 @@ class SocialBrainTest(unittest.TestCase):
         with patch.dict(os.environ, {"OPENROUTER_API_KEY": "", "OPENROUTER_MODEL": ""}, clear=False):
             with self.assertRaises(ValueError):
                 create_provider()
+
+    def test_provider_loader_uses_saved_model_override(self):
+        with patch.dict(
+            os.environ,
+            {
+                "SOCIAL_BRAIN_PROVIDER": "leadpoet_social_brain.openrouter_provider:create_provider",
+                "OPENROUTER_API_KEY": "test-key",
+                "OPENROUTER_MODEL": "openai/gpt-4.1-mini",
+                "SOCIAL_BRAIN_MODEL": "",
+            },
+            clear=False,
+        ):
+            provider = load_provider_from_env(model_override="anthropic/claude-sonnet-4.5")
+            self.assertEqual(os.environ.get("SOCIAL_BRAIN_MODEL"), "")
+
+        self.assertEqual(provider.model, "anthropic/claude-sonnet-4.5")
 
     def test_skill_files_load_correctly(self):
         skill = load_skill("global_voice.md")
@@ -947,6 +969,38 @@ class SocialBrainTest(unittest.TestCase):
             for key in ["by_post_type", "by_topic", "by_hook", "by_structure", "by_tone", "by_cta", "by_formatting", "hints"]:
                 self.assertIn(key, payload)
             self.assertEqual(payload["by_hook"][0]["key"], "specific_observation")
+
+    def test_web_account_saves_model_and_reports_x_status(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            env = {
+                "SOCIAL_BRAIN_PROVIDER": "leadpoet_social_brain.openrouter_provider:create_provider",
+                "OPENROUTER_API_KEY": "test-key",
+                "OPENROUTER_MODEL": "openai/gpt-4.1-mini",
+            }
+            with patch.dict(os.environ, env, clear=True):
+                status, saved = handle_api_request(
+                    "PATCH",
+                    "/api/account",
+                    json.dumps({"llm_model": "anthropic/claude-sonnet-4.5"}),
+                    db_path=db_path,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(saved["settings"]["llm_model"], "anthropic/claude-sonnet-4.5")
+                self.assertEqual(saved["status"]["llm_model_source"], "account")
+                self.assertFalse(saved["status"]["x_read_configured"])
+                self.assertEqual(saved["status"]["x_read_env_var"], "X_BEARER_TOKEN")
+                self.assertFalse(saved["status"]["x_write_configured"])
+                self.assertIn("X_OAUTH2_ACCESS_TOKEN", saved["status"]["x_write_env_vars"])
+
+                status, account = handle_api_request("GET", "/api/account", db_path=db_path)
+
+            self.assertEqual(status, 200)
+            self.assertEqual(account["settings"]["effective_llm_model"], "anthropic/claude-sonnet-4.5")
+
+            store = SQLiteStore(db_path)
+            self.assertEqual(store.get_app_setting("llm_model"), "anthropic/claude-sonnet-4.5")
+            store.close()
 
     def test_web_missing_provider_blocks_ai_edit(self):
         with tempfile.TemporaryDirectory() as tmpdir:

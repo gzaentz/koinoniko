@@ -234,6 +234,12 @@ class SQLiteStore:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             """
         )
         self._migrate_existing_schema()
@@ -487,6 +493,33 @@ class SQLiteStore:
             iterations=user.iterations,
         )
         return hmac.compare_digest(candidate_hash, user.password_hash)
+
+    def get_app_setting(self, key: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?",
+            (key.strip(),),
+        ).fetchone()
+        return str(row["value"]) if row else None
+
+    def save_app_setting(self, key: str, value: str | None) -> None:
+        clean_key = key.strip()
+        if not clean_key:
+            raise ValueError("Setting key is required.")
+        clean_value = str(value or "").strip()
+        if not clean_value:
+            self.conn.execute("DELETE FROM app_settings WHERE key = ?", (clean_key,))
+        else:
+            self.conn.execute(
+                """
+                INSERT INTO app_settings (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at
+                """,
+                (clean_key, clean_value, utc_now()),
+            )
+        self.conn.commit()
 
     def _ensure_column(self, table: str, column: str, ddl: str) -> None:
         rows = self.conn.execute(f"PRAGMA table_info({table})").fetchall()

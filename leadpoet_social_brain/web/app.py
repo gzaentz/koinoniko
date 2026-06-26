@@ -59,6 +59,7 @@ STATIC_DIR = Path(__file__).with_name("static")
 JSON_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
 AUTH_COOKIE_SECURE_ENV = "SOCIAL_BRAIN_AUTH_COOKIE_SECURE"
 TASK_TOKEN_ENV = "SOCIAL_BRAIN_TASK_TOKEN"
+LLM_MODEL_SETTING = "llm_model"
 DEFAULT_AUTH_USERNAME = DEFAULT_WEB_AUTH_USERNAME
 SESSION_COOKIE = "social_brain_session"
 SESSION_TTL_SECONDS = 60 * 60 * 12
@@ -460,7 +461,12 @@ def route_api(
         return 404, {"error": "Not found."}
 
     if method == "GET" and parts == ["api", "status"]:
-        return 200, status_payload()
+        return 200, status_payload(store)
+    if method == "GET" and parts == ["api", "account"]:
+        return 200, account_payload(store)
+    if method == "PATCH" and parts == ["api", "account"]:
+        store.save_app_setting(LLM_MODEL_SETTING, clean_optional(payload.get("llm_model")))
+        return 200, account_payload(store)
     if method == "GET" and parts == ["api", "dashboard"]:
         return 200, dashboard_payload(store)
     if method == "GET" and parts == ["api", "queue"]:
@@ -490,7 +496,7 @@ def route_api(
         status = 200 if result.error is None else 400
         return status, {"result": publish_result_payload(result)}
     if method == "POST" and len(parts) == 4 and parts[:2] == ["api", "queue"] and parts[3] == "revise":
-        provider = load_provider_from_env()
+        provider = load_configured_provider(store)
         if not provider:
             raise ValueError(MISSING_PROVIDER_MESSAGE)
         versions = revise_queued_post(
@@ -505,7 +511,7 @@ def route_api(
         item = accept_queued_post_version(store, version_id=parts[4])
         return 200, {"item": queue_item_payload(store, item, include_versions=True)}
     if method == "POST" and parts == ["api", "plan-week"]:
-        provider = load_provider_from_env()
+        provider = load_configured_provider(store)
         if not provider:
             raise ValueError(MISSING_PROVIDER_MESSAGE)
         generator = SocialBrainGenerator(store, provider=provider)
@@ -593,7 +599,7 @@ def sync_x_user_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str
     auto_categorize = bool(payload.get("auto_categorize", False))
     categorizer = None
     if auto_categorize:
-        provider = load_provider_from_env()
+        provider = load_configured_provider(store)
         if not provider:
             raise ValueError(MISSING_PROVIDER_MESSAGE)
         categorizer = XPostLLMCategorizer(provider).categorize
@@ -717,7 +723,7 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
     ][:10]
     analytics = build_analytics_summary(store)
     return {
-        "status": status_payload(),
+        "status": status_payload(store),
         "queue_counts": counts,
         "due": [queue_item_payload(store, item) for item in due],
         "recent_queue": [queue_item_payload(store, item) for item in queue[:10]],
@@ -726,13 +732,57 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
     }
 
 
-def status_payload() -> dict[str, Any]:
+def status_payload(store: SQLiteStore | None = None) -> dict[str, Any]:
+    model = configured_llm_model(store)
+    saved_model = store.get_app_setting(LLM_MODEL_SETTING) if store else None
+    if saved_model:
+        model_source = "account"
+    elif os.getenv("SOCIAL_BRAIN_MODEL"):
+        model_source = "SOCIAL_BRAIN_MODEL"
+    elif os.getenv("OPENROUTER_MODEL"):
+        model_source = "OPENROUTER_MODEL"
+    else:
+        model_source = "missing"
     return {
         "provider_configured": bool(os.getenv("SOCIAL_BRAIN_PROVIDER")),
+        "provider_path": os.getenv("SOCIAL_BRAIN_PROVIDER") or "",
+        "openrouter_api_key_configured": bool(os.getenv("OPENROUTER_API_KEY")),
+        "llm_model": model or "",
+        "llm_model_source": model_source,
         "x_read_configured": bool(os.getenv("X_BEARER_TOKEN")),
+        "x_read_env_var": "X_BEARER_TOKEN",
         "x_write_configured": has_x_write_credentials(),
+        "x_write_env_vars": [
+            "X_OAUTH2_ACCESS_TOKEN",
+            "or X_API_KEY + X_API_SECRET + X_ACCESS_TOKEN + X_ACCESS_TOKEN_SECRET",
+        ],
         "task_trigger_configured": bool(os.getenv(TASK_TOKEN_ENV)),
     }
+
+
+def account_payload(store: SQLiteStore) -> dict[str, Any]:
+    return {
+        "status": status_payload(store),
+        "settings": {
+            "llm_model": store.get_app_setting(LLM_MODEL_SETTING) or "",
+            "effective_llm_model": configured_llm_model(store) or "",
+        },
+    }
+
+
+def configured_llm_model(store: SQLiteStore | None = None) -> str | None:
+    if store:
+        saved = clean_optional(store.get_app_setting(LLM_MODEL_SETTING))
+        if saved:
+            return saved
+    return (
+        clean_optional(os.getenv("SOCIAL_BRAIN_MODEL"))
+        or clean_optional(os.getenv("OPENROUTER_MODEL"))
+    )
+
+
+def load_configured_provider(store: SQLiteStore) -> Any:
+    return load_provider_from_env(model_override=configured_llm_model(store))
 
 
 def analytics_payload(store: SQLiteStore) -> dict[str, Any]:

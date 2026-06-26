@@ -42,6 +42,8 @@ from leadpoet_social_brain.platforms.x_api import (
 from leadpoet_social_brain.providers import load_provider_from_env
 from leadpoet_social_brain.storage.sqlite_store import DEFAULT_DB_PATH, DEFAULT_WEB_AUTH_USERNAME, SQLiteStore
 
+LLM_MODEL_SETTING = "llm_model"
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
@@ -364,7 +366,7 @@ def cmd_sync_x_user(store: SQLiteStore, args: argparse.Namespace) -> int:
         client = XApiClient.from_env()
         categorizer = None
         if args.auto_categorize:
-            provider = load_provider_from_env()
+            provider = load_configured_provider(store)
             if not provider:
                 raise SystemExit(MISSING_PROVIDER_MESSAGE)
             categorizer = XPostLLMCategorizer(provider).categorize
@@ -551,7 +553,7 @@ def cmd_add_pattern(store: SQLiteStore, args: argparse.Namespace) -> int:
 
 
 def cmd_generate_x(store: SQLiteStore, args: argparse.Namespace) -> int:
-    provider = load_provider_from_env()
+    provider = load_configured_provider(store)
     if not provider:
         raise SystemExit(MISSING_PROVIDER_MESSAGE)
     generator = SocialBrainGenerator(store, provider=provider)
@@ -577,7 +579,7 @@ def cmd_generate_x(store: SQLiteStore, args: argparse.Namespace) -> int:
 
 
 def cmd_plan_week_x(store: SQLiteStore, args: argparse.Namespace) -> int:
-    provider = load_provider_from_env()
+    provider = load_configured_provider(store)
     if not provider:
         raise SystemExit(MISSING_PROVIDER_MESSAGE)
     generator = SocialBrainGenerator(store, provider=provider)
@@ -942,6 +944,10 @@ def print_counter(counter) -> None:
         return
     for key, count in counter.most_common(5):
         print(f"- {key}: {count}")
+
+
+def load_configured_provider(store: SQLiteStore):
+    return load_provider_from_env(model_override=store.get_app_setting(LLM_MODEL_SETTING))
 
 
 def parse_bool_arg(value: str) -> bool:
