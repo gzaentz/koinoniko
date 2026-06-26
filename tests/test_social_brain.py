@@ -326,7 +326,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('data-view="dashboard">Dashboard</button>', index_html)
         self.assertIn('data-view="reviewer"', index_html)
         self.assertIn(">Queue</span>", index_html)
-        self.assertIn("<h2>Queue</h2>", index_html)
+        self.assertNotIn("<h2>Queue</h2>", index_html)
         self.assertIn('id="reviewNavBadge"', index_html)
         self.assertIn('data-view="account">Account</button>', index_html)
         self.assertIn('id="accountView"', index_html)
