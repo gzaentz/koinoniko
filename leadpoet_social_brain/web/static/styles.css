@@ -744,9 +744,8 @@ main {
   max-width: 1040px;
 }
 
-.account-section .panel-header p {
-  color: var(--muted);
-  margin-top: 4px;
+.account-section .panel-header {
+  margin-bottom: 18px;
 }
 
 .connection-list,
