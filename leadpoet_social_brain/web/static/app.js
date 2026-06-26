@@ -11,6 +11,8 @@ const state = {
   draggedQueueId: "",
   queueDetail: null,
   recentPostsSort: { key: "date", direction: "desc" },
+  autoRefreshedWebTrends: false,
+  webTrendsRefreshing: false,
 };
 
 const RECENT_POST_SORT_COLUMNS = {
@@ -212,7 +214,7 @@ function updateGlobalControls() {
     button.title = state.status?.x_write_configured ? "" : "X write auth is not connected.";
   });
 
-  [$("createPlanButton"), $("createPlanReviewerButton")].forEach((button) => {
+  [$("createPostButton"), $("createPostReviewerButton"), $("generatePostButton"), $("createPlanButton"), $("createPlanReviewerButton")].forEach((button) => {
     button.disabled = !state.status?.provider_configured;
     button.title = state.status?.provider_configured ? "" : "Provider-backed generation is not connected.";
   });
@@ -236,6 +238,7 @@ function renderDashboard() {
   renderDashboardTrends();
   renderSignals();
   renderDashboardSyncLine();
+  maybeAutoRefreshWebTrends();
 }
 
 function renderRecentPosts() {
@@ -383,10 +386,24 @@ window.openPostDetails = (id) => {
 };
 
 function renderDashboardTrends() {
-  const trends = state.dashboard?.trends || [];
-  $("dashboardTrendList").innerHTML = trends.length
-    ? trends.slice(0, 10).map(dashboardTrendRow).join("")
-    : `<p class="muted">No trends yet. Add or import trends to use them in weekly planning.</p>`;
+  const groups = state.dashboard?.trend_groups || {};
+  const daily = groups.daily || [];
+  const weekly = groups.weekly || [];
+  const content = [
+    dashboardTrendGroup("Top daily trends", daily),
+    dashboardTrendGroup("Top weekly trends", weekly),
+  ].filter(Boolean).join("");
+  $("dashboardTrendList").innerHTML = content || `<p class="muted">No web trends loaded yet. Refresh trends to pull current AI, sales, and lead generation signals.</p>`;
+}
+
+function dashboardTrendGroup(title, trends) {
+  if (!trends.length) return "";
+  return `
+    <section class="trend-group">
+      <h3>${escapeHtml(title)}</h3>
+      <div class="trend-group-list">${trends.slice(0, 5).map(dashboardTrendRow).join("")}</div>
+    </section>
+  `;
 }
 
 function dashboardTrendRow(item) {
@@ -410,13 +427,25 @@ function dashboardTrendRow(item) {
 }
 
 window.useTrendInPlan = (id) => {
-  const trend = (state.dashboard?.trends || []).find((item) => item.id === id);
+  const trend = dashboardTrendItems().find((item) => item.id === id);
   if (trend?.topic) {
     $("planTopicMix").value = `${trend.topic}:3,sales LLMs:2`;
   }
   $("planUseTrends").checked = true;
   openModal("planModal");
 };
+
+function dashboardTrendItems() {
+  const groups = state.dashboard?.trend_groups || {};
+  return [...(groups.daily || []), ...(groups.weekly || []), ...(state.dashboard?.trends || [])];
+}
+
+function maybeAutoRefreshWebTrends() {
+  if (state.view !== "dashboard" || state.autoRefreshedWebTrends || state.webTrendsRefreshing) return;
+  if (dashboardTrendItems().length) return;
+  state.autoRefreshedWebTrends = true;
+  refreshWebTrends({ silent: true }).catch(() => {});
+}
 
 function renderSignals() {
   const hints = (state.analytics?.hints || state.dashboard?.analytics_hints || []).slice(0, 5);
@@ -438,15 +467,17 @@ function renderReviewer() {
   $("scheduledCount").textContent = String(state.scheduledItems.length);
   $("reviewList").innerHTML = state.reviewItems.length
     ? state.reviewItems.map((item) => queueCard(item, "review")).join("")
-    : emptyState("No posts to review. Create a weekly plan to start.");
+    : reviewEmptyState();
   $("scheduledList").innerHTML = state.scheduledItems.length
     ? state.scheduledItems.map((item) => queueCard(item, "scheduled")).join("")
     : emptyState("No approved posts scheduled yet.");
 }
 
 function queueCard(item, column) {
-  const scheduled = formatDateTime(item.scheduled_at);
+  const scheduled = item.scheduled_at ? formatDateTime(item.scheduled_at) : "";
   const canPost = item.status === "approved" && state.status?.x_write_configured;
+  const quality = qualityLabel(item.quality_mode);
+  const trend = trendSummary(item);
   return `
     <article class="queue-card" draggable="true" ondragstart='dragQueue(event, ${jsArg(item.id)})'>
       <button class="card-open" onclick='openQueueDetail(${jsArg(item.id)})'>
@@ -454,10 +485,12 @@ function queueCard(item, column) {
           <span class="tag">${escapeHtml(label(item.status))}</span>
           <span>${escapeHtml(item.topic || "No topic")}</span>
           <span>${escapeHtml(label(item.post_type || "post"))}</span>
+          ${quality ? `<span>${escapeHtml(quality)}</span>` : ""}
+          ${trend ? `<span>${escapeHtml(trend)}</span>` : ""}
         </div>
-        <h3>${escapeHtml(summarize(item.text, 88))}</h3>
-        <p>${escapeHtml(item.reviewer_notes || item.angle || "Suggested from the current Social Brain context.")}</p>
-        <div class="schedule-line">${escapeHtml(scheduled || "Not scheduled")}</div>
+        <h3>${escapeHtml(item.focus || summarize(item.angle || item.text, 88))}</h3>
+        <p>${escapeHtml(summarize(item.text, 150))}</p>
+        <div class="schedule-line">${escapeHtml(scheduled ? `Scheduled ${scheduled}` : "Not scheduled")}</div>
       </button>
       <div class="card-actions">
         <button onclick='openQueueDetail(${jsArg(item.id)})'>Review / Edit</button>
@@ -520,7 +553,7 @@ function renderQueueModal() {
   if (!item) return;
   const canUseAI = Boolean(state.status?.provider_configured);
   const canPost = item.status === "approved" && Boolean(state.status?.x_write_configured);
-  $("queueModalTitle").textContent = summarize(item.text, 70);
+  $("queueModalTitle").textContent = item.focus || summarize(item.text, 70);
   $("queueModalBody").innerHTML = `
     <label>Post text<textarea id="detailText" rows="8">${escapeHtml(item.text)}</textarea></label>
     <div class="form-grid">
@@ -531,19 +564,29 @@ function renderQueueModal() {
     </div>
     <label>Reviewer notes<textarea id="detailNotes" rows="3">${escapeHtml(item.reviewer_notes || "")}</textarea></label>
     <div class="detail-grid">
-      ${detail("Trend/source", item.trend_ids?.length ? `${item.trend_ids.length} trend source(s)` : "None")}
+      ${detail("Quality", qualityLabel(item.quality_mode) || "Unknown")}
+      ${detail("Trend/source", trendSummary(item) || "None")}
       ${detail("Why suggested", item.angle || item.reviewer_notes || "Suggested from Social Brain context.")}
       ${detail("Draft", item.draft_id || "No draft link")}
     </div>
     <div class="modal-actions">
       <button onclick="saveQueueDetail(event)">Save changes</button>
       <button class="secondary" onclick="reviseDetail(event)" ${canUseAI ? "" : "disabled"} title="${canUseAI ? "" : "Provider-backed generation is not connected."}">Improve with AI</button>
+      <button class="secondary" onclick="generateBestVersion(event)" ${canUseAI ? "" : "disabled"} title="${canUseAI ? "" : "Provider-backed generation is not connected."}">Generate Best Version</button>
       ${item.status !== "approved" ? `<button class="secondary" onclick='approveQueue(event, ${jsArg(item.id)})'>Approve</button>` : `<button class="secondary" onclick='moveToReview(event, ${jsArg(item.id)})'>Move to review</button>`}
       ${item.status === "approved" ? `<button class="secondary" onclick='postNow(event, ${jsArg(item.id)})' ${canPost ? "" : "disabled"} title="${state.status?.x_write_configured ? "" : "X write auth is not connected."}">Post now</button>` : ""}
       <button class="quiet-button" onclick='skipQueue(event, ${jsArg(item.id)})'>Skip</button>
     </div>
     <div class="revision-box">
       <label>AI instruction<textarea id="revisionInstruction" rows="3" placeholder="Make it sharper, less corporate, or tie it more directly to Leadpoet."></textarea></label>
+      <div class="intent-actions">
+        <button class="secondary" onclick='reviseWithPreset(event, "Make this more natural and less polished.")' ${canUseAI ? "" : "disabled"}>Make More Natural</button>
+        <button class="secondary" onclick='reviseWithPreset(event, "Make this sharper and more opinionated.")' ${canUseAI ? "" : "disabled"}>Make Sharper</button>
+        <button class="secondary" onclick='reviseWithPreset(event, "Make this more founder-led and personal to Gavin.")' ${canUseAI ? "" : "disabled"}>Make More Founder-Led</button>
+        <button class="secondary" onclick='reviseWithPreset(event, "Shorten this while keeping the point.")' ${canUseAI ? "" : "disabled"}>Shorten</button>
+        <button class="secondary" onclick='reviseWithPreset(event, "Tie this more clearly to Leadpoet without making it salesy.")' ${canUseAI ? "" : "disabled"}>Tie More to Leadpoet</button>
+        <button class="secondary" onclick='reviseWithPreset(event, "Generate the strongest final version of this queued post.", true)' ${canUseAI ? "" : "disabled"}>Generate Best Version</button>
+      </div>
       <div id="revisionList" class="revision-list">${revisionList(item.versions || [])}</div>
     </div>
   `;
@@ -594,6 +637,26 @@ window.reviseDetail = (event) => {
       versions: payload.versions,
     };
     showMessage("Revision options generated.");
+    renderQueueModal();
+  });
+};
+
+window.generateBestVersion = (event) => {
+  reviseWithPreset(event, "Generate the strongest final version of this queued post.", true);
+};
+
+window.reviseWithPreset = (event, instruction, bestVersion = false) => {
+  $("revisionInstruction").value = instruction;
+  runButton(event.currentTarget, "Generating...", async () => {
+    const payload = await api(`/api/queue/${encodeURIComponent(state.queueDetail.id)}/revise`, {
+      method: "POST",
+      body: JSON.stringify({ instruction, variants: bestVersion ? 1 : 3, best_version: bestVersion }),
+    });
+    state.queueDetail = {
+      ...state.queueDetail,
+      versions: payload.versions,
+    };
+    showMessage(bestVersion ? "Best Version generated. Accept it when it is ready." : "Revision options generated.");
     renderQueueModal();
   });
 };
@@ -660,6 +723,42 @@ window.postNow = (event, id) => {
   });
 };
 
+function openCreatePostModal() {
+  $("createPostResult").innerHTML = "";
+  openModal("createPostModal");
+  window.setTimeout(() => $("createPostInstruction").focus(), 0);
+}
+
+async function createPost() {
+  const instruction = $("createPostInstruction").value.trim();
+  if (!instruction) throw new Error("Post idea / instruction is required.");
+  const payload = await api("/api/content/create-post", {
+    method: "POST",
+    body: JSON.stringify({
+      instruction,
+      topic: $("createPostTopic").value || "Leadpoet",
+      post_type: $("createPostType").value || "founder_insight",
+      use_trends: $("createPostUseTrends").checked,
+      best_version: $("createPostQuality").value === "best_version",
+      scheduled_at: $("createPostScheduled").value,
+      extra_context: $("createPostExtra").value,
+    }),
+  });
+  const warnings = payload.warnings || [];
+  $("createPostResult").innerHTML = warnings.length
+    ? warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join("")
+    : "";
+  showMessage(warnings.length ? `Created post for review. ${warnings[0]}` : "Created post for review.");
+  closeModal("createPostModal");
+  $("createPostInstruction").value = "";
+  $("createPostExtra").value = "";
+  $("createPostScheduled").value = "";
+  $("createPostUseTrends").checked = false;
+  $("createPostQuality").value = "standard";
+  await refresh();
+  setView("reviewer");
+}
+
 async function planWeek() {
   const payload = await api("/api/plan-week", {
     method: "POST",
@@ -672,6 +771,7 @@ async function planWeek() {
       trend_window_days: 14,
       use_trends: $("planUseTrends").checked,
       allow_evergreen: $("planAllowEvergreen").checked,
+      best_version: $("planQuality").value === "best_version",
       instruction: $("planInstruction").value,
       variants_per_slot: 1,
     }),
@@ -753,7 +853,7 @@ async function loadTrends() {
   const payload = await api("/api/trends?limit=100&status=unused");
   $("trendList").innerHTML = payload.items.length
     ? payload.items.map(trendCard).join("")
-    : `<p class="muted">No trends yet. Add or import trends before planning trend-based content.</p>`;
+    : `<p class="muted">No saved trends yet. Refresh web trends to pull current items.</p>`;
 }
 
 function trendCard(item) {
@@ -787,27 +887,17 @@ window.markTrend = (event, id, status) => {
   });
 };
 
-async function addTrend() {
-  await api("/api/trends", {
-    method: "POST",
-    body: JSON.stringify({
-      title: $("trendTitle").value,
-      topic: $("trendTopic").value,
-      source_type: $("trendSourceType").value,
-      urgency: $("trendUrgency").value,
-      status: "unused",
-      source_url: $("trendSourceUrl").value,
-      summary: $("trendSummary").value,
-      why_it_matters: $("trendWhy").value,
-      leadpoet_angle: $("trendAngle").value,
-    }),
-  });
-  ["trendTitle", "trendSourceUrl", "trendSummary", "trendWhy", "trendAngle"].forEach((id) => {
-    $(id).value = "";
-  });
-  showMessage("Trend added.");
-  await loadTrends();
-  await refresh();
+async function refreshWebTrends({ silent = false } = {}) {
+  state.webTrendsRefreshing = true;
+  try {
+    const payload = await api("/api/trends/refresh", { method: "POST", body: "{}" });
+    if (state.dashboard) state.dashboard.trend_groups = payload.trend_groups || {};
+    if (!silent) showMessage("Web trends refreshed.");
+    await refresh();
+    if (!$("trendsModal").classList.contains("hidden")) await loadTrends();
+  } finally {
+    state.webTrendsRefreshing = false;
+  }
 }
 
 async function loadAccount() {
@@ -837,10 +927,18 @@ function renderAccount() {
     statusCard("Latest imported X post", Boolean(stats.latest_imported_x_post_date), stats.latest_imported_x_post_date ? formatDateTime(stats.latest_imported_x_post_date) : "No X posts stored yet"),
     statusCard("Latest sync error", !(latestSyncError(sync)), latestSyncError(sync) || "None"),
   ].join("");
-  $("accountModel").value = settings.llm_model || status.llm_model || "";
-  $("accountModelMeta").textContent = settings.llm_model
-    ? `Saved in account settings. Effective model: ${settings.effective_llm_model || settings.llm_model}.`
-    : "Choose the model Social Brain should use for drafts and AI edits.";
+  const models = settings.models || {};
+  const effectiveModels = settings.effective_models || {};
+  $("accountModel").value = models.default || "";
+  $("accountStrategistModel").value = models.strategist || "";
+  $("accountNaturalWriterModel").value = models.natural_writer || "";
+  $("accountEvaluatorModel").value = models.evaluator || "";
+  $("accountModelMeta").textContent = [
+    `Default: ${effectiveModels.default || "provider default"}`,
+    `Strategist: ${effectiveModels.strategist || effectiveModels.default || "provider default"}`,
+    `Writer: ${effectiveModels.natural_writer || effectiveModels.default || "provider default"}`,
+    `Evaluator: ${effectiveModels.evaluator || effectiveModels.default || "provider default"}`,
+  ].join(" · ");
 }
 
 function statusCard(title, configured, detail) {
@@ -887,10 +985,34 @@ function latestSyncError(sync) {
 async function saveAccount() {
   state.account = await api("/api/account", {
     method: "PATCH",
-    body: JSON.stringify({ llm_model: $("accountModel").value }),
+    body: JSON.stringify({
+      models: {
+        default: $("accountModel").value,
+        strategist: $("accountStrategistModel").value,
+        natural_writer: $("accountNaturalWriterModel").value,
+        evaluator: $("accountEvaluatorModel").value,
+      },
+    }),
   });
   renderAccount();
   showMessage("Account settings saved.");
+}
+
+async function resetAccountModels() {
+  state.account = await api("/api/account", {
+    method: "PATCH",
+    body: JSON.stringify({ reset_model_settings: true }),
+  });
+  renderAccount();
+  showMessage("Model settings reset to environment defaults.");
+}
+
+async function testProvider() {
+  const payload = await api("/api/account/test-provider", {
+    method: "POST",
+    body: "{}",
+  });
+  showMessage(payload.message || "Provider test succeeded.");
 }
 
 function openModal(id) {
@@ -918,6 +1040,18 @@ function emptyState(text) {
   return `<div class="empty-state">${escapeHtml(text)}</div>`;
 }
 
+function reviewEmptyState() {
+  return `
+    <div class="empty-state">
+      <p>No posts to review. Create a post or create a weekly plan to start.</p>
+      <div class="actions left">
+        <button onclick="openCreatePostModal()">Create Post</button>
+        <button class="secondary" onclick='openModal("planModal")'>Create Weekly Plan</button>
+      </div>
+    </div>
+  `;
+}
+
 function detail(labelText, value) {
   return `
     <div class="detail-item">
@@ -937,6 +1071,21 @@ function summarize(text, maxLength = 96) {
 
 function label(value) {
   return String(value || "").replaceAll("_", " ");
+}
+
+function qualityLabel(value) {
+  const mode = String(value || "");
+  if (mode === "best_version") return "Best Version";
+  if (mode === "standard") return "Standard";
+  return "";
+}
+
+function trendSummary(item) {
+  if (item.trend_used) return item.trend_used;
+  return (item.trend_sources || [])
+    .map((trend) => trend.title)
+    .filter(Boolean)
+    .join(", ");
 }
 
 function metric(value) {
@@ -1001,19 +1150,24 @@ function setup() {
   });
 
   $("refreshButton").addEventListener("click", (event) => runButton(event.currentTarget, "Refreshing...", refresh));
+  $("createPostButton").addEventListener("click", openCreatePostModal);
+  $("createPostReviewerButton").addEventListener("click", openCreatePostModal);
   $("createPlanButton").addEventListener("click", () => openModal("planModal"));
   $("createPlanReviewerButton").addEventListener("click", () => openModal("planModal"));
   $("syncPostsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncPosts));
   $("syncMetricsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncMetrics));
   $("publishDueButton").addEventListener("click", (event) => runButton(event.currentTarget, "Posting...", publishDue));
   $("publishDueReviewerButton").addEventListener("click", (event) => runButton(event.currentTarget, "Posting...", publishDue));
+  $("generatePostButton").addEventListener("click", (event) => runButton(event.currentTarget, "Generating...", createPost));
   $("planWeekButton").addEventListener("click", (event) => runButton(event.currentTarget, "Creating...", planWeek));
   $("openTrendsButton").addEventListener("click", () => window.openTrendsModal().catch((error) => showMessage(error.message, true)));
-  $("openTrendsDashboardButton").addEventListener("click", () => window.openTrendsModal().catch((error) => showMessage(error.message, true)));
+  $("openTrendsDashboardButton").addEventListener("click", (event) => runButton(event.currentTarget, "Refreshing...", refreshWebTrends));
   $("manageTrendsFromPlanButton").addEventListener("click", () => window.openTrendsModal().catch((error) => showMessage(error.message, true)));
   $("loadTrendsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Loading...", loadTrends));
-  $("addTrendButton").addEventListener("click", (event) => runButton(event.currentTarget, "Adding...", addTrend));
+  $("refreshTrendsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Refreshing...", refreshWebTrends));
   $("saveAccountButton").addEventListener("click", (event) => runButton(event.currentTarget, "Saving...", saveAccount));
+  $("resetAccountModelsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Resetting...", resetAccountModels));
+  $("testProviderButton").addEventListener("click", (event) => runButton(event.currentTarget, "Testing...", testProvider));
   $("accountSyncPostsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncPosts));
   $("accountSyncMetricsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncMetrics));
   $("accountSyncAllButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncAllXData));

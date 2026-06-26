@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 import re
 
 from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.core.models import ContextBundle, DraftRequest, GeneratedDraft, TrendItem
 from leadpoet_social_brain.platforms.x import get_x_adapter
-from leadpoet_social_brain.providers import DraftProvider
+from leadpoet_social_brain.providers import DraftProvider, ModelRouting, generate_with_provider, resolve_model_routing
 from leadpoet_social_brain.skills import SkillAsset, generation_skills
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 
@@ -21,7 +22,14 @@ class SocialBrainGenerator:
         self.provider = provider
         self.context_manager = ContextManager(store)
 
-    def generate(self, request: DraftRequest, *, variants: int = 3, save: bool = True) -> list[GeneratedDraft]:
+    def generate(
+        self,
+        request: DraftRequest,
+        *,
+        variants: int = 3,
+        save: bool = True,
+        best_version: bool = False,
+    ) -> list[GeneratedDraft]:
         adapter = self._adapter_for(request.platform)
         if hasattr(adapter, "validate_post_type"):
             adapter.validate_post_type(request.post_type)
@@ -33,11 +41,29 @@ class SocialBrainGenerator:
         )
         trends = self._trends_for(request)
         skills = generation_skills(platform=request.platform, post_type=request.post_type)
-        prompt = build_generation_prompt(request, bundle, skills=skills, trends=trends, max_chars=max_chars)
         if not self.provider:
             raise ValueError(MISSING_PROVIDER_MESSAGE)
         provider_name = provider_name_for(self.provider)
-        raw_texts = self.provider.generate(prompt, variants=variants)
+        model_routing = resolve_model_routing(self.store, self.provider)
+        if best_version:
+            return self._generate_best_version(
+                request,
+                bundle,
+                skills=skills,
+                trends=trends,
+                max_chars=max_chars,
+                provider_name=provider_name,
+                model_routing=model_routing,
+                save=save,
+            )
+
+        prompt = build_generation_prompt(request, bundle, skills=skills, trends=trends, max_chars=max_chars)
+        raw_texts = generate_with_provider(
+            self.provider,
+            prompt,
+            variants=variants,
+            model=model_routing.default,
+        )
         drafts: list[GeneratedDraft] = []
         for raw_text in raw_texts:
             text = clean_generated_text(raw_text, max_chars=max_chars)
@@ -59,12 +85,99 @@ class SocialBrainGenerator:
                     trends=trends,
                     quality_notes=quality_notes,
                     provider_name=provider_name,
+                    quality_mode="standard",
+                    model_routing=model_routing,
+                    models_used={"default": model_routing.default},
                 ),
             )
             if save:
                 self.store.save_generated_draft(draft)
             drafts.append(draft)
         return drafts
+
+    def _generate_best_version(
+        self,
+        request: DraftRequest,
+        bundle: ContextBundle,
+        *,
+        skills: list[SkillAsset],
+        trends: list[TrendItem],
+        max_chars: int,
+        provider_name: str,
+        model_routing: ModelRouting,
+        save: bool,
+    ) -> list[GeneratedDraft]:
+        assert self.provider is not None
+        adapter = self._adapter_for(request.platform)
+        strategy_prompt = build_strategy_prompt(request, bundle, trends=trends)
+        strategy_raw = generate_with_provider(
+            self.provider,
+            strategy_prompt,
+            variants=1,
+            model=model_routing.strategist,
+        )[0]
+        strategy_summary = parse_strategy_summary(strategy_raw)
+        writer_prompt = build_best_writer_prompt(
+            request,
+            bundle,
+            skills=skills,
+            trends=trends,
+            strategy_summary=strategy_summary,
+            max_chars=max_chars,
+        )
+        draft_options = generate_with_provider(
+            self.provider,
+            writer_prompt,
+            variants=3,
+            model=model_routing.natural_writer,
+        )
+        cleaned_options = [clean_generated_text(raw, max_chars=max_chars) for raw in draft_options]
+        cleaned_options = [text for text in cleaned_options if text]
+        if not cleaned_options:
+            raise ValueError("Provider did not return usable draft text.")
+        evaluation_prompt = build_evaluation_prompt(
+            request,
+            skills=skills,
+            strategy_summary=strategy_summary,
+            draft_options=cleaned_options,
+        )
+        evaluation_raw = generate_with_provider(
+            self.provider,
+            evaluation_prompt,
+            variants=1,
+            model=model_routing.evaluator,
+        )[0]
+        final_text, quality_notes, evaluation = parse_evaluation_result(evaluation_raw, cleaned_options)
+        text = clean_generated_text(final_text, max_chars=max_chars)
+        adapter.validate_text(text, max_chars=max_chars)
+        notes = quality_notes or build_quality_notes(request, bundle, trends=trends)
+        draft = GeneratedDraft(
+            text=text,
+            request=request,
+            explanation=explain_influence(bundle, trends=trends),
+            influences=build_influence_labels(bundle, trends=trends),
+            context_snapshot=build_context_snapshot(
+                request,
+                bundle,
+                skills=skills,
+                trends=trends,
+                quality_notes=notes,
+                provider_name=provider_name,
+                quality_mode="best_version",
+                model_routing=model_routing,
+                models_used={
+                    "default": model_routing.default,
+                    "strategist": model_routing.strategist,
+                    "natural_writer": model_routing.natural_writer,
+                    "evaluator": model_routing.evaluator,
+                },
+                strategy_summary=strategy_summary,
+                evaluation=evaluation,
+            ),
+        )
+        if save:
+            self.store.save_generated_draft(draft)
+        return [draft]
 
     def build_prompt(self, request: DraftRequest) -> str:
         adapter = self._adapter_for(request.platform)
@@ -148,6 +261,124 @@ Writing and review instructions:
 Return only draft post text variants, no commentary. Do not write a bland news summary. Make the post timely, specific, and founder-led."""
 
 
+def build_strategy_prompt(
+    request: DraftRequest,
+    bundle: ContextBundle,
+    *,
+    trends: list[TrendItem],
+) -> str:
+    context = "\n".join(f"- {section.kind}/{section.name}: {section.content}" for section in bundle.positioning_sections)
+    examples_text = "\n\n".join(_format_example(post, bundle) for post in bundle.examples)
+    trends_text = "\n\n".join(_format_trend(trend) for trend in trends)
+    analytics = "\n".join(f"- {hint}" for hint in bundle.analytics_hints)
+    return f"""You are helping Gavin decide the strongest X post angle for Leadpoet.
+
+Do not write the post yet. Decide what the post should accomplish.
+
+Request:
+- Topic: {request.topic}
+- Post type: {request.post_type}
+- Angle: {request.angle or "choose the strongest specific angle"}
+- Audience: {request.audience or "Leadpoet's current audience"}
+- Extra context: {request.extra_context or "none"}
+
+Leadpoet context:
+{context or "- No positioning context yet."}
+
+Gavin examples and worked-reason notes:
+{examples_text or "No examples selected."}
+
+Trend context:
+{trends_text or "No timely trends selected."}
+
+Analytics hints:
+{analytics or "- No analytics hints available."}
+
+Return compact JSON only with these keys:
+core_point, intended_audience, why_timely, post_angle, hook_direction, what_to_avoid, success_criteria."""
+
+
+def build_best_writer_prompt(
+    request: DraftRequest,
+    bundle: ContextBundle,
+    *,
+    skills: list[SkillAsset],
+    trends: list[TrendItem],
+    strategy_summary: dict[str, object],
+    max_chars: int,
+) -> str:
+    skill_text = "\n\n".join(f"## {skill.path}\n{skill.content}" for skill in skills)
+    examples_text = "\n\n".join(_format_example(post, bundle) for post in bundle.examples)
+    context = "\n".join(f"- {section.kind}/{section.name}: {section.content}" for section in bundle.positioning_sections)
+    trends_text = "\n\n".join(_format_trend(trend) for trend in trends)
+    analytics = "\n".join(f"- {hint}" for hint in bundle.analytics_hints)
+    return f"""Write 3 X draft options for Gavin.
+
+Prioritize exact Gavin examples, worked-reason notes, and the writing skills below over generic marketing instincts.
+
+Strategy:
+{json.dumps(strategy_summary, indent=2)}
+
+Request:
+- Topic: {request.topic}
+- Post type: {request.post_type}
+- Tone: {request.tone or "plain, sharp, useful"}
+- CTA: {request.call_to_action or "only include if natural"}
+- Extra context: {request.extra_context or "none"}
+- Character limit: {max_chars}
+
+Exact Gavin/Leadpoet examples:
+{examples_text or "No examples selected."}
+
+Leadpoet context:
+{context or "- No positioning context yet."}
+
+Trend context:
+{trends_text or "No timely trends selected."}
+
+Performance hints:
+{analytics or "- No analytics hints available."}
+
+Writing and review instructions:
+{skill_text}
+
+Avoid corporate thought leadership, generic hype, fake profundity, em dashes, overly symmetrical phrasing, LinkedIn-style moral lessons, and "not just X, but Y" framing.
+
+Return only draft post text variants. Separate variants with a line containing only ---."""
+
+
+def build_evaluation_prompt(
+    request: DraftRequest,
+    *,
+    skills: list[SkillAsset],
+    strategy_summary: dict[str, object],
+    draft_options: list[str],
+) -> str:
+    skill_text = "\n\n".join(f"## {skill.path}\n{skill.content}" for skill in skills)
+    options = "\n\n".join(f"Draft {index}:\n{text}" for index, text in enumerate(draft_options, start=1))
+    return f"""Choose the best X post for Gavin and clean it up lightly.
+
+Original request:
+- Topic: {request.topic}
+- Post type: {request.post_type}
+- Angle: {request.angle or "none"}
+- Audience: {request.audience or "Leadpoet's current audience"}
+
+Success criteria:
+{json.dumps(strategy_summary.get("success_criteria", ""), indent=2)}
+
+Voice and review rules:
+{skill_text}
+
+Draft options:
+{options}
+
+Return compact JSON only with:
+ranked_drafts, quality_notes, warnings, suggested_final_version.
+
+The suggested_final_version must be natural, specific, founder-led, concise, non-corporate, and free of em dashes."""
+
+
 def build_context_snapshot(
     request: DraftRequest,
     bundle: ContextBundle,
@@ -156,6 +387,11 @@ def build_context_snapshot(
     trends: list[TrendItem],
     quality_notes: str,
     provider_name: str,
+    quality_mode: str,
+    model_routing: ModelRouting,
+    models_used: dict[str, str | None],
+    strategy_summary: dict[str, object] | None = None,
+    evaluation: dict[str, object] | None = None,
 ) -> dict[str, object]:
     examples = []
     for post in bundle.examples:
@@ -181,7 +417,16 @@ def build_context_snapshot(
     return {
         "request": request.__dict__,
         "generation_mode": "provider",
+        "quality_mode": quality_mode,
         "provider_name": provider_name,
+        "model_routing": model_routing.as_dict(),
+        "models_used": models_used,
+        "default_model": models_used.get("default"),
+        "strategist_model": models_used.get("strategist"),
+        "natural_writer_model": models_used.get("natural_writer"),
+        "evaluator_model": models_used.get("evaluator"),
+        "strategy_summary": strategy_summary,
+        "evaluation": evaluation,
         "quality_notes": quality_notes,
         "skills": [
             {
@@ -214,6 +459,47 @@ def build_context_snapshot(
             for trend in trends
         ],
     }
+
+
+def parse_strategy_summary(raw: str) -> dict[str, object]:
+    parsed = parse_json_object(raw)
+    if isinstance(parsed, dict):
+        return {
+            "core_point": str(parsed.get("core_point") or "").strip(),
+            "intended_audience": str(parsed.get("intended_audience") or "").strip(),
+            "why_timely": str(parsed.get("why_timely") or "").strip(),
+            "post_angle": str(parsed.get("post_angle") or "").strip(),
+            "hook_direction": str(parsed.get("hook_direction") or "").strip(),
+            "what_to_avoid": str(parsed.get("what_to_avoid") or "").strip(),
+            "success_criteria": parsed.get("success_criteria") or "",
+        }
+    return {"raw": raw.strip()}
+
+
+def parse_evaluation_result(raw: str, draft_options: list[str]) -> tuple[str, str, dict[str, object]]:
+    parsed = parse_json_object(raw)
+    if isinstance(parsed, dict):
+        final = str(parsed.get("suggested_final_version") or "").strip() or draft_options[0]
+        notes = str(parsed.get("quality_notes") or "").strip()
+        return final, notes, parsed
+    return draft_options[0], raw.strip(), {"raw": raw.strip()}
+
+
+def parse_json_object(raw: str) -> object | None:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I).strip()
+        text = re.sub(r"\s*```$", "", text).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, flags=re.S)
+        if not match:
+            return None
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return None
 
 
 def provider_name_for(provider: DraftProvider) -> str:

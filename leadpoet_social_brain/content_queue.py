@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from leadpoet_social_brain.core.models import (
     ContentQueueItem,
     DraftRequest,
+    GeneratedDraft,
     PostInfluence,
     QueuedPostVersion,
     SocialPost,
@@ -15,10 +16,18 @@ from leadpoet_social_brain.core.models import (
     utc_now,
 )
 from leadpoet_social_brain.context import ContextManager
-from leadpoet_social_brain.generation import SocialBrainGenerator, clean_generated_text
+from leadpoet_social_brain.generation import (
+    SocialBrainGenerator,
+    build_best_writer_prompt,
+    build_evaluation_prompt,
+    build_strategy_prompt,
+    clean_generated_text,
+    parse_evaluation_result,
+    parse_strategy_summary,
+)
 from leadpoet_social_brain.platforms.x import get_x_adapter
 from leadpoet_social_brain.platforms.x_api import XPostedTweet, XWriteClient
-from leadpoet_social_brain.providers import DraftProvider
+from leadpoet_social_brain.providers import DraftProvider, generate_with_provider, resolve_model_routing
 from leadpoet_social_brain.skills import generation_skills
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 
@@ -29,6 +38,13 @@ LOCAL_TZ = ZoneInfo("America/New_York")
 @dataclass(frozen=True)
 class PlanWeekResult:
     queued: list[ContentQueueItem]
+    warnings: list[str]
+
+
+@dataclass(frozen=True)
+class CreatePostResult:
+    item: ContentQueueItem
+    draft: GeneratedDraft
     warnings: list[str]
 
 
@@ -52,6 +68,7 @@ def plan_week_x(
     default_post_type: str,
     variants_per_slot: int,
     allow_evergreen: bool = False,
+    best_version: bool = False,
 ) -> PlanWeekResult:
     if posts <= 0:
         raise ValueError("--posts must be greater than 0.")
@@ -90,7 +107,11 @@ def plan_week_x(
             use_trends=bool(trend),
             trend_ids=[trend.id] if trend else [],
         )
-        drafts = generator.generate(request, variants=max(1, variants_per_slot))
+        drafts = generator.generate(
+            request,
+            variants=max(1, variants_per_slot),
+            best_version=best_version,
+        )
         draft = drafts[0]
         item = store.save_content_queue_item(
             ContentQueueItem(
@@ -108,6 +129,69 @@ def plan_week_x(
         )
         queued.append(item)
     return PlanWeekResult(queued=queued, warnings=warnings)
+
+
+def create_post_x(
+    store: SQLiteStore,
+    generator: SocialBrainGenerator,
+    *,
+    instruction: str,
+    topic: str = "Leadpoet",
+    post_type: str = "founder_insight",
+    use_trends: bool = False,
+    best_version: bool = False,
+    scheduled_at: str | None = None,
+    extra_context: str | None = None,
+) -> CreatePostResult:
+    instruction = instruction.strip()
+    if not instruction:
+        raise ValueError("Post idea / instruction is required.")
+    topic = topic.strip() or "Leadpoet"
+    post_type = post_type.strip() or "founder_insight"
+    get_x_adapter().validate_post_type(post_type)
+
+    warnings: list[str] = []
+    selected_trends = store.relevant_trends(topic=topic, angle=instruction, limit=3) if use_trends else []
+    if use_trends and not selected_trends:
+        warnings.append("No relevant unused trends found. Created an evergreen post instead.")
+
+    context_parts = [
+        "One-off/interim Content Reviewer post. Write a complete standalone X post.",
+        f"User instruction: {instruction}",
+    ]
+    if extra_context and extra_context.strip():
+        context_parts.append(f"Extra instruction: {extra_context.strip()}")
+    request = DraftRequest(
+        platform="x",
+        topic=topic,
+        post_type=post_type,
+        angle=instruction,
+        extra_context="\n".join(context_parts),
+        use_trends=bool(selected_trends),
+        trend_ids=[trend.id for trend in selected_trends],
+    )
+    draft = generator.generate(request, variants=1, best_version=best_version)[0]
+    trend_ids = selected_trend_ids(draft, selected_trends)
+    item = store.save_content_queue_item(
+        ContentQueueItem(
+            platform="x",
+            draft_id=draft.id,
+            text=draft.text,
+            topic=topic,
+            post_type=post_type,
+            angle=instruction,
+            trend_ids=trend_ids,
+            scheduled_at=(scheduled_at or "").strip(),
+            status="needs_review",
+            reviewer_notes=create_post_notes(
+                draft,
+                instruction=instruction,
+                trends=[trend for trend in selected_trends if trend.id in set(trend_ids)],
+                best_version=best_version,
+            ),
+        )
+    )
+    return CreatePostResult(item=item, draft=draft, warnings=warnings)
 
 
 def approve_queue_item(store: SQLiteStore, queue_id: str) -> ContentQueueItem:
@@ -131,6 +215,7 @@ def revise_queued_post(
     queue_id: str,
     instruction: str,
     variants: int = 3,
+    best_version: bool = False,
 ) -> list[QueuedPostVersion]:
     item = require_queue_item(store, queue_id)
     if not instruction.strip():
@@ -175,7 +260,69 @@ Writing and review instructions:
 {skill_text}
 
 Return only revised post text variants. Do not explain. Do not approve or post anything."""
-    raw_versions = provider.generate(prompt, variants=max(1, min(variants, 3)))
+    model_routing = resolve_model_routing(store, provider)
+    if best_version:
+        request = DraftRequest(
+            platform=item.platform,
+            topic=item.topic,
+            post_type=item.post_type,
+            angle=item.angle,
+            extra_context=(
+                "Revise this queued post into the strongest final version. "
+                f"Original post: {item.text}\nInstruction: {instruction.strip()}"
+            ),
+            trend_ids=item.trend_ids,
+        )
+        trends = [
+            trend for trend_id in item.trend_ids
+            if (trend := store.get_trend_item(trend_id)) is not None
+        ]
+        strategy_raw = generate_with_provider(
+            provider,
+            build_strategy_prompt(request, bundle, trends=trends),
+            variants=1,
+            model=model_routing.strategist,
+        )[0]
+        strategy_summary = parse_strategy_summary(strategy_raw)
+        raw_options = generate_with_provider(
+            provider,
+            build_best_writer_prompt(
+                request,
+                bundle,
+                skills=skills,
+                trends=trends,
+                strategy_summary=strategy_summary,
+                max_chars=adapter.rules.default_max_chars,
+            ),
+            variants=3,
+            model=model_routing.natural_writer,
+        )
+        options = [
+            text for raw in raw_options
+            if (text := clean_generated_text(raw, max_chars=adapter.rules.default_max_chars))
+        ]
+        if not options:
+            raise ValueError("Provider did not return usable revision text.")
+        evaluation_raw = generate_with_provider(
+            provider,
+            build_evaluation_prompt(
+                request,
+                skills=skills,
+                strategy_summary=strategy_summary,
+                draft_options=options,
+            ),
+            variants=1,
+            model=model_routing.evaluator,
+        )[0]
+        final_text, _, _ = parse_evaluation_result(evaluation_raw, options)
+        raw_versions = [final_text]
+    else:
+        raw_versions = generate_with_provider(
+            provider,
+            prompt,
+            variants=max(1, min(variants, 3)),
+            model=model_routing.default,
+        )
     saved: list[QueuedPostVersion] = []
     for raw in raw_versions:
         text = clean_generated_text(raw, max_chars=adapter.rules.default_max_chars)
@@ -439,6 +586,34 @@ def queue_notes(explanation: str, trend: TrendItem | None) -> str:
     if trend:
         pieces.append(f"Trend/source used: {trend.title}")
     return "\n".join(pieces)
+
+
+def create_post_notes(
+    draft: GeneratedDraft,
+    *,
+    instruction: str,
+    trends: list[TrendItem],
+    best_version: bool,
+) -> str:
+    pieces = [
+        f"Focus: {instruction}",
+        f"Why worth publishing: {draft.explanation}",
+        f"Quality mode: {'Best Version' if best_version else 'Standard'}",
+    ]
+    if trends:
+        pieces.append("Trend/source used: " + ", ".join(trend.title for trend in trends))
+    return "\n".join(pieces)
+
+
+def selected_trend_ids(draft: GeneratedDraft, fallback: list[TrendItem]) -> list[str]:
+    snapshot = draft.context_snapshot or {}
+    selected = snapshot.get("selected_trends") if isinstance(snapshot, dict) else []
+    ids = [
+        str(trend.get("id"))
+        for trend in selected or []
+        if isinstance(trend, dict) and trend.get("id")
+    ]
+    return ids or [trend.id for trend in fallback]
 
 
 def weekly_report_text(store: SQLiteStore, *, since_days: int) -> str:

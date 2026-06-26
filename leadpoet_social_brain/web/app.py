@@ -23,6 +23,7 @@ from leadpoet_social_brain.categorization import XPostLLMCategorizer
 from leadpoet_social_brain.content_queue import (
     accept_queued_post_version,
     approve_queue_item,
+    create_post_x,
     plan_week_x,
     post_queue_item_x,
     publish_due_x,
@@ -47,13 +48,21 @@ from leadpoet_social_brain.platforms.x_api import (
     sync_x_metrics,
     sync_x_user_posts,
 )
-from leadpoet_social_brain.providers import load_provider_from_env
+from leadpoet_social_brain.providers import (
+    LEGACY_MODEL_SETTING,
+    MODEL_ENV_KEYS,
+    MODEL_SETTING_KEYS,
+    generate_with_provider,
+    load_provider_from_env,
+    resolve_model_routing,
+)
 from leadpoet_social_brain.storage.sqlite_store import (
     DEFAULT_DB_PATH,
     DEFAULT_WEB_AUTH_USERNAME,
     SQLiteStore,
     resolve_db_path,
 )
+from leadpoet_social_brain.trend_scout import refresh_web_trends, web_trend_groups
 
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -61,7 +70,7 @@ JSON_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
 AUTH_COOKIE_SECURE_ENV = "SOCIAL_BRAIN_AUTH_COOKIE_SECURE"
 TASK_TOKEN_ENV = "SOCIAL_BRAIN_TASK_TOKEN"
 TASK_SECRET_ENV = "TASK_SECRET"
-LLM_MODEL_SETTING = "llm_model"
+LLM_MODEL_SETTING = MODEL_SETTING_KEYS["default"]
 DEFAULT_AUTH_USERNAME = DEFAULT_WEB_AUTH_USERNAME
 DEFAULT_X_SYNC_USERNAME = "gavinzaentz"
 DEFAULT_X_POST_SYNC_LIMIT = 3200
@@ -78,6 +87,7 @@ TASK_AUTH_REQUIRED_MESSAGE = "Task authentication required."
 TASK_SECRET_CONFIG_MESSAGE = "Task secret is not configured. Set TASK_SECRET."
 TASK_SECRET_REQUIRED_MESSAGE = "Task authentication required."
 MISSING_X_READ_CREDENTIALS_MESSAGE = "X read credentials missing. Set X_BEARER_TOKEN."
+CREATE_POST_MISSING_PROVIDER_MESSAGE = "No LLM provider configured. Set provider before creating posts."
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -512,8 +522,10 @@ def route_api(
     if method == "GET" and parts == ["api", "account", "status"]:
         return 200, account_status_payload(store)
     if method == "PATCH" and parts == ["api", "account"]:
-        store.save_app_setting(LLM_MODEL_SETTING, clean_optional(payload.get("llm_model")))
+        save_account_model_settings(store, payload)
         return 200, account_payload(store)
+    if method == "POST" and parts == ["api", "account", "test-provider"]:
+        return test_provider_response(store)
     if method == "GET" and parts == ["api", "dashboard"]:
         return 200, dashboard_payload(store)
     if method == "GET" and parts == ["api", "queue"]:
@@ -552,11 +564,35 @@ def route_api(
             queue_id=parts[2],
             instruction=str(payload.get("instruction") or ""),
             variants=int(payload.get("variants") or 3),
+            best_version=bool(payload.get("best_version", False)),
         )
         return 200, {"versions": [queue_version_payload(version) for version in versions]}
     if method == "POST" and len(parts) == 5 and parts[:2] == ["api", "queue"] and parts[3] == "versions":
         item = accept_queued_post_version(store, version_id=parts[4])
         return 200, {"item": queue_item_payload(store, item, include_versions=True)}
+    if method == "POST" and parts == ["api", "content", "create-post"]:
+        provider = load_configured_provider(store)
+        if not provider:
+            raise ValueError(CREATE_POST_MISSING_PROVIDER_MESSAGE)
+        result = create_post_x(
+            store,
+            SocialBrainGenerator(store, provider=provider),
+            instruction=str(payload.get("instruction") or ""),
+            topic=str(payload.get("topic") or "Leadpoet"),
+            post_type=str(payload.get("post_type") or "founder_insight"),
+            use_trends=bool_from_payload(payload, "use_trends", False),
+            best_version=bool_from_payload(payload, "best_version", False),
+            scheduled_at=clean_optional(payload.get("scheduled_at")),
+            extra_context=clean_optional(payload.get("extra_context")),
+        )
+        item_payload = queue_item_payload(store, result.item)
+        return 200, {
+            "item": item_payload,
+            "generated_text": result.draft.text,
+            "queue_id": result.item.id,
+            "status": result.item.status,
+            "warnings": result.warnings,
+        }
     if method == "POST" and parts == ["api", "plan-week"]:
         provider = load_configured_provider(store)
         if not provider:
@@ -574,6 +610,7 @@ def route_api(
             default_post_type=str(payload.get("default_post_type") or "founder_insight"),
             variants_per_slot=int(payload.get("variants_per_slot") or 1),
             allow_evergreen=bool(payload.get("allow_evergreen", True)),
+            best_version=bool(payload.get("best_version", False)),
         )
         return 200, {
             "queued": [queue_item_payload(store, item) for item in result.queued],
@@ -609,6 +646,12 @@ def route_api(
             limit=int(one(query, "limit") or 50),
         )
         return 200, {"items": [trend_payload(trend) for trend in trends]}
+    if method == "POST" and parts == ["api", "trends", "refresh"]:
+        try:
+            groups = refresh_web_trends(store)
+        except Exception as exc:  # noqa: BLE001 - web trend sources can fail independently of the app.
+            return 502, {"error": f"Could not refresh web trends: {exc}"}
+        return 200, {"trend_groups": trend_groups_payload(groups)}
     if method == "POST" and parts == ["api", "trends"]:
         trend = store.save_trend_item(trend_from_payload(payload))
         return 200, {"item": trend_payload(trend)}
@@ -1050,7 +1093,8 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
     analytics = build_analytics_summary(store)
     recent_posts = store.list_posts(platform="x", limit=None)
     latest_metrics = store.latest_metrics_by_post_id([post.id for post in recent_posts])
-    trends = store.list_trends(status="unused", limit=10)
+    trend_groups = web_trend_groups(store)
+    trends = [*trend_groups.daily, *trend_groups.weekly]
     return {
         "status": status_payload(store),
         "queue_counts": counts,
@@ -1061,6 +1105,7 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
             for post in recent_posts
         ],
         "trends": [trend_payload(trend) for trend in trends],
+        "trend_groups": trend_groups_payload(trend_groups),
         "sync": account_sync_payload(store),
         "analytics_hints": analytics.hints,
         "best_examples": [post_payload(post) for post in analytics.best_examples[:5]],
@@ -1069,9 +1114,11 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
 
 def status_payload(store: SQLiteStore | None = None) -> dict[str, Any]:
     model = configured_llm_model(store)
-    saved_model = store.get_app_setting(LLM_MODEL_SETTING) if store else None
+    saved_model = account_model_settings(store)["default"] if store else None
     if saved_model:
         model_source = "account"
+    elif os.getenv(MODEL_ENV_KEYS["default"]):
+        model_source = MODEL_ENV_KEYS["default"]
     elif os.getenv("SOCIAL_BRAIN_MODEL"):
         model_source = "SOCIAL_BRAIN_MODEL"
     elif os.getenv("OPENROUTER_MODEL"):
@@ -1084,6 +1131,7 @@ def status_payload(store: SQLiteStore | None = None) -> dict[str, Any]:
         "openrouter_api_key_configured": bool(os.getenv("OPENROUTER_API_KEY")),
         "llm_model": model or "",
         "llm_model_source": model_source,
+        "model_routing": resolve_model_routing(store).as_dict() if store else {},
         "x_read_configured": bool(os.getenv("X_BEARER_TOKEN")),
         "x_write_configured": has_x_write_credentials(),
         "task_trigger_configured": bool(os.getenv(TASK_TOKEN_ENV)),
@@ -1092,13 +1140,17 @@ def status_payload(store: SQLiteStore | None = None) -> dict[str, Any]:
 
 
 def account_payload(store: SQLiteStore) -> dict[str, Any]:
+    routing = resolve_model_routing(store)
     return {
         "status": status_payload(store),
         "sync": account_sync_payload(store),
         "stats": x_account_stats_payload(store),
         "settings": {
-            "llm_model": store.get_app_setting(LLM_MODEL_SETTING) or "",
-            "effective_llm_model": configured_llm_model(store) or "",
+            "llm_model": account_model_settings(store)["default"],
+            "effective_llm_model": routing.default or "",
+            "models": account_model_settings(store),
+            "effective_models": routing.as_dict(),
+            "model_env_defaults": model_env_defaults(),
         },
     }
 
@@ -1129,6 +1181,75 @@ def x_account_stats_payload(store: SQLiteStore) -> dict[str, Any]:
     }
 
 
+def save_account_model_settings(store: SQLiteStore, payload: dict[str, Any]) -> None:
+    if bool(payload.get("reset_model_settings", False)):
+        for key in [*MODEL_SETTING_KEYS.values(), LEGACY_MODEL_SETTING]:
+            store.save_app_setting(key, None)
+        return
+
+    models = payload.get("models")
+    if not isinstance(models, dict):
+        models = {}
+    if "llm_model" in payload:
+        models = {**models, "default": payload.get("llm_model")}
+    for role, key in MODEL_SETTING_KEYS.items():
+        if role in models:
+            store.save_app_setting(key, clean_optional(models.get(role)))
+    if "default" in models:
+        store.save_app_setting(LEGACY_MODEL_SETTING, None)
+
+
+def account_model_settings(store: SQLiteStore | None) -> dict[str, str]:
+    if not store:
+        return {"default": "", "strategist": "", "natural_writer": "", "evaluator": ""}
+    return {
+        "default": (
+            clean_optional(store.get_app_setting(MODEL_SETTING_KEYS["default"]))
+            or clean_optional(store.get_app_setting(LEGACY_MODEL_SETTING))
+            or ""
+        ),
+        "strategist": clean_optional(store.get_app_setting(MODEL_SETTING_KEYS["strategist"])) or "",
+        "natural_writer": clean_optional(store.get_app_setting(MODEL_SETTING_KEYS["natural_writer"])) or "",
+        "evaluator": clean_optional(store.get_app_setting(MODEL_SETTING_KEYS["evaluator"])) or "",
+    }
+
+
+def model_env_defaults() -> dict[str, str]:
+    return {
+        "default": (
+            clean_optional(os.getenv(MODEL_ENV_KEYS["default"]))
+            or clean_optional(os.getenv("SOCIAL_BRAIN_MODEL"))
+            or clean_optional(os.getenv("OPENROUTER_MODEL"))
+            or ""
+        ),
+        "strategist": clean_optional(os.getenv(MODEL_ENV_KEYS["strategist"])) or "",
+        "natural_writer": clean_optional(os.getenv(MODEL_ENV_KEYS["natural_writer"])) or "",
+        "evaluator": clean_optional(os.getenv(MODEL_ENV_KEYS["evaluator"])) or "",
+    }
+
+
+def test_provider_response(store: SQLiteStore) -> tuple[int, dict[str, Any]]:
+    provider = load_configured_provider(store)
+    if not provider:
+        return 400, {"ok": False, "error": MISSING_PROVIDER_MESSAGE}
+    routing = resolve_model_routing(store, provider)
+    try:
+        result = generate_with_provider(
+            provider,
+            "Provider smoke test. Reply with exactly: OK",
+            variants=1,
+            model=routing.default,
+        )
+    except Exception as exc:  # noqa: BLE001 - endpoint should show clear provider failure.
+        return 400, {"ok": False, "error": str(exc), "model": routing.default or ""}
+    return 200, {
+        "ok": True,
+        "message": "Provider test succeeded.",
+        "model": routing.default or "",
+        "sample": (result[0] if result else "")[:120],
+    }
+
+
 def sync_metadata_payload(metadata: SyncMetadata | None) -> dict[str, Any]:
     if not metadata:
         return {
@@ -1148,14 +1269,7 @@ def sync_metadata_payload(metadata: SyncMetadata | None) -> dict[str, Any]:
 
 
 def configured_llm_model(store: SQLiteStore | None = None) -> str | None:
-    if store:
-        saved = clean_optional(store.get_app_setting(LLM_MODEL_SETTING))
-        if saved:
-            return saved
-    return (
-        clean_optional(os.getenv("SOCIAL_BRAIN_MODEL"))
-        or clean_optional(os.getenv("OPENROUTER_MODEL"))
-    )
+    return resolve_model_routing(store).default
 
 
 def load_configured_provider(store: SQLiteStore) -> Any:
@@ -1183,15 +1297,20 @@ def analytics_payload(store: SQLiteStore) -> dict[str, Any]:
 
 
 def queue_item_payload(store: SQLiteStore, item: ContentQueueItem, *, include_versions: bool = False) -> dict[str, Any]:
+    generation_metadata = queue_generation_metadata(store, item)
     payload = {
         "id": item.id,
         "platform": item.platform,
         "draft_id": item.draft_id,
         "text": item.text,
+        "focus": post_summary(item.angle or item.text, max_length=80),
         "topic": item.topic,
         "post_type": item.post_type,
         "angle": item.angle,
         "trend_ids": item.trend_ids,
+        "trend_sources": generation_metadata["trend_sources"],
+        "trend_used": generation_metadata["trend_used"],
+        "quality_mode": generation_metadata["quality_mode"],
         "scheduled_at": item.scheduled_at,
         "status": item.status,
         "reviewer_notes": item.reviewer_notes,
@@ -1209,6 +1328,45 @@ def queue_item_payload(store: SQLiteStore, item: ContentQueueItem, *, include_ve
             for version in store.list_queued_post_versions(item.id, limit=20)
         ]
     return payload
+
+
+def queue_generation_metadata(store: SQLiteStore, item: ContentQueueItem) -> dict[str, Any]:
+    quality_mode = ""
+    trend_sources: list[dict[str, str]] = []
+    draft = store.get_generated_draft(item.draft_id) if item.draft_id else None
+    snapshot = draft.context_snapshot if draft else {}
+    if isinstance(snapshot, dict):
+        quality_mode = str(snapshot.get("quality_mode") or "")
+        selected_trends = snapshot.get("selected_trends") or []
+        trend_sources = [
+            {
+                "id": str(trend.get("id") or ""),
+                "title": str(trend.get("title") or ""),
+                "topic": str(trend.get("topic") or ""),
+                "source_type": str(trend.get("source_type") or ""),
+                "urgency": str(trend.get("urgency") or ""),
+            }
+            for trend in selected_trends
+            if isinstance(trend, dict) and trend.get("id")
+        ]
+    if not trend_sources and item.trend_ids:
+        for trend_id in item.trend_ids:
+            trend = store.get_trend_item(trend_id)
+            if trend:
+                trend_sources.append(
+                    {
+                        "id": trend.id,
+                        "title": trend.title,
+                        "topic": trend.topic,
+                        "source_type": trend.source_type,
+                        "urgency": trend.urgency,
+                    }
+                )
+    return {
+        "quality_mode": quality_mode,
+        "trend_sources": trend_sources,
+        "trend_used": ", ".join(trend["title"] for trend in trend_sources if trend.get("title")),
+    }
 
 
 def queue_version_payload(version: QueuedPostVersion) -> dict[str, Any]:
@@ -1347,6 +1505,13 @@ def trend_from_payload(payload: dict[str, Any], *, existing: TrendItem | None = 
         created_at=existing.created_at if existing else utc_now(),
         updated_at=existing.updated_at if existing else utc_now(),
     )
+
+
+def trend_groups_payload(groups) -> dict[str, list[dict[str, Any]]]:
+    return {
+        "daily": [trend_payload(trend) for trend in groups.daily],
+        "weekly": [trend_payload(trend) for trend in groups.weekly],
+    }
 
 
 def parse_json_body(body: bytes | str | None) -> dict[str, Any]:

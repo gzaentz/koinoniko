@@ -11,6 +11,7 @@ from leadpoet_social_brain.content_queue import (
     post_queue_item_x,
     publish_due_x,
     require_queue_item,
+    revise_queued_post,
     weekly_report_text,
 )
 from leadpoet_social_brain.categorization import XPostLLMCategorizer
@@ -39,11 +40,8 @@ from leadpoet_social_brain.platforms.x_api import (
     sync_x_metrics,
     sync_x_user_posts,
 )
-from leadpoet_social_brain.providers import load_provider_from_env
+from leadpoet_social_brain.providers import load_provider_from_env, resolve_model_routing
 from leadpoet_social_brain.storage.sqlite_store import DEFAULT_DB_PATH, DEFAULT_WEB_AUTH_USERNAME, SQLiteStore
-
-LLM_MODEL_SETTING = "llm_model"
-
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
@@ -162,6 +160,7 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--max-chars", type=int)
     generate.add_argument("--use-trends", action="store_true")
     generate.add_argument("--variants", type=int, default=3)
+    generate.add_argument("--best-version", action="store_true")
     generate.set_defaults(func=cmd_generate_x)
 
     plan_week = subparsers.add_parser("plan-week-x", help="Generate a one-week X content queue.")
@@ -174,6 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_week.add_argument("--default-post-type", default="founder_insight")
     plan_week.add_argument("--variants-per-slot", type=int, default=1)
     plan_week.add_argument("--allow-evergreen", action="store_true")
+    plan_week.add_argument("--best-version", action="store_true")
     plan_week.set_defaults(func=cmd_plan_week_x)
 
     list_queue = subparsers.add_parser("list-content-queue", help="List queued content.")
@@ -194,6 +194,13 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["draft", "needs_review", "approved", "posted", "failed", "skipped"],
     )
     update_queue.set_defaults(func=cmd_update_queued_post)
+
+    revise_queue = subparsers.add_parser("revise-queued-post", help="Generate AI revision options for a queued post.")
+    revise_queue.add_argument("--queue-id", required=True)
+    revise_queue.add_argument("--instruction", required=True)
+    revise_queue.add_argument("--variants", type=int, default=3)
+    revise_queue.add_argument("--best-version", action="store_true")
+    revise_queue.set_defaults(func=cmd_revise_queued_post)
 
     approve_queue = subparsers.add_parser("approve-queued-post", help="Approve one queued post.")
     approve_queue.add_argument("--queue-id", required=True)
@@ -557,7 +564,7 @@ def cmd_generate_x(store: SQLiteStore, args: argparse.Namespace) -> int:
     if not provider:
         raise SystemExit(MISSING_PROVIDER_MESSAGE)
     generator = SocialBrainGenerator(store, provider=provider)
-    print("Generator mode: configured LLM provider")
+    print("Generator mode: best version" if args.best_version else "Generator mode: configured LLM provider")
     request = DraftRequest(
         platform="x",
         topic=args.topic,
@@ -570,7 +577,7 @@ def cmd_generate_x(store: SQLiteStore, args: argparse.Namespace) -> int:
         extra_context=args.extra_context,
         use_trends=args.use_trends,
     )
-    drafts = generator.generate(request, variants=args.variants)
+    drafts = generator.generate(request, variants=args.variants, best_version=args.best_version)
     for index, draft in enumerate(drafts, start=1):
         print(f"\nDraft {index} ({len(draft.text)} chars, id {draft.id})")
         print(draft.text)
@@ -596,6 +603,7 @@ def cmd_plan_week_x(store: SQLiteStore, args: argparse.Namespace) -> int:
             default_post_type=args.default_post_type,
             variants_per_slot=args.variants_per_slot,
             allow_evergreen=args.allow_evergreen,
+            best_version=args.best_version,
         )
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
@@ -674,6 +682,28 @@ def cmd_update_queued_post(store: SQLiteStore, args: argparse.Namespace) -> int:
     print(f"Topic: {updated.topic}")
     print(f"Post type: {updated.post_type}")
     print(updated.text)
+    return 0
+
+
+def cmd_revise_queued_post(store: SQLiteStore, args: argparse.Namespace) -> int:
+    provider = load_configured_provider(store)
+    if not provider:
+        raise SystemExit(MISSING_PROVIDER_MESSAGE)
+    try:
+        versions = revise_queued_post(
+            store,
+            provider,
+            queue_id=args.queue_id,
+            instruction=args.instruction,
+            variants=args.variants,
+            best_version=args.best_version,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    print(f"Generated {len(versions)} revision option(s) for {args.queue_id}")
+    for version in versions:
+        print(f"\nRevision {version.id}")
+        print(version.text)
     return 0
 
 
@@ -947,7 +977,7 @@ def print_counter(counter) -> None:
 
 
 def load_configured_provider(store: SQLiteStore):
-    return load_provider_from_env(model_override=store.get_app_setting(LLM_MODEL_SETTING))
+    return load_provider_from_env(model_override=resolve_model_routing(store).default)
 
 
 def parse_bool_arg(value: str) -> bool:

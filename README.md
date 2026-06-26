@@ -1151,9 +1151,9 @@ No X write credentials configured. Set X write auth credentials before posting.
 
 ## Trend Scout
 
-Trend Scout is optional context, not an automated research system.
+Trend Scout stores timely market/news/product context for generation and planning. The web UI can refresh the top 5 daily and top 5 weekly web trends across AI, sales, and lead generation, then saves them as reusable trend items.
 
-Use it for timely market/news/product context around:
+Use it for timely context around:
 
 - AI
 - sales LLMs
@@ -1167,7 +1167,7 @@ Use it for timely market/news/product context around:
 - funding
 - customer signals
 
-Add one trend manually:
+The CLI still supports adding one trend manually when you have a specific source:
 
 ```bash
 python3 -m leadpoet_social_brain.cli add-trend \

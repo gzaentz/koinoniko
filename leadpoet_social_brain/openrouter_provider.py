@@ -17,7 +17,7 @@ class OpenRouterProvider:
         self,
         *,
         api_key: str,
-        model: str,
+        model: str | None,
         base_url: str = OPENROUTER_API_URL,
         temperature: float = 0.8,
         max_tokens: int = 1200,
@@ -27,8 +27,6 @@ class OpenRouterProvider:
     ):
         if not api_key:
             raise ValueError("OPENROUTER_API_KEY is required.")
-        if not model:
-            raise ValueError("OPENROUTER_MODEL is required.")
         self.api_key = api_key
         self.model = model
         self.base_url = base_url
@@ -38,10 +36,13 @@ class OpenRouterProvider:
         self.app_name = app_name
         self._request_json = request_json
 
-    def generate(self, prompt: str, *, variants: int) -> list[str]:
+    def generate(self, prompt: str, *, variants: int, model: str | None = None) -> list[str]:
         requested_variants = max(1, variants)
+        selected_model = (model or self.model or "").strip()
+        if not selected_model:
+            raise ValueError("OpenRouter model is required. Set it in Account or OPENROUTER_MODEL.")
         payload = {
-            "model": self.model,
+            "model": selected_model,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "messages": [
@@ -86,7 +87,12 @@ class OpenRouterProvider:
 def create_provider() -> OpenRouterProvider:
     return OpenRouterProvider(
         api_key=os.getenv("OPENROUTER_API_KEY", ""),
-        model=os.getenv("SOCIAL_BRAIN_MODEL") or os.getenv("OPENROUTER_MODEL", ""),
+        model=(
+            os.getenv("SOCIAL_BRAIN_MODEL")
+            or os.getenv("SOCIAL_BRAIN_DEFAULT_MODEL")
+            or os.getenv("OPENROUTER_MODEL")
+            or None
+        ),
         base_url=os.getenv("OPENROUTER_API_URL", OPENROUTER_API_URL),
         temperature=float(os.getenv("OPENROUTER_TEMPERATURE", "0.8")),
         max_tokens=int(os.getenv("OPENROUTER_MAX_TOKENS", "1200")),

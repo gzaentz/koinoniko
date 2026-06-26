@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from http import HTTPStatus
 from contextlib import redirect_stdout
 from unittest.mock import patch
@@ -13,7 +14,7 @@ from pathlib import Path
 
 from leadpoet_social_brain.analytics import build_analytics_summary
 from leadpoet_social_brain.categorization import XPostLLMCategorizer, parse_x_category_response
-from leadpoet_social_brain.content_queue import plan_week_x, post_queue_item_x
+from leadpoet_social_brain.content_queue import create_post_x, plan_week_x, post_queue_item_x
 from leadpoet_social_brain.cli import main as cli_main
 from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.core.models import ContentQueueItem, DraftRequest, EngagementMetrics, SocialPost, TrendItem, utc_now
@@ -30,6 +31,7 @@ from leadpoet_social_brain.platforms.x_api import (
     sync_x_user_posts,
 )
 from leadpoet_social_brain.providers import load_provider_from_env
+from leadpoet_social_brain.providers import resolve_model_routing
 from leadpoet_social_brain.skills import generation_skills, load_skill
 from leadpoet_social_brain.storage.sqlite_store import (
     DB_ENV_VAR,
@@ -37,7 +39,9 @@ from leadpoet_social_brain.storage.sqlite_store import (
     SQLiteStore,
     resolve_db_path,
 )
+from leadpoet_social_brain.trend_scout import WebTrendGroups, refresh_web_trends, web_trend_groups
 from leadpoet_social_brain.web.app import (
+    CREATE_POST_MISSING_PROVIDER_MESSAGE,
     DEFAULT_AUTH_USERNAME,
     MISSING_X_READ_CREDENTIALS_MESSAGE,
     SESSION_COOKIE,
@@ -75,6 +79,51 @@ class FakeProvider:
         while len(texts) < variants:
             texts.append(f"Provider draft {len(texts) + 1}: Leadpoet should make buyer timing obvious.")
         return texts[:variants]
+
+
+class RoleAwareProvider:
+    def __init__(self):
+        self.calls: list[dict[str, str | int | None]] = []
+
+    def generate(self, prompt: str, *, variants: int, model: str | None = None) -> list[str]:
+        self.calls.append({"prompt": prompt, "variants": variants, "model": model})
+        if "Provider smoke test" in prompt:
+            return ["OK"]
+        if "Do not write the post yet" in prompt:
+            return [
+                json.dumps(
+                    {
+                        "core_point": "Sales AI needs account judgment, not more volume.",
+                        "intended_audience": "founders and sales leaders",
+                        "why_timely": "teams are questioning AI SDR volume",
+                        "post_angle": "timing beats automation volume",
+                        "hook_direction": "plain contrast",
+                        "what_to_avoid": "generic AI hype",
+                        "success_criteria": "sounds specific and founder-led",
+                    }
+                )
+            ]
+        if "Write 3 X draft options for Gavin" in prompt:
+            return [
+                "Most sales AI still acts like more volume is the product.\n\nThe useful version knows why this account cares today.",
+                "The hard part of sales AI is not sending.\n\nIt is knowing which buyer has a real reason to listen.",
+                "A sales LLM should not make outbound louder.\n\nIt should make timing obvious.",
+            ][:variants]
+        if "Choose the best X post for Gavin" in prompt:
+            return [
+                json.dumps(
+                    {
+                        "ranked_drafts": [1, 2, 3],
+                        "quality_notes": "Specific, plain, and not corporate.",
+                        "warnings": [],
+                        "suggested_final_version": (
+                            "Most sales AI still acts like more volume is the product.\n\n"
+                            "The useful version knows why this account cares today."
+                        ),
+                    }
+                )
+            ]
+        return ["Default routed draft about buyer timing."][:variants]
 
 
 class FakeXApiClient:
@@ -282,6 +331,9 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('id="accountView"', index_html)
         self.assertIn('id="accountModel"', index_html)
         self.assertIn('id="planModal"', index_html)
+        self.assertIn('id="createPostModal"', index_html)
+        self.assertIn('id="createPostButton"', index_html)
+        self.assertIn('id="createPostReviewerButton"', index_html)
         self.assertIn('id="trendsModal"', index_html)
         self.assertIn('id="postModal"', index_html)
         self.assertIn('id="queueModal"', index_html)
@@ -294,10 +346,16 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('id="accountSyncGrid"', index_html)
         self.assertIn('id="refreshButton"', index_html)
         self.assertIn("Improve with AI", app_js)
+        self.assertIn("Generate Best Version", app_js)
+        self.assertIn("/api/content/create-post", app_js)
+        self.assertIn("No posts to review. Create a post or create a weekly plan to start.", app_js)
         self.assertIn("saveAccount", app_js)
         self.assertIn("/api/account/sync-x-posts", app_js)
         self.assertIn("/api/account/sync-x-metrics", app_js)
         self.assertIn("/api/account/sync-x-all", app_js)
+        self.assertIn("/api/trends/refresh", app_js)
+        self.assertIn("Refresh Trends", index_html)
+        self.assertNotIn('id="addTrendButton"', index_html)
         self.assertIn("/api/publish-due", app_js)
         self.assertIn("/api/plan-week", app_js)
         self.assertNotIn("Railway variables", index_html)
@@ -381,7 +439,11 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(headers["HTTP-Referer"], "https://leadpoet.com")
         self.assertEqual(headers["X-Title"], "Leadpoet Social Brain")
 
-    def test_openrouter_create_provider_requires_key_and_model(self):
+        drafts = provider.generate("Write X posts.", variants=1, model="openai/gpt-4.1-mini")
+        self.assertEqual(drafts, ["First draft about buyer timing.", "Second draft about sales context."][:1])
+        self.assertEqual(captured["payload"]["model"], "openai/gpt-4.1-mini")
+
+    def test_openrouter_create_provider_requires_key_and_allows_model_later(self):
         with patch.dict(
             os.environ,
             {
@@ -403,6 +465,10 @@ class SocialBrainTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 create_provider()
 
+        provider_without_model = OpenRouterProvider(api_key="test-key", model=None, request_json=lambda *_: {})
+        with self.assertRaises(ValueError):
+            provider_without_model.generate("Write.", variants=1)
+
     def test_provider_loader_uses_saved_model_override(self):
         with patch.dict(
             os.environ,
@@ -418,6 +484,39 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(os.environ.get("SOCIAL_BRAIN_MODEL"), "")
 
         self.assertEqual(provider.model, "anthropic/claude-sonnet-4.5")
+
+    def test_model_settings_save_load_and_priority(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.save_app_setting("model.default", "account/default")
+            store.save_app_setting("model.strategist", "account/strategist")
+            with patch.dict(
+                os.environ,
+                {
+                    "SOCIAL_BRAIN_DEFAULT_MODEL": "env/default",
+                    "SOCIAL_BRAIN_NATURAL_WRITER_MODEL": "env/writer",
+                    "SOCIAL_BRAIN_EVALUATOR_MODEL": "env/evaluator",
+                },
+                clear=False,
+            ):
+                routing = resolve_model_routing(store)
+
+            self.assertEqual(routing.default, "account/default")
+            self.assertEqual(routing.strategist, "account/strategist")
+            self.assertEqual(routing.natural_writer, "env/writer")
+            self.assertEqual(routing.evaluator, "env/evaluator")
+            store.close()
+
+    def test_role_specific_blank_values_fall_back_to_default_model(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.save_app_setting("model.default", "account/default")
+            routing = resolve_model_routing(store)
+
+            self.assertEqual(routing.strategist, "account/default")
+            self.assertEqual(routing.natural_writer, "account/default")
+            self.assertEqual(routing.evaluator, "account/default")
+            store.close()
 
     def test_skill_files_load_correctly(self):
         skill = load_skill("global_voice.md")
@@ -611,6 +710,59 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(all(skill.get("sha256") for skill in saved_draft.context_snapshot["skills"]))
             store.close()
 
+    def test_standard_generation_uses_default_model(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            store.save_app_setting("model.default", "openrouter/default")
+            provider = RoleAwareProvider()
+
+            drafts = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(platform="x", topic="sales LLMs", post_type="founder_insight"),
+                variants=1,
+            )
+
+            self.assertEqual(len(provider.calls), 1)
+            self.assertEqual(provider.calls[0]["model"], "openrouter/default")
+            self.assertEqual(drafts[0].context_snapshot["quality_mode"], "standard")
+            self.assertEqual(drafts[0].context_snapshot["default_model"], "openrouter/default")
+            store.close()
+
+    def test_best_version_generation_calls_role_models_and_saves_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            store.save_app_setting("model.default", "openrouter/default")
+            store.save_app_setting("model.strategist", "openrouter/strategy")
+            store.save_app_setting("model.natural_writer", "openrouter/writer")
+            store.save_app_setting("model.evaluator", "openrouter/evaluator")
+            provider = RoleAwareProvider()
+
+            drafts = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="buyer timing beats volume",
+                ),
+                best_version=True,
+            )
+
+            self.assertEqual(len(drafts), 1)
+            self.assertEqual(
+                [call["model"] for call in provider.calls],
+                ["openrouter/strategy", "openrouter/writer", "openrouter/evaluator"],
+            )
+            snapshot = store.get_generated_draft(drafts[0].id).context_snapshot
+            self.assertEqual(snapshot["quality_mode"], "best_version")
+            self.assertEqual(snapshot["strategist_model"], "openrouter/strategy")
+            self.assertEqual(snapshot["natural_writer_model"], "openrouter/writer")
+            self.assertEqual(snapshot["evaluator_model"], "openrouter/evaluator")
+            self.assertIn("strategy_summary", snapshot)
+            self.assertIn("quality_notes", snapshot)
+            self.assertIn("Most sales AI", drafts[0].text)
+            store.close()
+
     def test_style_guide_rebuild_is_writing_guide_not_tag_report(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -698,6 +850,54 @@ class SocialBrainTest(unittest.TestCase):
                 )
 
             self.assertIn("No recent unused trends available", str(error.exception))
+            store.close()
+
+    def test_create_post_x_creates_needs_review_queue_item(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = FakeProvider(["Sales AI needs buyer timing, not a bigger pile of generated emails."])
+            result = create_post_x(
+                store,
+                SocialBrainGenerator(store, provider=provider),
+                instruction="Write about why sales AI needs buyer timing, not just more generated emails.",
+                topic="Leadpoet",
+                post_type="founder_insight",
+                scheduled_at="2026-06-30T10:00",
+                extra_context="Keep it plain and founder-led.",
+            )
+
+            queued = store.list_content_queue(status="needs_review")
+            saved_draft = store.get_generated_draft(result.item.draft_id)
+
+            self.assertEqual(result.item.status, "needs_review")
+            self.assertEqual(result.item.scheduled_at, "2026-06-30T10:00")
+            self.assertEqual(result.item.topic, "Leadpoet")
+            self.assertEqual(result.item.post_type, "founder_insight")
+            self.assertIn("buyer timing", result.item.angle)
+            self.assertIn("Quality mode: Standard", result.item.reviewer_notes)
+            self.assertEqual(len(queued), 1)
+            self.assertEqual(queued[0].id, result.item.id)
+            self.assertEqual(saved_draft.context_snapshot["quality_mode"], "standard")
+            self.assertIn("User instruction: Write about why sales AI needs buyer timing", provider.prompts[0])
+            store.close()
+
+    def test_create_post_x_warns_and_continues_without_trends(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            result = create_post_x(
+                store,
+                SocialBrainGenerator(store, provider=FakeProvider(["Evergreen post about buyer timing."])),
+                instruction="Make the buyer timing point.",
+                topic="Leadpoet",
+                post_type="founder_insight",
+                use_trends=True,
+            )
+
+            self.assertEqual(result.warnings, ["No relevant unused trends found. Created an evergreen post instead."])
+            self.assertEqual(result.item.status, "needs_review")
+            self.assertEqual(result.item.trend_ids, [])
             store.close()
 
     def test_update_and_approve_queued_post_cli(self):
@@ -1000,6 +1200,61 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(accepted["item"]["status"], "needs_review")
             self.assertIsNone(accepted["item"]["approved_at"])
 
+    def test_web_create_post_endpoint_creates_review_item(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.seed_defaults()
+            store.close()
+
+            provider = FakeProvider(["Buyer timing is the real sales AI advantage. More email is not strategy."])
+            with patch("leadpoet_social_brain.web.app.load_provider_from_env", return_value=provider):
+                status, payload = handle_api_request(
+                    "POST",
+                    "/api/content/create-post",
+                    json.dumps(
+                        {
+                            "instruction": "Write about buyer timing, not generated email volume.",
+                            "topic": "Leadpoet",
+                            "post_type": "founder_insight",
+                            "scheduled_at": "2026-06-30T10:00",
+                            "best_version": False,
+                        }
+                    ),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["status"], "needs_review")
+            self.assertEqual(payload["generated_text"], "Buyer timing is the real sales AI advantage. More email is not strategy.")
+            self.assertEqual(payload["item"]["status"], "needs_review")
+            self.assertEqual(payload["item"]["scheduled_at"], "2026-06-30T10:00")
+            self.assertEqual(payload["item"]["quality_mode"], "standard")
+            self.assertIn("buyer timing", payload["item"]["focus"].lower())
+            self.assertEqual(payload["queue_id"], payload["item"]["id"])
+
+            store = SQLiteStore(db_path)
+            saved = store.get_content_queue_item(payload["queue_id"])
+            self.assertEqual(saved.status, "needs_review")
+            self.assertIsNone(saved.approved_at)
+            store.close()
+
+    def test_web_create_post_endpoint_returns_clear_missing_provider_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+
+            with patch("leadpoet_social_brain.web.app.load_provider_from_env", return_value=None):
+                status, payload = handle_api_request(
+                    "POST",
+                    "/api/content/create-post",
+                    json.dumps({"instruction": "Write a post about buyer timing."}),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 400)
+            self.assertEqual(payload["error"], CREATE_POST_MISSING_PROVIDER_MESSAGE)
+
     def test_web_analytics_endpoint_returns_expected_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"
@@ -1052,12 +1307,13 @@ class SocialBrainTest(unittest.TestCase):
             trend = store.save_trend_item(
                 TrendItem(
                     title="AI sales teams move from volume to timing",
-                    source_type="AI",
+                    source_type="web_daily",
                     topic="sales LLMs",
                     summary="More teams are evaluating sales AI by account context instead of volume.",
                     why_it_matters="It supports the Leadpoet positioning.",
                     leadpoet_angle="Tie buyer timing to sales LLM usefulness.",
                     urgency="high",
+                    date=utc_now(),
                 )
             )
             store.close()
@@ -1070,7 +1326,72 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["recent_posts"][0]["metrics"]["likes"], 100)
             self.assertEqual(payload["recent_posts"][0]["metrics"]["impressions"], 2500)
             self.assertEqual(payload["trends"][0]["id"], trend.id)
+            self.assertEqual(payload["trend_groups"]["daily"][0]["id"], trend.id)
             self.assertIn("analytics_hints", payload)
+
+    def test_web_trend_scout_refreshes_daily_and_weekly_groups(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+
+            def fake_fetch(*, timespan: str, limit: int):
+                return [
+                    {
+                        "title": f"{timespan} AI sales trend {index}",
+                        "url": f"https://example.com/{timespan}/{index}",
+                        "seendate": "20260626120000",
+                        "sourceCommonName": "Example News",
+                    }
+                    for index in range(7)
+                ]
+
+            refreshed = refresh_web_trends(store, fetch_articles=fake_fetch)
+            grouped = web_trend_groups(store, now=datetime(2026, 6, 26, 12, 30, tzinfo=timezone.utc))
+
+            self.assertEqual(len(refreshed.daily), 5)
+            self.assertEqual(len(refreshed.weekly), 5)
+            self.assertEqual(len(grouped.daily), 5)
+            self.assertEqual(len(grouped.weekly), 5)
+            self.assertTrue(all(trend.source_type == "web_daily" for trend in grouped.daily))
+            self.assertTrue(all(trend.source_type == "web_weekly" for trend in grouped.weekly))
+            self.assertTrue(all(trend.id.startswith("trend_web_daily_") for trend in grouped.daily))
+            store.close()
+
+    def test_web_trends_refresh_endpoint_returns_daily_and_weekly_groups(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+
+            def fake_refresh(store: SQLiteStore):
+                daily = store.save_trend_item(
+                    TrendItem(
+                        title="Daily AI sales signal",
+                        source_type="web_daily",
+                        topic="sales AI",
+                        summary="Daily signal.",
+                        why_it_matters="It may affect sales workflows.",
+                        leadpoet_angle="Connect it to buyer timing.",
+                        date="2026-06-26T12:00:00+00:00",
+                    )
+                )
+                weekly = store.save_trend_item(
+                    TrendItem(
+                        title="Weekly lead generation signal",
+                        source_type="web_weekly",
+                        topic="lead generation",
+                        summary="Weekly signal.",
+                        why_it_matters="It may affect pipeline strategy.",
+                        leadpoet_angle="Connect it to context.",
+                        date="2026-06-26T12:00:00+00:00",
+                    )
+                )
+                return WebTrendGroups(daily=[daily], weekly=[weekly])
+
+            with patch("leadpoet_social_brain.web.app.refresh_web_trends", side_effect=fake_refresh):
+                status, payload = handle_api_request("POST", "/api/trends/refresh", b"{}", db_path=db_path)
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["trend_groups"]["daily"][0]["title"], "Daily AI sales signal")
+            self.assertEqual(payload["trend_groups"]["weekly"][0]["title"], "Weekly lead generation signal")
 
     def test_web_dashboard_returns_all_posts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1513,7 +1834,8 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(account["settings"]["effective_llm_model"], "anthropic/claude-sonnet-4.5")
 
             store = SQLiteStore(db_path)
-            self.assertEqual(store.get_app_setting("llm_model"), "anthropic/claude-sonnet-4.5")
+            self.assertEqual(store.get_app_setting("model.default"), "anthropic/claude-sonnet-4.5")
+            self.assertIsNone(store.get_app_setting("llm_model"))
             store.close()
 
     def test_web_missing_provider_blocks_ai_edit(self):

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Koinoniko</title>
     <link rel="icon" type="image/svg+xml" href="/static/koinoniko-favicon.svg">
-    <link rel="stylesheet" href="/static/styles.css?v=20260626-dashboard-table-scroll">
+    <link rel="stylesheet" href="/static/styles.css?v=20260626-web-trends">
   </head>
   <body>
     <aside class="sidebar">
@@ -36,6 +36,7 @@
         </div>
         <div class="actions">
           <button class="secondary" id="refreshButton">Refresh</button>
+          <button id="createPostButton">Create Post</button>
           <button id="createPlanButton">Create Weekly Plan</button>
           <button class="secondary" id="syncPostsButton">Sync X Posts</button>
           <button class="secondary" id="syncMetricsButton">Sync Metrics</button>
@@ -53,7 +54,7 @@
                 <span class="eyebrow">Current Trends</span>
                 <h2>Worth considering</h2>
               </div>
-              <button class="secondary" id="openTrendsDashboardButton">Add Trend</button>
+              <button class="secondary" id="openTrendsDashboardButton">Refresh Trends</button>
             </div>
             <div id="dashboardTrendList" class="trend-list"></div>
           </section>
@@ -113,6 +114,7 @@
             <h2>Review, improve, approve, schedule.</h2>
           </div>
           <div class="actions">
+            <button id="createPostReviewerButton">Create Post</button>
             <button id="createPlanReviewerButton">Create Weekly Plan</button>
             <button class="secondary" id="openTrendsButton">Trends</button>
             <button class="secondary hidden" id="publishDueReviewerButton">Post Due</button>
@@ -168,18 +170,32 @@
           <section class="panel">
             <div class="panel-header">
               <div>
-                <span class="eyebrow">Model</span>
-                <h2>Generation Model</h2>
+                <span class="eyebrow">Model routing</span>
+                <h2>Advanced Model Settings</h2>
               </div>
             </div>
             <div class="settings-form">
               <label>
-                OpenRouter model
+                Default model
                 <input id="accountModel" placeholder="anthropic/claude-sonnet-4.5">
               </label>
-              <p class="muted" id="accountModelMeta">Choose the model Social Brain should use for drafts and AI edits.</p>
+              <label>
+                Strategist model
+                <input id="accountStrategistModel" placeholder="optional">
+              </label>
+              <label>
+                Natural writer model
+                <input id="accountNaturalWriterModel" placeholder="optional">
+              </label>
+              <label>
+                Evaluator model
+                <input id="accountEvaluatorModel" placeholder="optional">
+              </label>
+              <p class="muted" id="accountModelMeta">Model names depend on your provider. For OpenRouter, use the OpenRouter model ID.</p>
               <div class="actions left">
-                <button id="saveAccountButton">Save Model</button>
+                <button id="saveAccountButton">Save Model Settings</button>
+                <button class="secondary" id="resetAccountModelsButton">Reset to Env Defaults</button>
+                <button class="secondary" id="testProviderButton">Test Provider</button>
               </div>
             </div>
           </section>
@@ -215,6 +231,42 @@
       </div>
     </section>
 
+    <section class="modal hidden" id="createPostModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="createPostModal"></div>
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <span class="eyebrow">Content Reviewer</span>
+            <h2>Create Post</h2>
+          </div>
+          <button class="icon-button" data-close-modal="createPostModal" aria-label="Close">x</button>
+        </div>
+        <label>What should this post be about?
+          <textarea id="createPostInstruction" rows="4" required placeholder="Write about why sales AI needs buyer timing, not just more generated emails."></textarea>
+        </label>
+        <div class="form-grid">
+          <label>Topic<input id="createPostTopic" value="Leadpoet"></label>
+          <label>Post type<input id="createPostType" value="founder_insight"></label>
+          <label>Quality
+            <select id="createPostQuality">
+              <option value="standard">Standard</option>
+              <option value="best_version">Best Version</option>
+            </select>
+          </label>
+          <label>Schedule time<input id="createPostScheduled" type="datetime-local"></label>
+        </div>
+        <div class="option-row">
+          <label class="inline-check"><input id="createPostUseTrends" type="checkbox"> Use trends</label>
+        </div>
+        <label>Extra instruction<textarea id="createPostExtra" rows="3"></textarea></label>
+        <div class="modal-actions">
+          <button id="generatePostButton">Generate Post</button>
+          <button class="quiet-button" data-close-modal="createPostModal">Cancel</button>
+        </div>
+        <div id="createPostResult" class="stack"></div>
+      </div>
+    </section>
+
     <section class="modal hidden" id="planModal" aria-hidden="true">
       <div class="modal-backdrop" data-close-modal="planModal"></div>
       <div class="modal-card">
@@ -234,6 +286,12 @@
             <select id="planCadence">
               <option value="weekday_mornings">Weekday mornings</option>
               <option value="daily_mornings">Daily mornings</option>
+            </select>
+          </label>
+          <label>Quality
+            <select id="planQuality">
+              <option value="standard">Standard</option>
+              <option value="best_version">Best Version</option>
             </select>
           </label>
         </div>
@@ -263,28 +321,16 @@
         </div>
         <div class="two-column">
           <section class="subsection">
-            <h3>Add Trend</h3>
-            <label>Title<input id="trendTitle"></label>
-            <div class="form-grid">
-              <label>Topic<input id="trendTopic" value="sales LLMs"></label>
-              <label>Source type<input id="trendSourceType" value="news"></label>
-              <label>Urgency
-                <select id="trendUrgency">
-                  <option>medium</option>
-                  <option>high</option>
-                  <option>low</option>
-                </select>
-              </label>
+            <h3>Web Trends</h3>
+            <div class="trend-refresh-card">
+              <span class="eyebrow">Daily + weekly</span>
+              <p>AI / sales / lead generation</p>
+              <button id="refreshTrendsButton">Refresh Trends</button>
             </div>
-            <label>Source URL<input id="trendSourceUrl"></label>
-            <label>Summary<textarea id="trendSummary" rows="3"></textarea></label>
-            <label>Why it matters<textarea id="trendWhy" rows="3"></textarea></label>
-            <label>Koinoniko angle<textarea id="trendAngle" rows="3"></textarea></label>
-            <button id="addTrendButton">Add Trend</button>
           </section>
           <section class="subsection">
             <div class="panel-header">
-              <h3>Unused Trends</h3>
+              <h3>Saved Trends</h3>
               <button class="quiet-button" id="loadTrendsButton">Refresh</button>
             </div>
             <div id="trendList" class="stack"></div>
@@ -293,6 +339,6 @@
       </div>
     </section>
 
-    <script src="/static/app.js?v=20260626-dashboard-table-scroll"></script>
+    <script src="/static/app.js?v=20260626-web-trends"></script>
   </body>
 </html>

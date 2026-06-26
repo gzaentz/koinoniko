@@ -478,6 +478,32 @@ main {
   gap: 8px;
 }
 
+.trend-group {
+  display: grid;
+  gap: 10px;
+}
+
+.trend-group h3 {
+  font-size: 14px;
+}
+
+.trend-group-list {
+  display: grid;
+  gap: 10px;
+}
+
+.trend-refresh-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.trend-refresh-card p {
+  color: var(--muted);
+}
+
 .trend-row p {
   color: var(--muted);
   font-size: 13px;
@@ -576,6 +602,12 @@ main {
 .empty-state {
   color: var(--muted);
   background: var(--soft);
+  display: grid;
+  gap: 12px;
+}
+
+.empty-state p {
+  color: var(--muted);
 }
 
 .account-layout {
@@ -693,6 +725,17 @@ main {
   padding-top: 16px;
   display: grid;
   gap: 12px;
+}
+
+.intent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.intent-actions button {
+  min-height: 34px;
+  font-size: 14px;
 }
 
 .form-grid {
