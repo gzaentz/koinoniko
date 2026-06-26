@@ -144,6 +144,30 @@ SOCIAL_BRAIN_PROVIDER="module.path:create_provider"
 
 Posting to X requires write credentials. Read-only X import and metric sync use `X_BEARER_TOKEN`; posting needs either `X_OAUTH2_ACCESS_TOKEN` or OAuth 1.0a keys. The UI does not auto-post or auto-approve anything.
 
+## Railway Deployment
+
+This repo includes `railway.toml` for the local web UI:
+
+```toml
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "python -m leadpoet_social_brain.web.app --host 0.0.0.0"
+```
+
+The app reads Railway's `PORT` environment variable automatically. Locally it still defaults to `127.0.0.1:8787`.
+
+Required Railway settings:
+
+- Deploy from the `main` branch of `gzaentz/koinonikos`.
+- Set `X_BEARER_TOKEN` if you want X import and metric sync.
+- Set `SOCIAL_BRAIN_PROVIDER=module.path:create_provider` before using generation, planning, or AI edits.
+- Set X write credentials only if you want approved posts to be posted from Railway.
+- Add a Railway volume or external database later if you need persistent SQLite data across redeploys. Without a volume, Railway filesystem data can be ephemeral.
+
+If Railway shows "Unexposed service", open the service settings and generate a public domain after the deployment succeeds. The build/start config makes the app listen on the correct host and port; the domain is still a Railway service setting.
+
 ## Quick Sample Flow
 
 Run the sample context flow without touching the default database:

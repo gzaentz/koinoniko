@@ -44,8 +44,8 @@ JSON_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Leadpoet Social Brain local UI")
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="Path to SQLite database.")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8787)
+    parser.add_argument("--host", default=os.getenv("HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8787")))
     parser.add_argument("--env-file", default=".env", help="Optional local env file to load.")
     args = parser.parse_args(argv)
     load_local_env(args.env_file)

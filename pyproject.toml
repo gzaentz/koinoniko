@@ -9,6 +9,12 @@ dependencies = []
 [project.scripts]
 leadpoet-social-brain = "leadpoet_social_brain.cli:main"
 
+[tool.setuptools.packages.find]
+include = ["leadpoet_social_brain*"]
+
+[tool.setuptools.package-data]
+"leadpoet_social_brain.web" = ["static/*.html", "static/*.css", "static/*.js"]
+
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
