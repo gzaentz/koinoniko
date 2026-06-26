@@ -348,6 +348,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('id="recentPostsTable"', index_html)
         self.assertIn('id="dailyTrendList"', index_html)
         self.assertIn('id="weeklyTrendList"', index_html)
+        self.assertNotIn("All X Posts", index_html)
+        self.assertNotIn("Workflow", index_html)
         self.assertNotIn('id="openTrendsDashboardButton"', index_html)
         self.assertNotIn('id="refreshTrendsButton"', index_html)
         self.assertNotIn("Performance Signals", index_html)
