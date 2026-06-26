@@ -1006,16 +1006,11 @@ function renderAccount() {
   ].join("");
   const models = settings.models || {};
   const effectiveModels = settings.effective_models || {};
-  $("accountModel").value = models.default || "";
-  $("accountStrategistModel").value = models.strategist || "";
-  $("accountNaturalWriterModel").value = models.natural_writer || "";
-  $("accountEvaluatorModel").value = models.evaluator || "";
-  $("accountModelMeta").textContent = [
-    `Default: ${effectiveModels.default || "provider default"}`,
-    `Strategist: ${effectiveModels.strategist || effectiveModels.default || "provider default"}`,
-    `Writer: ${effectiveModels.natural_writer || effectiveModels.default || "provider default"}`,
-    `Evaluator: ${effectiveModels.evaluator || effectiveModels.default || "provider default"}`,
-  ].join(" · ");
+  const defaultModel = models.default || effectiveModels.default || "";
+  $("accountModel").value = defaultModel;
+  setModelInput("accountStrategistModel", models.strategist, effectiveModels.strategist || defaultModel);
+  setModelInput("accountNaturalWriterModel", models.natural_writer, effectiveModels.natural_writer || defaultModel);
+  setModelInput("accountEvaluatorModel", models.evaluator, effectiveModels.evaluator || defaultModel);
   const security = account.security || {};
   $("accountSecurityBlock").innerHTML = `
     <div class="security-row">
@@ -1033,6 +1028,22 @@ function renderAccount() {
   const scrapingdogStatus = connectionStatus(connections.scrapingdog);
   trendsButton.disabled = scrapingdogStatus !== "connected";
   trendsButton.title = trendsButton.disabled ? "Connect ScrapingDog to refresh live trend context." : "Refresh live trend context.";
+}
+
+function setModelInput(id, savedValue, effectiveValue) {
+  const input = $(id);
+  const value = savedValue || effectiveValue || "";
+  input.value = value;
+  input.dataset.inherited = savedValue ? "false" : "true";
+  input.dataset.inheritedValue = savedValue ? "" : value;
+}
+
+function modelValueForSave(id) {
+  const input = $(id);
+  if (input.dataset.inherited === "true" && input.value === input.dataset.inheritedValue) {
+    return "";
+  }
+  return input.value;
 }
 
 function fallbackConnections(status) {
@@ -1144,9 +1155,9 @@ async function saveAccount() {
     body: JSON.stringify({
       models: {
         default: $("accountModel").value,
-        strategist: $("accountStrategistModel").value,
-        natural_writer: $("accountNaturalWriterModel").value,
-        evaluator: $("accountEvaluatorModel").value,
+        strategist: modelValueForSave("accountStrategistModel"),
+        natural_writer: modelValueForSave("accountNaturalWriterModel"),
+        evaluator: modelValueForSave("accountEvaluatorModel"),
       },
     }),
   });
