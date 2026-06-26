@@ -10,6 +10,70 @@ const state = {
   scheduledItems: [],
   draggedQueueId: "",
   queueDetail: null,
+  recentPostsSort: { key: "date", direction: "desc" },
+};
+
+const RECENT_POST_SORT_COLUMNS = {
+  date: {
+    type: "date",
+    defaultDirection: "desc",
+    get: (post) => post.published_at,
+  },
+  post: {
+    type: "text",
+    defaultDirection: "asc",
+    get: (post) => post.summary || summarize(post.text),
+  },
+  topic: {
+    type: "text",
+    defaultDirection: "asc",
+    get: (post) => post.topic,
+  },
+  type: {
+    type: "text",
+    defaultDirection: "asc",
+    get: (post) => label(post.post_type),
+  },
+  likes: {
+    type: "number",
+    defaultDirection: "desc",
+    get: (post) => post.metrics?.likes,
+  },
+  replies: {
+    type: "number",
+    defaultDirection: "desc",
+    get: (post) => post.metrics?.replies,
+  },
+  reposts: {
+    type: "number",
+    defaultDirection: "desc",
+    get: (post) => post.metrics?.reposts,
+  },
+  quotes: {
+    type: "number",
+    defaultDirection: "desc",
+    get: (post) => post.metrics?.quotes,
+  },
+  bookmarks: {
+    type: "number",
+    defaultDirection: "desc",
+    get: (post) => post.metrics?.bookmarks,
+  },
+  impressions: {
+    type: "number",
+    defaultDirection: "desc",
+    get: (post) => post.metrics?.impressions,
+  },
+  er: {
+    type: "number",
+    defaultDirection: "desc",
+    get: (post) => post.metrics?.engagement_rate,
+  },
+  link: {
+    type: "text",
+    defaultDirection: "asc",
+    get: (post) => post.url,
+  },
 };
 
 const views = {
@@ -176,6 +240,7 @@ function renderDashboard() {
 
 function renderRecentPosts() {
   const tbody = $("recentPostsTable");
+  renderRecentPostSortHeaders();
   const posts = filteredRecentPosts();
   if (!posts.length) {
     tbody.innerHTML = `
@@ -192,13 +257,84 @@ function filteredRecentPosts() {
   const search = $("postSearch").value.trim().toLowerCase();
   const from = $("postDateFrom").value;
   const to = $("postDateTo").value;
-  return (state.dashboard?.recent_posts || []).filter((post) => {
+  const filtered = (state.dashboard?.recent_posts || []).filter((post) => {
     const haystack = [post.text, post.summary, post.topic, post.post_type].join(" ").toLowerCase();
     if (search && !haystack.includes(search)) return false;
     const dateText = String(post.published_at || "").slice(0, 10);
     if (from && dateText && dateText < from) return false;
     if (to && dateText && dateText > to) return false;
     return true;
+  });
+  return sortRecentPosts(filtered);
+}
+
+function setRecentPostsSort(key) {
+  const column = RECENT_POST_SORT_COLUMNS[key];
+  if (!column) return;
+  const isCurrentColumn = state.recentPostsSort.key === key;
+  state.recentPostsSort = {
+    key,
+    direction: isCurrentColumn
+      ? (state.recentPostsSort.direction === "asc" ? "desc" : "asc")
+      : column.defaultDirection,
+  };
+  renderRecentPosts();
+}
+
+function sortRecentPosts(posts) {
+  const { key, direction } = state.recentPostsSort;
+  return [...posts].sort((first, second) => {
+    const primary = compareRecentPosts(first, second, key, direction);
+    if (primary) return primary;
+    if (key !== "date") {
+      const fallback = compareRecentPosts(first, second, "date", "desc");
+      if (fallback) return fallback;
+    }
+    return String(first.id || "").localeCompare(String(second.id || ""));
+  });
+}
+
+function compareRecentPosts(first, second, key, direction) {
+  const column = RECENT_POST_SORT_COLUMNS[key] || RECENT_POST_SORT_COLUMNS.date;
+  const firstValue = column.get(first);
+  const secondValue = column.get(second);
+  const firstMissing = isMissingSortValue(firstValue, column.type);
+  const secondMissing = isMissingSortValue(secondValue, column.type);
+  if (firstMissing && secondMissing) return 0;
+  if (firstMissing) return 1;
+  if (secondMissing) return -1;
+
+  let comparison = 0;
+  if (column.type === "number") {
+    comparison = Number(firstValue) - Number(secondValue);
+  } else if (column.type === "date") {
+    comparison = Date.parse(firstValue) - Date.parse(secondValue);
+  } else {
+    comparison = String(firstValue).localeCompare(String(secondValue), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  }
+  if (comparison === 0) return 0;
+  return direction === "asc" ? comparison : -comparison;
+}
+
+function isMissingSortValue(value, type) {
+  if (type === "number") return value === null || value === undefined || value === "" || !Number.isFinite(Number(value));
+  if (type === "date") return !Number.isFinite(Date.parse(value));
+  return value === null || value === undefined || String(value).trim() === "";
+}
+
+function renderRecentPostSortHeaders() {
+  document.querySelectorAll(".posts-table th[data-sort-key]").forEach((header) => {
+    const active = header.dataset.sortKey === state.recentPostsSort.key;
+    header.classList.toggle("is-sorted", active);
+    header.classList.toggle("sort-asc", active && state.recentPostsSort.direction === "asc");
+    header.classList.toggle("sort-desc", active && state.recentPostsSort.direction === "desc");
+    header.setAttribute(
+      "aria-sort",
+      active ? (state.recentPostsSort.direction === "asc" ? "ascending" : "descending") : "none"
+    );
   });
 }
 
@@ -859,6 +995,9 @@ function setup() {
   });
   ["postSearch", "postDateFrom", "postDateTo"].forEach((id) => {
     $(id).addEventListener("input", renderRecentPosts);
+  });
+  document.querySelectorAll(".posts-table th[data-sort-key]").forEach((header) => {
+    header.querySelector("button")?.addEventListener("click", () => setRecentPostsSort(header.dataset.sortKey));
   });
 
   $("refreshButton").addEventListener("click", (event) => runButton(event.currentTarget, "Refreshing...", refresh));

@@ -375,6 +375,47 @@ main {
   letter-spacing: 0;
 }
 
+.table-sort-button {
+  appearance: none;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.table-sort-button:hover,
+.posts-table th.is-sorted .table-sort-button {
+  color: var(--ink);
+}
+
+.sort-indicator {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  opacity: 0;
+}
+
+.posts-table th.is-sorted .sort-indicator {
+  opacity: 1;
+}
+
+.posts-table th.sort-asc .sort-indicator {
+  border-bottom: 6px solid currentColor;
+}
+
+.posts-table th.sort-desc .sort-indicator {
+  border-top: 6px solid currentColor;
+}
+
 .posts-table tbody tr {
   cursor: pointer;
 }

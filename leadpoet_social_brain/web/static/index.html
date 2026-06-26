@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Koinoniko</title>
     <link rel="icon" type="image/svg+xml" href="/static/koinoniko-favicon.svg">
-    <link rel="stylesheet" href="/static/styles.css?v=20260626-marketing-brain">
+    <link rel="stylesheet" href="/static/styles.css?v=20260626-sortable-posts">
   </head>
   <body>
     <aside class="sidebar">
@@ -62,18 +62,18 @@
             <table class="posts-table">
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Post</th>
-                  <th>Topic</th>
-                  <th>Type</th>
-                  <th>Likes</th>
-                  <th>Replies</th>
-                  <th>Reposts</th>
-                  <th>Quotes</th>
-                  <th>Bookmarks</th>
-                  <th>Impressions</th>
-                  <th>ER</th>
-                  <th>Link</th>
+                  <th data-sort-key="date"><button type="button" class="table-sort-button">Date<span class="sort-indicator" aria-hidden="true"></span></button></th>
+                  <th data-sort-key="post"><button type="button" class="table-sort-button">Post<span class="sort-indicator" aria-hidden="true"></span></button></th>
+                  <th data-sort-key="topic"><button type="button" class="table-sort-button">Topic<span class="sort-indicator" aria-hidden="true"></span></button></th>
+                  <th data-sort-key="type"><button type="button" class="table-sort-button">Type<span class="sort-indicator" aria-hidden="true"></span></button></th>
+                  <th data-sort-key="likes"><button type="button" class="table-sort-button">Likes<span class="sort-indicator" aria-hidden="true"></span></button></th>
+                  <th data-sort-key="replies"><button type="button" class="table-sort-button">Replies<span class="sort-indicator" aria-hidden="true"></span></button></th>
+                  <th data-sort-key="reposts"><button type="button" class="table-sort-button">Reposts<span class="sort-indicator" aria-hidden="true"></span></button></th>
+                  <th data-sort-key="quotes"><button type="button" class="table-sort-button">Quotes<span class="sort-indicator" aria-hidden="true"></span></button></th>
+                  <th data-sort-key="bookmarks"><button type="button" class="table-sort-button">Bookmarks<span class="sort-indicator" aria-hidden="true"></span></button></th>
+                  <th data-sort-key="impressions"><button type="button" class="table-sort-button">Impressions<span class="sort-indicator" aria-hidden="true"></span></button></th>
+                  <th data-sort-key="er"><button type="button" class="table-sort-button">ER<span class="sort-indicator" aria-hidden="true"></span></button></th>
+                  <th data-sort-key="link"><button type="button" class="table-sort-button">Link<span class="sort-indicator" aria-hidden="true"></span></button></th>
                 </tr>
               </thead>
               <tbody id="recentPostsTable"></tbody>
@@ -293,6 +293,6 @@
       </div>
     </section>
 
-    <script src="/static/app.js?v=20260626-marketing-brain"></script>
+    <script src="/static/app.js?v=20260626-sortable-posts"></script>
   </body>
 </html>
