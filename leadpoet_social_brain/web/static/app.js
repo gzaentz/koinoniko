@@ -1340,8 +1340,6 @@ function setup() {
   $("planWeekButton").addEventListener("click", (event) => runButton(event.currentTarget, "Creating...", planWeek));
   $("loadTrendsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Loading...", loadTrends));
   $("saveAccountButton").addEventListener("click", (event) => runButton(event.currentTarget, "Saving...", saveAccount));
-  $("resetAccountModelsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Resetting...", resetAccountModels));
-  $("testProviderButton").addEventListener("click", (event) => runButton(event.currentTarget, "Testing...", testProvider));
   $("accountSyncPostsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncPosts));
   $("accountSyncMetricsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncMetrics));
   $("accountSyncAllButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncAllXData));
