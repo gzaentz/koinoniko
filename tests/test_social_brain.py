@@ -245,6 +245,14 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn(DEFAULT_AUTH_USERNAME, output.getvalue())
             store.close()
 
+    def test_web_static_uses_logo_for_favicon_and_brand(self):
+        static_dir = Path("leadpoet_social_brain/web/static")
+        index_html = (static_dir / "index.html").read_text(encoding="utf-8")
+
+        self.assertTrue((static_dir / "koinoniko-logo.svg").exists())
+        self.assertIn('rel="icon" type="image/svg+xml" href="/static/koinoniko-logo.svg"', index_html)
+        self.assertIn('src="/static/koinoniko-logo.svg"', index_html)
+
     def test_openrouter_provider_uses_env_and_parses_variants(self):
         captured: dict[str, object] = {}
 

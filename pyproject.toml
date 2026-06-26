@@ -13,7 +13,7 @@ leadpoet-social-brain = "leadpoet_social_brain.cli:main"
 include = ["leadpoet_social_brain*"]
 
 [tool.setuptools.package-data]
-"leadpoet_social_brain.web" = ["static/*.html", "static/*.css", "static/*.js"]
+"leadpoet_social_brain.web" = ["static/*.html", "static/*.css", "static/*.js", "static/*.svg"]
 
 [build-system]
 requires = ["setuptools>=61"]
