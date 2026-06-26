@@ -70,6 +70,11 @@ button.icon-button {
   border-radius: 50%;
 }
 
+.topbar-refresh {
+  font-size: 20px;
+  line-height: 1;
+}
+
 button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -564,6 +569,41 @@ main {
 
 .board-header {
   margin-bottom: 16px;
+}
+
+.board-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.add-menu-wrap {
+  position: relative;
+}
+
+.board-add-button {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.action-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 4;
+  min-width: 190px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--white);
+  padding: 8px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.12);
+  display: grid;
+  gap: 8px;
+}
+
+.action-menu button {
+  width: 100%;
+  justify-content: flex-start;
 }
 
 .count-pill,

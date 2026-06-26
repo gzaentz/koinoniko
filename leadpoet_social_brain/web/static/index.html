@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260626-type-d3">
+    <link rel="stylesheet" href="/static/styles.css?v=20260626-reviewer-actions">
   </head>
   <body>
     <aside class="sidebar">
@@ -38,12 +38,7 @@
           <p id="viewMeta">What needs attention, what is scheduled, and what is working.</p>
         </div>
         <div class="actions">
-          <button class="secondary" id="refreshButton">Refresh</button>
-          <button id="createPostButton">Create Post</button>
-          <button id="createPlanButton">Create Weekly Plan</button>
-          <button class="secondary" id="syncPostsButton">Sync X Posts</button>
-          <button class="secondary" id="syncMetricsButton">Sync Metrics</button>
-          <button class="secondary hidden" id="publishDueButton">Post Due</button>
+          <button class="secondary icon-button topbar-refresh" id="refreshButton" aria-label="Sync X posts and metrics" title="Sync X posts and metrics">&#8635;</button>
         </div>
       </header>
 
@@ -116,19 +111,22 @@
             <span class="eyebrow">Workflow</span>
             <h2>Review, improve, approve, schedule.</h2>
           </div>
-          <div class="actions">
-            <button id="createPostReviewerButton">Create Post</button>
-            <button id="createPlanReviewerButton">Create Weekly Plan</button>
-            <button class="secondary" id="openTrendsButton">Trends</button>
-            <button class="secondary hidden" id="publishDueReviewerButton">Post Due</button>
-          </div>
         </div>
 
         <div class="board">
           <section class="board-column">
             <div class="board-header">
               <h2>To Review</h2>
-              <span id="reviewCount" class="count-pill">0</span>
+              <div class="board-header-actions">
+                <span id="reviewCount" class="count-pill">0</span>
+                <div class="add-menu-wrap">
+                  <button class="icon-button board-add-button" id="reviewAddButton" aria-label="Create content" aria-haspopup="true" aria-expanded="false">+</button>
+                  <div class="action-menu hidden" id="reviewAddMenu">
+                    <button id="reviewAddPostButton">Create Post</button>
+                    <button class="secondary" id="reviewAddPlanButton">Create Weekly Plan</button>
+                  </div>
+                </div>
+              </div>
             </div>
             <div id="reviewList" class="card-list"></div>
           </section>
@@ -305,7 +303,6 @@
         <label>Optional instruction<textarea id="planInstruction" rows="3" placeholder="Example: make the sales posts sharper and more founder-led."></textarea></label>
         <div class="modal-actions">
           <button id="planWeekButton">Create Plan</button>
-          <button class="secondary" id="manageTrendsFromPlanButton">Manage Trends</button>
           <button class="quiet-button" data-close-modal="planModal">Cancel</button>
         </div>
         <div id="planResult" class="stack"></div>
@@ -342,6 +339,6 @@
       </div>
     </section>
 
-    <script src="/static/app.js?v=20260626-web-trends"></script>
+    <script src="/static/app.js?v=20260626-reviewer-actions"></script>
   </body>
 </html>

@@ -205,25 +205,14 @@ function updateGlobalControls() {
   $("reviewNavBadge").textContent = String(reviewCount);
   $("reviewNavBadge").classList.toggle("muted-badge", reviewCount === 0);
 
-  const dueCount = (state.dashboard?.due || []).length;
-  [$("publishDueButton"), $("publishDueReviewerButton")].forEach((button) => {
-    if (!button) return;
-    button.classList.toggle("hidden", dueCount === 0);
-    button.textContent = dueCount ? `Post Due (${dueCount})` : "Post Due";
-    button.disabled = dueCount === 0 || !state.status?.x_write_configured;
-    button.title = state.status?.x_write_configured ? "" : "X write auth is not connected.";
-  });
+  $("refreshButton").title = state.status?.x_read_configured
+    ? "Sync X posts and metrics"
+    : "Refresh page data. Connect X read auth to sync posts and metrics.";
 
-  [$("createPostButton"), $("createPostReviewerButton"), $("generatePostButton"), $("createPlanButton"), $("createPlanReviewerButton")].forEach((button) => {
+  [$("reviewAddButton"), $("generatePostButton")].forEach((button) => {
     button.disabled = !state.status?.provider_configured;
     button.title = state.status?.provider_configured ? "" : "Provider-backed generation is not connected.";
   });
-
-  $("syncPostsButton").disabled = !state.status?.x_read_configured;
-  $("syncPostsButton").title = state.status?.x_read_configured ? "" : "X read auth is not connected.";
-
-  $("syncMetricsButton").disabled = !state.status?.x_read_configured;
-  $("syncMetricsButton").title = state.status?.x_read_configured ? "" : "X read auth is not connected.";
 
   ["accountSyncPostsButton", "accountSyncMetricsButton", "accountSyncAllButton"].forEach((id) => {
     const button = $(id);
@@ -463,6 +452,7 @@ function renderDashboardSyncLine() {
 }
 
 function renderReviewer() {
+  closeReviewAddMenu();
   $("reviewCount").textContent = String(state.reviewItems.length);
   $("scheduledCount").textContent = String(state.scheduledItems.length);
   $("reviewList").innerHTML = state.reviewItems.length
@@ -835,6 +825,15 @@ async function syncAllXData() {
   await refresh();
 }
 
+async function refreshTopbar() {
+  if (state.status?.x_read_configured) {
+    await syncAllXData();
+    return;
+  }
+  await refresh();
+  showMessage("Refreshed.");
+}
+
 async function publishDue() {
   const payload = await api("/api/publish-due", {
     method: "POST",
@@ -1041,15 +1040,23 @@ function emptyState(text) {
 }
 
 function reviewEmptyState() {
-  return `
-    <div class="empty-state">
-      <p>No posts to review. Create a post or create a weekly plan to start.</p>
-      <div class="actions left">
-        <button onclick="openCreatePostModal()">Create Post</button>
-        <button class="secondary" onclick='openModal("planModal")'>Create Weekly Plan</button>
-      </div>
-    </div>
-  `;
+  return emptyState("No posts to review.");
+}
+
+function setReviewAddMenuOpen(open) {
+  $("reviewAddMenu").classList.toggle("hidden", !open);
+  $("reviewAddButton").setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function toggleReviewAddMenu(event) {
+  event.stopPropagation();
+  if ($("reviewAddButton").disabled) return;
+  setReviewAddMenuOpen($("reviewAddMenu").classList.contains("hidden"));
+}
+
+function closeReviewAddMenu() {
+  if (!$("reviewAddMenu")) return;
+  setReviewAddMenuOpen(false);
 }
 
 function detail(labelText, value) {
@@ -1149,20 +1156,21 @@ function setup() {
     header.querySelector("button")?.addEventListener("click", () => setRecentPostsSort(header.dataset.sortKey));
   });
 
-  $("refreshButton").addEventListener("click", (event) => runButton(event.currentTarget, "Refreshing...", refresh));
-  $("createPostButton").addEventListener("click", openCreatePostModal);
-  $("createPostReviewerButton").addEventListener("click", openCreatePostModal);
-  $("createPlanButton").addEventListener("click", () => openModal("planModal"));
-  $("createPlanReviewerButton").addEventListener("click", () => openModal("planModal"));
-  $("syncPostsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncPosts));
-  $("syncMetricsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncMetrics));
-  $("publishDueButton").addEventListener("click", (event) => runButton(event.currentTarget, "Posting...", publishDue));
-  $("publishDueReviewerButton").addEventListener("click", (event) => runButton(event.currentTarget, "Posting...", publishDue));
+  $("refreshButton").addEventListener("click", (event) => runButton(event.currentTarget, "...", refreshTopbar));
+  $("reviewAddButton").addEventListener("click", toggleReviewAddMenu);
+  $("reviewAddMenu").addEventListener("click", (event) => event.stopPropagation());
+  $("reviewAddPostButton").addEventListener("click", () => {
+    closeReviewAddMenu();
+    openCreatePostModal();
+  });
+  $("reviewAddPlanButton").addEventListener("click", () => {
+    closeReviewAddMenu();
+    openModal("planModal");
+  });
+  document.addEventListener("click", closeReviewAddMenu);
   $("generatePostButton").addEventListener("click", (event) => runButton(event.currentTarget, "Generating...", createPost));
   $("planWeekButton").addEventListener("click", (event) => runButton(event.currentTarget, "Creating...", planWeek));
-  $("openTrendsButton").addEventListener("click", () => window.openTrendsModal().catch((error) => showMessage(error.message, true)));
   $("openTrendsDashboardButton").addEventListener("click", (event) => runButton(event.currentTarget, "Refreshing...", refreshWebTrends));
-  $("manageTrendsFromPlanButton").addEventListener("click", () => window.openTrendsModal().catch((error) => showMessage(error.message, true)));
   $("loadTrendsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Loading...", loadTrends));
   $("refreshTrendsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Refreshing...", refreshWebTrends));
   $("saveAccountButton").addEventListener("click", (event) => runButton(event.currentTarget, "Saving...", saveAccount));
