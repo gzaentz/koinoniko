@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -10,14 +11,24 @@ from unittest.mock import patch
 from pathlib import Path
 
 from leadpoet_social_brain.analytics import build_analytics_summary
+from leadpoet_social_brain.content_queue import plan_week_x, post_queue_item_x
 from leadpoet_social_brain.cli import main as cli_main
 from leadpoet_social_brain.context import ContextManager
-from leadpoet_social_brain.core.models import DraftRequest, EngagementMetrics, TrendItem
+from leadpoet_social_brain.core.models import ContentQueueItem, DraftRequest, EngagementMetrics, TrendItem, utc_now
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
-from leadpoet_social_brain.platforms.x_api import XApiClient, normalize_x_api_post, sync_x_user_posts
+from leadpoet_social_brain.platforms.x_api import (
+    MISSING_X_WRITE_CREDENTIALS_MESSAGE,
+    XApiClient,
+    XPostedTweet,
+    XWriteClient,
+    normalize_x_api_post,
+    sync_x_metrics,
+    sync_x_user_posts,
+)
 from leadpoet_social_brain.skills import generation_skills, load_skill
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
+from leadpoet_social_brain.web.app import handle_api_request
 
 
 class FakeProvider:
@@ -38,8 +49,9 @@ class FakeProvider:
 
 
 class FakeXApiClient:
-    def __init__(self, tweets):
+    def __init__(self, tweets, metrics_by_id=None):
         self.tweets = tweets
+        self.metrics_by_id = metrics_by_id or {}
         self.resolved_usernames: list[str] = []
 
     def resolve_user_id(self, username: str) -> str:
@@ -48,6 +60,26 @@ class FakeXApiClient:
 
     def iter_user_posts(self, user_id: str, **kwargs):
         yield from self.tweets
+
+    def fetch_tweets_by_ids(self, tweet_ids):
+        return {
+            tweet_id: {"id": tweet_id, "public_metrics": self.metrics_by_id[tweet_id]}
+            for tweet_id in tweet_ids
+            if tweet_id in self.metrics_by_id
+        }
+
+
+class FakeXWriteClient:
+    def __init__(self):
+        self.posts: list[str] = []
+
+    def post_tweet(self, text: str) -> XPostedTweet:
+        self.posts.append(text)
+        return XPostedTweet(
+            id=f"posted{len(self.posts)}",
+            text=text,
+            url=f"https://x.com/i/web/status/posted{len(self.posts)}",
+        )
 
 
 class SocialBrainTest(unittest.TestCase):
@@ -270,6 +302,384 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Reusable writing principles", section.content)
             self.assertNotIn("Repeated patterns to consider", section.content)
             store.close()
+
+    def test_plan_week_x_creates_review_queue_with_trend_context(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            trend = store.save_trend_item(
+                TrendItem(
+                    title="Sales teams shift budget from volume to signal quality",
+                    source_type="news",
+                    topic="sales LLMs",
+                    summary="Teams are questioning high-volume outbound workflows.",
+                    why_it_matters="It supports Leadpoet's view that timing beats volume.",
+                    leadpoet_angle="Buyer timing is becoming the real sales AI edge.",
+                    suggested_hooks="The AI SDR debate is really a timing debate.",
+                    date=utc_now(),
+                )
+            )
+            provider = FakeProvider(["Timing is the actual sales AI moat. Volume is just the old stack moving faster."])
+            generator = SocialBrainGenerator(store, provider=provider)
+
+            result = plan_week_x(
+                store,
+                generator,
+                week_start="2026-06-29",
+                posts=1,
+                use_trends=True,
+                trend_window_days=30,
+                topic_mix="sales LLMs:1",
+                cadence="daily_mornings",
+                default_post_type="founder_insight",
+                variants_per_slot=1,
+            )
+            queued = store.list_content_queue(status="needs_review")
+            saved_draft = store.get_generated_draft(queued[0].draft_id)
+
+            self.assertEqual(len(result.queued), 1)
+            self.assertEqual(len(queued), 1)
+            self.assertEqual(queued[0].topic, "sales LLMs")
+            self.assertEqual(queued[0].trend_ids, [trend.id])
+            self.assertIn("Why worth publishing", queued[0].reviewer_notes)
+            self.assertEqual(saved_draft.context_snapshot["selected_trends"][0]["id"], trend.id)
+            store.close()
+
+    def test_plan_week_x_requires_evergreen_opt_in_when_trends_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+
+            with self.assertRaises(ValueError) as error:
+                plan_week_x(
+                    store,
+                    SocialBrainGenerator(store, provider=FakeProvider()),
+                    week_start="2026-06-29",
+                    posts=1,
+                    use_trends=True,
+                    trend_window_days=7,
+                    topic_mix="sales LLMs:1",
+                    cadence="daily_mornings",
+                    default_post_type="founder_insight",
+                    variants_per_slot=1,
+                )
+
+            self.assertIn("No recent unused trends available", str(error.exception))
+            store.close()
+
+    def test_update_and_approve_queued_post_cli(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            item = store.save_content_queue_item(
+                ContentQueueItem(
+                    text="Draft text",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-06-30T10:00:00-04:00",
+                )
+            )
+            store.close()
+
+            with redirect_stdout(io.StringIO()):
+                cli_main(
+                    [
+                        "--db",
+                        str(db_path),
+                        "update-queued-post",
+                        "--queue-id",
+                        item.id,
+                        "--text",
+                        "Edited text",
+                        "--notes",
+                        "Looks good.",
+                    ]
+                )
+                cli_main(
+                    [
+                        "--db",
+                        str(db_path),
+                        "approve-queued-post",
+                        "--queue-id",
+                        item.id,
+                    ]
+                )
+
+            store = SQLiteStore(db_path)
+            updated = store.get_content_queue_item(item.id)
+
+            self.assertEqual(updated.text, "Edited text")
+            self.assertEqual(updated.topic, "sales LLMs")
+            self.assertEqual(updated.status, "approved")
+            self.assertIsNotNone(updated.approved_at)
+            store.close()
+
+    def test_web_queue_listing_update_and_approve(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            item = store.save_content_queue_item(
+                ContentQueueItem(
+                    text="Draft text",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-06-30T10:00:00-04:00",
+                )
+            )
+            store.close()
+
+            status, listed = handle_api_request("GET", "/api/queue?status=needs_review", db_path=db_path)
+            self.assertEqual(status, 200)
+            self.assertEqual(listed["items"][0]["id"], item.id)
+
+            status, updated = handle_api_request(
+                "PATCH",
+                f"/api/queue/{item.id}",
+                json.dumps({"text": "Sharper draft text", "reviewer_notes": "Ready after one edit."}),
+                db_path=db_path,
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(updated["item"]["text"], "Sharper draft text")
+
+            status, approved = handle_api_request("POST", f"/api/queue/{item.id}/approve", b"{}", db_path=db_path)
+            self.assertEqual(status, 200)
+            self.assertEqual(approved["item"]["status"], "approved")
+
+            store = SQLiteStore(db_path)
+            versions = store.list_queued_post_versions(item.id)
+            saved = store.get_content_queue_item(item.id)
+            self.assertEqual(saved.status, "approved")
+            self.assertEqual(versions[0].text, "Draft text")
+            store.close()
+
+    def test_web_llm_edit_does_not_overwrite_until_accepted(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.seed_defaults()
+            item = store.save_content_queue_item(
+                ContentQueueItem(
+                    text="Original queued post.",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-06-30T10:00:00-04:00",
+                )
+            )
+            store.close()
+
+            provider = FakeProvider(["Sales AI should know why this account cares today."])
+            with patch("leadpoet_social_brain.web.app.load_provider_from_env", return_value=provider):
+                status, payload = handle_api_request(
+                    "POST",
+                    f"/api/queue/{item.id}/revise",
+                    json.dumps({"instruction": "Make it more specific.", "variants": 1}),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(len(payload["versions"]), 1)
+            self.assertIn("Original queued post.", provider.prompts[0])
+
+            store = SQLiteStore(db_path)
+            unchanged = store.get_content_queue_item(item.id)
+            self.assertEqual(unchanged.text, "Original queued post.")
+            self.assertEqual(store.list_queued_post_versions(item.id)[0].text, payload["versions"][0]["text"])
+            store.close()
+
+    def test_web_accept_revision_updates_queue_post(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.seed_defaults()
+            item = store.save_content_queue_item(
+                ContentQueueItem(
+                    text="Original approved post.",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-06-30T10:00:00-04:00",
+                    status="approved",
+                    approved_at=utc_now(),
+                )
+            )
+            store.close()
+
+            with patch(
+                "leadpoet_social_brain.web.app.load_provider_from_env",
+                return_value=FakeProvider(["Accepted revision about buyer timing."]),
+            ):
+                status, revisions = handle_api_request(
+                    "POST",
+                    f"/api/queue/{item.id}/revise",
+                    json.dumps({"instruction": "Tighten it.", "variants": 1}),
+                    db_path=db_path,
+                )
+            self.assertEqual(status, 200)
+            version_id = revisions["versions"][0]["id"]
+
+            status, accepted = handle_api_request(
+                "POST",
+                f"/api/queue/{item.id}/versions/{version_id}",
+                b"{}",
+                db_path=db_path,
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(accepted["item"]["text"], "Accepted revision about buyer timing.")
+            self.assertEqual(accepted["item"]["status"], "needs_review")
+            self.assertIsNone(accepted["item"]["approved_at"])
+
+    def test_web_analytics_endpoint_returns_expected_fields(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            ingest_x_post(
+                store,
+                text="The sentence is the easy part. The timing is the work.",
+                url="https://x.com/gavin/status/webanalytics",
+                date="2026-06-25",
+                author="Gavin",
+                topic="sales LLMs",
+                post_type="founder_insight",
+                metrics=EngagementMetrics(impressions=2000, likes=80, replies=5, reposts=8),
+                hook="specific_observation",
+                structure="claim_then_list",
+                tone="plainspoken",
+                cta="none",
+                formatting="short_paragraphs",
+                imitate=True,
+            )
+            store.close()
+
+            status, payload = handle_api_request("GET", "/api/analytics", db_path=db_path)
+
+            self.assertEqual(status, 200)
+            for key in ["by_post_type", "by_topic", "by_hook", "by_structure", "by_tone", "by_cta", "by_formatting", "hints"]:
+                self.assertIn(key, payload)
+            self.assertEqual(payload["by_hook"][0]["key"], "specific_observation")
+
+    def test_web_missing_provider_blocks_ai_edit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            item = store.save_content_queue_item(
+                ContentQueueItem(
+                    text="Original queued post.",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-06-30T10:00:00-04:00",
+                )
+            )
+            store.close()
+
+            with patch("leadpoet_social_brain.web.app.load_provider_from_env", return_value=None):
+                status, payload = handle_api_request(
+                    "POST",
+                    f"/api/queue/{item.id}/revise",
+                    json.dumps({"instruction": "Make it better.", "variants": 1}),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 400)
+            self.assertEqual(payload["error"], MISSING_PROVIDER_MESSAGE)
+
+    def test_web_missing_write_auth_blocks_posting(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            item = store.save_content_queue_item(
+                ContentQueueItem(
+                    text="Approved post ready to publish.",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-06-30T10:00:00-04:00",
+                    status="approved",
+                    approved_at=utc_now(),
+                )
+            )
+            store.close()
+
+            with patch.dict(
+                os.environ,
+                {
+                    "X_OAUTH2_ACCESS_TOKEN": "",
+                    "X_API_KEY": "",
+                    "X_API_SECRET": "",
+                    "X_ACCESS_TOKEN": "",
+                    "X_ACCESS_TOKEN_SECRET": "",
+                },
+                clear=False,
+            ):
+                status, payload = handle_api_request(
+                    "POST",
+                    f"/api/queue/{item.id}/post-now",
+                    b"{}",
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 400)
+            self.assertEqual(payload["error"], MISSING_X_WRITE_CREDENTIALS_MESSAGE)
+
+    def test_post_queue_item_requires_approval_and_creates_published_post(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            draft = SocialBrainGenerator(store, provider=FakeProvider()).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="timing beats volume",
+                ),
+                variants=1,
+            )[0]
+            unapproved = store.save_content_queue_item(
+                ContentQueueItem(
+                    draft_id=draft.id,
+                    text=draft.text,
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="timing beats volume",
+                    scheduled_at="2026-06-30T10:00:00-04:00",
+                    status="needs_review",
+                )
+            )
+            with self.assertRaises(ValueError):
+                post_queue_item_x(store, FakeXWriteClient(), item=unapproved)
+
+            approved = store.save_content_queue_item(
+                ContentQueueItem(
+                    **{
+                        **unapproved.__dict__,
+                        "status": "approved",
+                        "approved_at": utc_now(),
+                    }
+                )
+            )
+            result = post_queue_item_x(store, FakeXWriteClient(), item=approved)
+            saved_item = store.get_content_queue_item(approved.id)
+            post = store.get_post_by_x_post_id("posted1")
+
+            self.assertIsNone(result.error)
+            self.assertEqual(saved_item.status, "posted")
+            self.assertEqual(saved_item.x_post_id, "posted1")
+            self.assertIsNotNone(post)
+            self.assertEqual(post.source_draft_id, draft.id)
+            store.close()
+
+    def test_x_write_client_fails_clearly_without_write_credentials(self):
+        with patch.dict(
+            os.environ,
+            {
+                "X_OAUTH2_ACCESS_TOKEN": "",
+                "X_API_KEY": "",
+                "X_API_SECRET": "",
+                "X_ACCESS_TOKEN": "",
+                "X_ACCESS_TOKEN_SECRET": "",
+            },
+            clear=False,
+        ):
+            with self.assertRaises(ValueError) as error:
+                XWriteClient.from_env()
+
+        self.assertEqual(str(error.exception), MISSING_X_WRITE_CREDENTIALS_MESSAGE)
 
     def test_publishing_draft_preserves_source_and_analyzes_influences(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -665,6 +1075,252 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(result.errors, [])
             self.assertEqual(len(posts), 1)
             self.assertEqual(metrics, {})
+            store.close()
+
+    def test_x_api_sync_skips_replies_and_retweets_but_keeps_quotes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            client = FakeXApiClient(
+                [
+                    {
+                        "id": "original123",
+                        "text": "Original post",
+                        "created_at": "2026-06-25T12:00:00.000Z",
+                    },
+                    {
+                        "id": "quote123",
+                        "text": "Quote tweet",
+                        "created_at": "2026-06-25T12:01:00.000Z",
+                        "referenced_tweets": [{"type": "quoted", "id": "quoted1"}],
+                    },
+                    {
+                        "id": "reply123",
+                        "text": "Reply that should stay out",
+                        "created_at": "2026-06-25T12:02:00.000Z",
+                        "referenced_tweets": [{"type": "replied_to", "id": "reply-parent"}],
+                    },
+                    {
+                        "id": "retweet123",
+                        "text": "Retweet that should stay out",
+                        "created_at": "2026-06-25T12:03:00.000Z",
+                        "referenced_tweets": [{"type": "retweeted", "id": "retweeted-parent"}],
+                    },
+                ]
+            )
+
+            result = sync_x_user_posts(
+                store,
+                client,
+                username="gavinzaentz",
+                limit=10,
+                default_topic="Leadpoet",
+                default_post_type="founder_insight",
+                exclude_replies=True,
+                exclude_retweets=True,
+            )
+            posts = store.list_posts(platform="x", limit=10)
+            urls = {post.url for post in posts}
+
+            self.assertEqual(result.fetched, 4)
+            self.assertEqual(result.imported, 2)
+            self.assertEqual(result.skipped, 2)
+            self.assertIn("https://x.com/gavinzaentz/status/original123", urls)
+            self.assertIn("https://x.com/gavinzaentz/status/quote123", urls)
+            self.assertNotIn("https://x.com/gavinzaentz/status/reply123", urls)
+            self.assertNotIn("https://x.com/gavinzaentz/status/retweet123", urls)
+            store.close()
+
+    def test_sync_x_metrics_appends_snapshots_and_reports_movers(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            post = ingest_x_post(
+                store,
+                text="Metrics should get better over time.",
+                url="https://x.com/gavinzaentz/status/metrics123",
+                date="2026-06-25T12:00:00.000Z",
+                author="gavinzaentz",
+                topic="Leadpoet",
+                post_type="founder_insight",
+                metrics=EngagementMetrics(
+                    impressions=100,
+                    likes=5,
+                    replies=1,
+                    reposts=1,
+                    bookmarks=2,
+                    measured_at="2026-06-25T13:00:00+00:00",
+                ),
+            )
+            client = FakeXApiClient(
+                [],
+                metrics_by_id={
+                    "metrics123": {
+                        "impression_count": 250,
+                        "like_count": 20,
+                        "reply_count": 3,
+                        "retweet_count": 4,
+                        "quote_count": 1,
+                        "bookmark_count": 8,
+                    }
+                },
+            )
+
+            result = sync_x_metrics(store, client, limit=10)
+            history = store.metrics_for_post(post.id, limit=5)
+
+            self.assertEqual(result.checked, 1)
+            self.assertEqual(result.updated, 1)
+            self.assertEqual(result.skipped, 0)
+            self.assertEqual(len(history), 2)
+            self.assertEqual(history[0].impressions, 250)
+            self.assertEqual(history[1].impressions, 100)
+            self.assertEqual(result.top_movers[0].post_id, post.id)
+            self.assertEqual(result.top_movers[0].total_engagement_delta, 27)
+            store.close()
+
+    def test_sync_x_metrics_skips_missing_x_post_ids_cleanly(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            ingest_x_post(
+                store,
+                text="No URL means no X post id.",
+                url=None,
+                date="2026-06-25T12:00:00.000Z",
+                author="gavinzaentz",
+                topic="Leadpoet",
+                post_type="founder_insight",
+            )
+
+            result = sync_x_metrics(store, FakeXApiClient([]), limit=10)
+
+            self.assertEqual(result.checked, 1)
+            self.assertEqual(result.updated, 0)
+            self.assertEqual(result.skipped, 1)
+            self.assertEqual(result.errors, [])
+            store.close()
+
+    def test_analytics_uses_latest_metric_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            post = ingest_x_post(
+                store,
+                text="Latest snapshot should drive analytics.",
+                url="https://x.com/gavinzaentz/status/latest123",
+                date="2026-06-25T12:00:00.000Z",
+                author="gavinzaentz",
+                topic="Leadpoet",
+                post_type="founder_insight",
+                metrics=EngagementMetrics(
+                    impressions=100,
+                    likes=1,
+                    measured_at="2026-06-25T13:00:00+00:00",
+                ),
+            )
+            store.add_metrics(
+                post.id,
+                EngagementMetrics(
+                    impressions=1000,
+                    likes=100,
+                    measured_at="2026-06-25T14:00:00+00:00",
+                ),
+            )
+
+            summary = build_analytics_summary(store)
+
+            self.assertEqual(summary.by_topic[0].key, "Leadpoet")
+            self.assertEqual(summary.by_topic[0].avg_impressions, 1000)
+            self.assertEqual(summary.by_topic[0].avg_engagement_rate, 0.1)
+            store.close()
+
+    def test_update_post_notes_preserves_unspecified_fields(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            post = ingest_x_post(
+                store,
+                text="A strong post.",
+                url="https://x.com/gavinzaentz/status/notes123",
+                date="2026-06-25T12:00:00.000Z",
+                author="gavinzaentz",
+                topic="Leadpoet",
+                post_type="founder_insight",
+                worked_reason="Original reason.",
+                hook="enemy_hook",
+                tone="plainspoken",
+                imitate=True,
+            )
+            store.close()
+
+            with redirect_stdout(io.StringIO()):
+                cli_main(
+                    [
+                        "--db",
+                        str(db_path),
+                        "update-post-notes",
+                        "--post-id",
+                        post.id,
+                        "--worked-reason",
+                        "Updated reason.",
+                        "--topic",
+                        "sales LLMs",
+                    ]
+                )
+
+            store = SQLiteStore(db_path)
+            saved = store.get_post(post.id)
+            note = store.notes_by_post_id([post.id])[post.id]
+
+            self.assertEqual(saved.topic, "sales LLMs")
+            self.assertEqual(saved.post_type, "founder_insight")
+            self.assertEqual(note.worked_reason, "Updated reason.")
+            self.assertEqual(note.hook, "enemy_hook")
+            self.assertEqual(note.tone, "plainspoken")
+            self.assertTrue(note.imitate)
+            store.close()
+
+    def test_update_post_notes_can_mark_imitate_true_and_rebuild_style_guide(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.seed_defaults()
+            post = ingest_x_post(
+                store,
+                text="Most sales AI sounds busy. The useful version knows when to stay quiet.",
+                url="https://x.com/gavinzaentz/status/imitate123",
+                date="2026-06-25T12:00:00.000Z",
+                author="gavinzaentz",
+                topic="Leadpoet",
+                post_type="founder_insight",
+            )
+            store.close()
+
+            with redirect_stdout(io.StringIO()):
+                cli_main(
+                    [
+                        "--db",
+                        str(db_path),
+                        "update-post-notes",
+                        "--post-id",
+                        post.id,
+                        "--worked-reason",
+                        "Strong because it makes a sharp contrast and explains the product point in plain language.",
+                        "--imitate",
+                        "true",
+                        "--topic",
+                        "sales LLMs",
+                        "--post-type",
+                        "founder_insight",
+                        "--structure",
+                        "enemy_then_better_model",
+                    ]
+                )
+
+            store = SQLiteStore(db_path)
+            note = store.notes_by_post_id([post.id])[post.id]
+            section = ContextManager(store).rebuild_style_guide_from_examples()
+
+            self.assertTrue(note.imitate)
+            self.assertIn("Strong because it makes a sharp contrast", section.content)
+            self.assertIn("Name the weak default", section.content)
             store.close()
 
     def test_trend_items_manual_batch_generation_and_publish_linkage(self):

@@ -4,11 +4,37 @@ import argparse
 from pathlib import Path
 
 from leadpoet_social_brain.analytics import build_analytics_summary
+from leadpoet_social_brain.content_queue import (
+    approve_queue_item,
+    approve_week_x,
+    plan_week_x,
+    post_queue_item_x,
+    publish_due_x,
+    require_queue_item,
+    weekly_report_text,
+)
 from leadpoet_social_brain.context import ContextManager
-from leadpoet_social_brain.core.models import ContextSection, DraftRequest, EngagementMetrics, Pattern, TrendItem
+from leadpoet_social_brain.core.models import (
+    ContentQueueItem,
+    ContextSection,
+    DraftRequest,
+    EngagementMetrics,
+    Pattern,
+    PostNote,
+    SocialPost,
+    TrendItem,
+    utc_now,
+)
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
-from leadpoet_social_brain.platforms.x_api import XApiClient, sync_x_user_posts
+from leadpoet_social_brain.platforms.x import get_x_adapter
+from leadpoet_social_brain.platforms.x_api import (
+    MISSING_X_WRITE_CREDENTIALS_MESSAGE,
+    XApiClient,
+    XWriteClient,
+    sync_x_metrics,
+    sync_x_user_posts,
+)
 from leadpoet_social_brain.providers import load_provider_from_env
 from leadpoet_social_brain.storage.sqlite_store import DEFAULT_DB_PATH, SQLiteStore
 
@@ -69,6 +95,28 @@ def build_parser() -> argparse.ArgumentParser:
     sync_x.add_argument("--dry-run", action="store_true")
     sync_x.set_defaults(func=cmd_sync_x_user)
 
+    sync_metrics = subparsers.add_parser("sync-x-metrics", help="Refresh public metrics for stored X posts.")
+    sync_metrics.add_argument("--post-id")
+    sync_metrics.add_argument("--x-post-id")
+    sync_metrics.add_argument("--since-days", type=int)
+    sync_metrics.add_argument("--limit", type=int, default=100)
+    sync_metrics.add_argument("--dry-run", action="store_true")
+    sync_metrics.set_defaults(func=cmd_sync_x_metrics)
+
+    update_notes = subparsers.add_parser("update-post-notes", help="Update notes and labels for an existing post.")
+    update_notes.add_argument("--post-id", required=True)
+    update_notes.add_argument("--worked-reason")
+    update_notes.add_argument("--imitate", choices=["true", "false"])
+    update_notes.add_argument("--topic")
+    update_notes.add_argument("--post-type")
+    update_notes.add_argument("--hook")
+    update_notes.add_argument("--structure")
+    update_notes.add_argument("--tone")
+    update_notes.add_argument("--cta")
+    update_notes.add_argument("--formatting")
+    update_notes.add_argument("--pattern")
+    update_notes.set_defaults(func=cmd_update_post_notes)
+
     add_context = subparsers.add_parser("add-context", help="Add or update a context section.")
     add_context.add_argument("--kind", required=True)
     add_context.add_argument("--name", required=True)
@@ -97,6 +145,56 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--use-trends", action="store_true")
     generate.add_argument("--variants", type=int, default=3)
     generate.set_defaults(func=cmd_generate_x)
+
+    plan_week = subparsers.add_parser("plan-week-x", help="Generate a one-week X content queue.")
+    plan_week.add_argument("--week-start", required=True)
+    plan_week.add_argument("--posts", type=int, default=7)
+    plan_week.add_argument("--use-trends", action="store_true")
+    plan_week.add_argument("--trend-window-days", type=int, default=14)
+    plan_week.add_argument("--topic-mix")
+    plan_week.add_argument("--cadence", default="daily_mornings")
+    plan_week.add_argument("--default-post-type", default="founder_insight")
+    plan_week.add_argument("--variants-per-slot", type=int, default=1)
+    plan_week.add_argument("--allow-evergreen", action="store_true")
+    plan_week.set_defaults(func=cmd_plan_week_x)
+
+    list_queue = subparsers.add_parser("list-content-queue", help="List queued content.")
+    list_queue.add_argument("--status")
+    list_queue.add_argument("--limit", type=int, default=20)
+    list_queue.set_defaults(func=cmd_list_content_queue)
+
+    update_queue = subparsers.add_parser("update-queued-post", help="Edit a queued post.")
+    update_queue.add_argument("--queue-id", required=True)
+    update_queue.add_argument("--text")
+    update_queue.add_argument("--topic")
+    update_queue.add_argument("--post-type")
+    update_queue.add_argument("--angle")
+    update_queue.add_argument("--scheduled-at")
+    update_queue.add_argument("--notes")
+    update_queue.add_argument(
+        "--status",
+        choices=["draft", "needs_review", "approved", "posted", "failed", "skipped"],
+    )
+    update_queue.set_defaults(func=cmd_update_queued_post)
+
+    approve_queue = subparsers.add_parser("approve-queued-post", help="Approve one queued post.")
+    approve_queue.add_argument("--queue-id", required=True)
+    approve_queue.set_defaults(func=cmd_approve_queued_post)
+
+    approve_week = subparsers.add_parser("approve-week-x", help="Approve all needs-review posts in a week.")
+    approve_week.add_argument("--week-start", required=True)
+    approve_week.set_defaults(func=cmd_approve_week_x)
+
+    publish_due = subparsers.add_parser("publish-due-x", help="Post approved queued X items whose time has arrived.")
+    publish_due.add_argument("--now")
+    publish_due.add_argument("--limit", type=int, default=20)
+    publish_due.add_argument("--author", default="Gavin")
+    publish_due.set_defaults(func=cmd_publish_due_x)
+
+    post_now = subparsers.add_parser("post-now-x", help="Immediately post one approved queued X item.")
+    post_now.add_argument("--queue-id", required=True)
+    post_now.add_argument("--author", default="Gavin")
+    post_now.set_defaults(func=cmd_post_now_x)
 
     add_trend = subparsers.add_parser("add-trend", help="Manually add one trend item.")
     add_trend.add_argument("--title", required=True)
@@ -155,6 +253,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     analytics = subparsers.add_parser("analytics", help="Show transparent performance feedback.")
     analytics.set_defaults(func=cmd_analytics)
+
+    weekly_report = subparsers.add_parser("weekly-report-x", help="Summarize recent X performance.")
+    weekly_report.add_argument("--since-days", type=int, default=7)
+    weekly_report.set_defaults(func=cmd_weekly_report_x)
 
     prompt = subparsers.add_parser("prompt-x", help="Print the generation prompt without drafting.")
     prompt.add_argument("--topic", required=True)
@@ -276,6 +378,110 @@ def cmd_sync_x_user(store: SQLiteStore, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sync_x_metrics(store: SQLiteStore, args: argparse.Namespace) -> int:
+    try:
+        client = XApiClient.from_env()
+        result = sync_x_metrics(
+            store,
+            client,
+            post_id=args.post_id,
+            x_post_id=args.x_post_id,
+            since_days=args.since_days,
+            limit=args.limit,
+            dry_run=args.dry_run,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    mode = "Dry run" if args.dry_run else "Sync"
+    print(f"{mode} X metrics")
+    print(f"Posts checked: {result.checked}")
+    if args.dry_run:
+        print(f"Would update: {result.would_update}")
+    else:
+        print(f"Metrics updated: {result.updated}")
+    print(f"Skipped: {result.skipped}")
+    if result.errors:
+        print("Errors:")
+        for error in result.errors[:20]:
+            print(f"- {error}")
+        if len(result.errors) > 20:
+            print(f"- ... {len(result.errors) - 20} more")
+    print("Top movers:")
+    if result.top_movers:
+        for mover in result.top_movers:
+            impression = (
+                f", impressions +{mover.impression_delta}"
+                if mover.impression_delta is not None
+                else ""
+            )
+            print(
+                f"- {mover.post_id}: engagements +{mover.total_engagement_delta}"
+                f"{impression} ({mover.url or 'no url'})"
+            )
+    else:
+        print("- no movement yet")
+    return 0
+
+
+def cmd_update_post_notes(store: SQLiteStore, args: argparse.Namespace) -> int:
+    post = store.get_post(args.post_id)
+    if not post:
+        raise SystemExit(f"No post found for id {args.post_id}")
+
+    if args.post_type and post.platform == "x":
+        get_x_adapter().validate_post_type(args.post_type)
+    if args.topic or args.post_type:
+        post = store.save_post(
+            SocialPost(
+                id=post.id,
+                platform=post.platform,
+                text=post.text,
+                url=post.url,
+                published_at=post.published_at,
+                author=post.author,
+                topic=args.topic or post.topic,
+                post_type=args.post_type or post.post_type,
+                status=post.status,
+                source_draft_id=post.source_draft_id,
+                created_at=post.created_at,
+                updated_at=post.updated_at,
+            )
+        )
+
+    existing = store.notes_by_post_id([post.id]).get(post.id)
+    note = store.save_note(
+        PostNote(
+            post_id=post.id,
+            worked_reason=value_or_existing(args.worked_reason, existing.worked_reason if existing else None),
+            pattern_name=value_or_existing(args.pattern, existing.pattern_name if existing else None),
+            hook=value_or_existing(args.hook, existing.hook if existing else None),
+            structure=value_or_existing(args.structure, existing.structure if existing else None),
+            tone=value_or_existing(args.tone, existing.tone if existing else None),
+            cta=value_or_existing(args.cta, existing.cta if existing else None),
+            formatting=value_or_existing(args.formatting, existing.formatting if existing else None),
+            imitate=(
+                parse_bool_arg(args.imitate)
+                if args.imitate is not None
+                else (existing.imitate if existing else False)
+            ),
+        )
+    )
+
+    print(f"Updated post {post.id}")
+    print(f"Topic: {post.topic}")
+    print(f"Post type: {post.post_type}")
+    print(f"Imitate: {str(note.imitate).lower()}")
+    print(f"Worked reason: {note.worked_reason or 'not set'}")
+    print(f"Pattern: {note.pattern_name or 'not set'}")
+    print(f"Hook: {note.hook or 'not set'}")
+    print(f"Structure: {note.structure or 'not set'}")
+    print(f"Tone: {note.tone or 'not set'}")
+    print(f"CTA: {note.cta or 'not set'}")
+    print(f"Formatting: {note.formatting or 'not set'}")
+    return 0
+
+
 def cmd_add_context(store: SQLiteStore, args: argparse.Namespace) -> int:
     section = store.save_context_section(
         ContextSection(
@@ -329,6 +535,160 @@ def cmd_generate_x(store: SQLiteStore, args: argparse.Namespace) -> int:
         print(draft.text)
         print(f"Explanation: {draft.explanation}")
     return 0
+
+
+def cmd_plan_week_x(store: SQLiteStore, args: argparse.Namespace) -> int:
+    provider = load_provider_from_env()
+    if not provider:
+        raise SystemExit(MISSING_PROVIDER_MESSAGE)
+    generator = SocialBrainGenerator(store, provider=provider)
+    try:
+        result = plan_week_x(
+            store,
+            generator,
+            week_start=args.week_start,
+            posts=args.posts,
+            use_trends=args.use_trends,
+            trend_window_days=args.trend_window_days,
+            topic_mix=args.topic_mix,
+            cadence=args.cadence,
+            default_post_type=args.default_post_type,
+            variants_per_slot=args.variants_per_slot,
+            allow_evergreen=args.allow_evergreen,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    print(f"Planned {len(result.queued)} X post(s)")
+    for warning in result.warnings:
+        print(f"Warning: {warning}")
+    for item in result.queued:
+        trend_titles = [
+            trend.title for trend_id in item.trend_ids
+            if (trend := store.get_trend_item(trend_id)) is not None
+        ]
+        print(f"\n{item.scheduled_at} | {item.topic} | {item.post_type} | id {item.id}")
+        print(item.text)
+        print(f"Trend/source used: {', '.join(trend_titles) if trend_titles else 'none'}")
+        print(item.reviewer_notes or "Why worth publishing: needs review.")
+    return 0
+
+
+def cmd_list_content_queue(store: SQLiteStore, args: argparse.Namespace) -> int:
+    items = store.list_content_queue(status=args.status, platform="x", limit=args.limit)
+    if not items:
+        print("No queued posts found.")
+        return 0
+    for item in items:
+        print(
+            f"{item.id} | {item.status} | {item.scheduled_at} | "
+            f"{item.topic} | {item.post_type}"
+        )
+        print(f"  {item.text}")
+        if item.reviewer_notes:
+            print(f"  Notes: {item.reviewer_notes}")
+        if item.x_url:
+            print(f"  Posted: {item.x_url}")
+        if item.failure_reason:
+            print(f"  Failure: {item.failure_reason}")
+    return 0
+
+
+def cmd_update_queued_post(store: SQLiteStore, args: argparse.Namespace) -> int:
+    try:
+        item = require_queue_item(store, args.queue_id)
+        if args.post_type:
+            get_x_adapter().validate_post_type(args.post_type)
+        status = args.status or item.status
+        approved_at = item.approved_at
+        if status == "approved" and item.status != "approved":
+            approved_at = utc_now()
+        updated = store.save_content_queue_item(
+            ContentQueueItem(
+                id=item.id,
+                platform=item.platform,
+                draft_id=item.draft_id,
+                text=args.text if args.text is not None else item.text,
+                topic=args.topic if args.topic is not None else item.topic,
+                post_type=args.post_type if args.post_type is not None else item.post_type,
+                angle=args.angle if args.angle is not None else item.angle,
+                trend_ids=item.trend_ids,
+                scheduled_at=args.scheduled_at if args.scheduled_at is not None else item.scheduled_at,
+                status=status,
+                reviewer_notes=args.notes if args.notes is not None else item.reviewer_notes,
+                created_at=item.created_at,
+                approved_at=approved_at,
+                posted_at=item.posted_at,
+                x_post_id=item.x_post_id,
+                x_url=item.x_url,
+                failure_reason=item.failure_reason,
+            )
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    print(f"Updated queued post {updated.id}")
+    print(f"Status: {updated.status}")
+    print(f"Scheduled at: {updated.scheduled_at}")
+    print(f"Topic: {updated.topic}")
+    print(f"Post type: {updated.post_type}")
+    print(updated.text)
+    return 0
+
+
+def cmd_approve_queued_post(store: SQLiteStore, args: argparse.Namespace) -> int:
+    try:
+        item = approve_queue_item(store, args.queue_id)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    print(f"Approved queued post {item.id} for {item.scheduled_at}")
+    return 0
+
+
+def cmd_approve_week_x(store: SQLiteStore, args: argparse.Namespace) -> int:
+    try:
+        items = approve_week_x(store, week_start=args.week_start)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    print(f"Approved {len(items)} queued post(s) for week starting {args.week_start}")
+    for item in items:
+        print(f"- {item.id} | {item.scheduled_at} | {item.topic}")
+    return 0
+
+
+def cmd_publish_due_x(store: SQLiteStore, args: argparse.Namespace) -> int:
+    try:
+        client = XWriteClient.from_env()
+        results = publish_due_x(store, client, now=args.now, limit=args.limit, author=args.author)
+    except ValueError as exc:
+        message = str(exc) or MISSING_X_WRITE_CREDENTIALS_MESSAGE
+        raise SystemExit(message) from exc
+
+    if not results:
+        print("No approved X posts are due.")
+        return 0
+    print(f"Processed {len(results)} due queued post(s)")
+    for result in results:
+        if result.posted:
+            print(f"- posted {result.queue_item.id}: {result.posted.url}")
+        else:
+            print(f"- failed {result.queue_item.id}: {result.error}")
+    return 0
+
+
+def cmd_post_now_x(store: SQLiteStore, args: argparse.Namespace) -> int:
+    try:
+        item = require_queue_item(store, args.queue_id)
+        client = XWriteClient.from_env()
+        result = post_queue_item_x(store, client, item=item, author=args.author)
+    except ValueError as exc:
+        message = str(exc) or MISSING_X_WRITE_CREDENTIALS_MESSAGE
+        raise SystemExit(message) from exc
+    if result.posted:
+        print(f"Posted queued item {result.queue_item.id}: {result.posted.url}")
+        return 0
+    print(f"Failed queued item {result.queue_item.id}: {result.error}")
+    return 1
 
 
 def cmd_publish_draft_x(store: SQLiteStore, args: argparse.Namespace) -> int:
@@ -476,6 +836,11 @@ def cmd_analytics(store: SQLiteStore, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_weekly_report_x(store: SQLiteStore, args: argparse.Namespace) -> int:
+    print(weekly_report_text(store, since_days=args.since_days))
+    return 0
+
+
 def cmd_prompt_x(store: SQLiteStore, args: argparse.Namespace) -> int:
     generator = SocialBrainGenerator(store)
     request = DraftRequest(
@@ -538,6 +903,14 @@ def print_counter(counter) -> None:
         return
     for key, count in counter.most_common(5):
         print(f"- {key}: {count}")
+
+
+def parse_bool_arg(value: str) -> bool:
+    return value.strip().lower() == "true"
+
+
+def value_or_existing(value, existing):
+    return value if value is not None else existing
 
 
 if __name__ == "__main__":

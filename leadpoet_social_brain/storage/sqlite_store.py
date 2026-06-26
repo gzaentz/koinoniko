@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from leadpoet_social_brain.core.models import (
+    ContentQueueItem,
     ContextSection,
     DraftRequest,
     EngagementMetrics,
@@ -13,6 +14,7 @@ from leadpoet_social_brain.core.models import (
     Pattern,
     PostInfluence,
     PostNote,
+    QueuedPostVersion,
     SocialPost,
     TrendItem,
     new_id,
@@ -160,6 +162,42 @@ class SQLiteStore:
 
             CREATE INDEX IF NOT EXISTS idx_trend_items_lookup
             ON trend_items(status, urgency, topic, date);
+
+            CREATE TABLE IF NOT EXISTS content_queue (
+                id TEXT PRIMARY KEY,
+                platform TEXT NOT NULL DEFAULT 'x',
+                draft_id TEXT,
+                text TEXT NOT NULL,
+                topic TEXT NOT NULL,
+                post_type TEXT NOT NULL,
+                angle TEXT,
+                trend_ids_json TEXT NOT NULL DEFAULT '[]',
+                scheduled_at TEXT NOT NULL,
+                status TEXT NOT NULL,
+                reviewer_notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                approved_at TEXT,
+                posted_at TEXT,
+                x_post_id TEXT,
+                x_url TEXT,
+                failure_reason TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_content_queue_status_scheduled
+            ON content_queue(status, scheduled_at);
+
+            CREATE TABLE IF NOT EXISTS queued_post_versions (
+                id TEXT PRIMARY KEY,
+                queue_id TEXT NOT NULL REFERENCES content_queue(id) ON DELETE CASCADE,
+                text TEXT NOT NULL,
+                edit_type TEXT NOT NULL,
+                edit_instruction TEXT,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_queued_post_versions_queue_id
+            ON queued_post_versions(queue_id, created_at DESC);
             """
         )
         self._migrate_existing_schema()
@@ -170,6 +208,186 @@ class SQLiteStore:
         for column in ["hook", "structure", "tone", "cta", "formatting"]:
             self._ensure_column("post_notes", column, "TEXT")
         self._ensure_column("generated_drafts", "context_snapshot_json", "TEXT NOT NULL DEFAULT '{}'")
+
+    def save_content_queue_item(self, item: ContentQueueItem) -> ContentQueueItem:
+        now = utc_now()
+        saved = ContentQueueItem(
+            id=item.id,
+            platform=item.platform,
+            draft_id=item.draft_id,
+            text=item.text,
+            topic=item.topic,
+            post_type=item.post_type,
+            angle=item.angle,
+            trend_ids=item.trend_ids,
+            scheduled_at=item.scheduled_at,
+            status=item.status,
+            reviewer_notes=item.reviewer_notes,
+            created_at=item.created_at,
+            updated_at=now,
+            approved_at=item.approved_at,
+            posted_at=item.posted_at,
+            x_post_id=item.x_post_id,
+            x_url=item.x_url,
+            failure_reason=item.failure_reason,
+        )
+        self.conn.execute(
+            """
+            INSERT INTO content_queue (
+                id, platform, draft_id, text, topic, post_type, angle,
+                trend_ids_json, scheduled_at, status, reviewer_notes,
+                created_at, updated_at, approved_at, posted_at, x_post_id,
+                x_url, failure_reason
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                platform = excluded.platform,
+                draft_id = excluded.draft_id,
+                text = excluded.text,
+                topic = excluded.topic,
+                post_type = excluded.post_type,
+                angle = excluded.angle,
+                trend_ids_json = excluded.trend_ids_json,
+                scheduled_at = excluded.scheduled_at,
+                status = excluded.status,
+                reviewer_notes = excluded.reviewer_notes,
+                updated_at = excluded.updated_at,
+                approved_at = excluded.approved_at,
+                posted_at = excluded.posted_at,
+                x_post_id = excluded.x_post_id,
+                x_url = excluded.x_url,
+                failure_reason = excluded.failure_reason
+            """,
+            (
+                saved.id,
+                saved.platform,
+                saved.draft_id,
+                saved.text,
+                saved.topic,
+                saved.post_type,
+                saved.angle,
+                json.dumps(saved.trend_ids),
+                saved.scheduled_at,
+                saved.status,
+                saved.reviewer_notes,
+                saved.created_at,
+                saved.updated_at,
+                saved.approved_at,
+                saved.posted_at,
+                saved.x_post_id,
+                saved.x_url,
+                saved.failure_reason,
+            ),
+        )
+        self.conn.commit()
+        return saved
+
+    def get_content_queue_item(self, queue_id: str) -> ContentQueueItem | None:
+        row = self.conn.execute("SELECT * FROM content_queue WHERE id = ?", (queue_id,)).fetchone()
+        return self._row_to_queue_item(row) if row else None
+
+    def list_content_queue(
+        self,
+        *,
+        status: str | None = None,
+        platform: str | None = None,
+        scheduled_from: str | None = None,
+        scheduled_to: str | None = None,
+        limit: int = 100,
+    ) -> list[ContentQueueItem]:
+        clauses: list[str] = []
+        params: list[object] = []
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if platform:
+            clauses.append("platform = ?")
+            params.append(platform)
+        if scheduled_from:
+            clauses.append("scheduled_at >= ?")
+            params.append(scheduled_from)
+        if scheduled_to:
+            clauses.append("scheduled_at < ?")
+            params.append(scheduled_to)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self.conn.execute(
+            f"""
+            SELECT *
+            FROM content_queue
+            {where}
+            ORDER BY scheduled_at ASC, created_at ASC
+            LIMIT ?
+            """,
+            (*params, limit),
+        ).fetchall()
+        return [self._row_to_queue_item(row) for row in rows]
+
+    def due_content_queue_items(
+        self,
+        *,
+        platform: str = "x",
+        now: str | None = None,
+        limit: int = 20,
+    ) -> list[ContentQueueItem]:
+        rows = self.conn.execute(
+            """
+            SELECT *
+            FROM content_queue
+            WHERE platform = ? AND status = 'approved' AND scheduled_at <= ?
+            ORDER BY scheduled_at ASC, created_at ASC
+            LIMIT ?
+            """,
+            (platform, now or utc_now(), limit),
+        ).fetchall()
+        return [self._row_to_queue_item(row) for row in rows]
+
+    def save_queued_post_version(self, version: QueuedPostVersion) -> QueuedPostVersion:
+        saved = QueuedPostVersion(
+            id=version.id,
+            queue_id=version.queue_id,
+            text=version.text,
+            edit_type=version.edit_type,
+            edit_instruction=version.edit_instruction,
+            created_at=version.created_at,
+        )
+        self.conn.execute(
+            """
+            INSERT INTO queued_post_versions (
+                id, queue_id, text, edit_type, edit_instruction, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                saved.id,
+                saved.queue_id,
+                saved.text,
+                saved.edit_type,
+                saved.edit_instruction,
+                saved.created_at,
+            ),
+        )
+        self.conn.commit()
+        return saved
+
+    def get_queued_post_version(self, version_id: str) -> QueuedPostVersion | None:
+        row = self.conn.execute(
+            "SELECT * FROM queued_post_versions WHERE id = ?",
+            (version_id,),
+        ).fetchone()
+        return self._row_to_queue_version(row) if row else None
+
+    def list_queued_post_versions(self, queue_id: str, *, limit: int = 20) -> list[QueuedPostVersion]:
+        rows = self.conn.execute(
+            """
+            SELECT *
+            FROM queued_post_versions
+            WHERE queue_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (queue_id, limit),
+        ).fetchall()
+        return [self._row_to_queue_version(row) for row in rows]
 
     def _ensure_column(self, table: str, column: str, ddl: str) -> None:
         rows = self.conn.execute(f"PRAGMA table_info({table})").fetchall()
@@ -510,6 +728,13 @@ class SQLiteStore:
         ).fetchall()
         return [self._row_to_trend(row) for row in rows]
 
+    def get_trend_item(self, trend_id: str) -> TrendItem | None:
+        row = self.conn.execute(
+            "SELECT * FROM trend_items WHERE id = ?",
+            (trend_id,),
+        ).fetchone()
+        return self._row_to_trend(row) if row else None
+
     def relevant_trends(
         self,
         *,
@@ -692,23 +917,42 @@ class SQLiteStore:
         ids = list(post_ids or [])
         if ids:
             placeholders = ", ".join("?" for _ in ids)
-            filter_sql = f"WHERE post_id IN ({placeholders})"
+            filter_sql = f"AND pm.post_id IN ({placeholders})"
             params.extend(ids)
         rows = self.conn.execute(
             f"""
             SELECT pm.*
             FROM post_metrics pm
-            JOIN (
-                SELECT post_id, MAX(measured_at) AS measured_at
-                FROM post_metrics
-                {filter_sql}
-                GROUP BY post_id
-            ) latest
-            ON latest.post_id = pm.post_id AND latest.measured_at = pm.measured_at
+            WHERE pm.id = (
+                SELECT latest.id
+                FROM post_metrics AS latest
+                WHERE latest.post_id = pm.post_id
+                ORDER BY latest.measured_at DESC, latest.created_at DESC, latest.id DESC
+                LIMIT 1
+            )
+            {filter_sql}
             """,
             params,
         ).fetchall()
         return {row["post_id"]: self._row_to_metrics(row) for row in rows}
+
+    def metrics_for_post(self, post_id: str, *, limit: int | None = None) -> list[EngagementMetrics]:
+        params: list[object] = [post_id]
+        limit_sql = ""
+        if limit:
+            limit_sql = "LIMIT ?"
+            params.append(limit)
+        rows = self.conn.execute(
+            f"""
+            SELECT *
+            FROM post_metrics
+            WHERE post_id = ?
+            ORDER BY measured_at DESC, created_at DESC, id DESC
+            {limit_sql}
+            """,
+            params,
+        ).fetchall()
+        return [self._row_to_metrics(row) for row in rows]
 
     def notes_by_post_id(self, post_ids: Iterable[str] | None = None) -> dict[str, PostNote]:
         params: list[object] = []
@@ -915,6 +1159,38 @@ class SQLiteStore:
             raw_text=row["raw_text"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+        )
+
+    def _row_to_queue_item(self, row: sqlite3.Row) -> ContentQueueItem:
+        return ContentQueueItem(
+            id=row["id"],
+            platform=row["platform"],
+            draft_id=row["draft_id"],
+            text=row["text"],
+            topic=row["topic"],
+            post_type=row["post_type"],
+            angle=row["angle"],
+            trend_ids=json.loads(row["trend_ids_json"] or "[]"),
+            scheduled_at=row["scheduled_at"],
+            status=row["status"],
+            reviewer_notes=row["reviewer_notes"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            approved_at=row["approved_at"],
+            posted_at=row["posted_at"],
+            x_post_id=row["x_post_id"],
+            x_url=row["x_url"],
+            failure_reason=row["failure_reason"],
+        )
+
+    def _row_to_queue_version(self, row: sqlite3.Row) -> QueuedPostVersion:
+        return QueuedPostVersion(
+            id=row["id"],
+            queue_id=row["queue_id"],
+            text=row["text"],
+            edit_type=row["edit_type"],
+            edit_instruction=row["edit_instruction"],
+            created_at=row["created_at"],
         )
 
     def _sync_note_influences(self, note: PostNote) -> None:

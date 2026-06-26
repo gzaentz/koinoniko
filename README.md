@@ -26,7 +26,9 @@ What it does well:
 - Builds generation prompts from exact examples, human "why it worked" notes, Leadpoet context, skill files, analytics hints, and optional trends.
 - Preserves draft-to-post linkage through `source_draft_id`.
 - Tracks the examples, context sections, patterns, skill files, analytics hints, and trends used for each draft.
-- Lets you add metrics after publishing and analyze what is working.
+- Plans a simple weekly X content queue for review and approval.
+- Provides a minimal local web UI for review, editing, weekly planning, trends, analytics, and approved-only posting.
+- Lets you refresh or add metrics after publishing and analyze what is working.
 - Requires a configured LLM provider for draft generation.
 
 Provider requirement:
@@ -41,15 +43,18 @@ leadpoet_social_brain/
   core/models.py          Platform-neutral data models
   platforms/base.py       Platform adapter protocol
   platforms/x.py          X post types, URL validation, and character limits
-  platforms/x_api.py      Minimal X API client and user-post sync importer
+  platforms/x_api.py      Minimal X API import and public metrics sync
   storage/sqlite_store.py SQLite schema, migrations, and repository functions
   ingestion.py            X example import, trend import, publish workflow
+  content_queue.py        Weekly planning, local queue, approval, posting helpers
   context.py              Context retrieval and style guide rebuilds
   generation.py           Prompt assembly, provider call, draft validation
   skills.py               Tiny markdown skill loader
   providers.py            Optional provider protocol and env loader
   analytics.py            Transparent performance summaries
   cli.py                  Command-line interface
+  web/app.py              Minimal local HTTP API and static UI server
+  web/static/             Single-page local UI assets
 skills/
   global_voice.md
   platforms/x.md
@@ -91,6 +96,53 @@ python3 -m leadpoet_social_brain.cli --db /private/tmp/social_brain_demo.sqlite3
 ```
 
 Use a fresh database path when you want clean demo output.
+
+## Local UI
+
+The local UI is a thin web layer over the same SQLite store and core functions used by the CLI. It has no auth system and is intended for local use only.
+
+Start it from the repo root:
+
+```bash
+python3 -m leadpoet_social_brain.web.app --port 8787
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8787
+```
+
+Optional flags:
+
+```bash
+python3 -m leadpoet_social_brain.web.app \
+  --db data/social_brain.sqlite3 \
+  --host 127.0.0.1 \
+  --port 8787 \
+  --env-file .env
+```
+
+The UI loads `.env` by default if present. It only reads environment variables into the local process; it does not display token values.
+
+The UI supports:
+
+- dashboard status, queue counts, due posts, and analytics hints
+- content queue review, edit, approve, skip, and approved-only post-now
+- AI revisions for queued posts through the configured provider
+- accepting a revision without auto-approval
+- weekly queue planning
+- analytics views
+- trend add/list workflow
+- manual X metrics sync
+
+Generation and AI editing require:
+
+```bash
+SOCIAL_BRAIN_PROVIDER="module.path:create_provider"
+```
+
+Posting to X requires write credentials. Read-only X import and metric sync use `X_BEARER_TOKEN`; posting needs either `X_OAUTH2_ACCESS_TOKEN` or OAuth 1.0a keys. The UI does not auto-post or auto-approve anything.
 
 ## Quick Sample Flow
 
@@ -158,19 +210,28 @@ python3 -m leadpoet_social_brain.cli --db /private/tmp/social_brain_demo.sqlite3
 
 ## Real Workflow
 
+The normal v0.2 loop is:
+
+1. `sync-x-user` to import posts.
+2. `list-posts` to review them.
+3. `update-post-notes` to mark the strongest posts with `imitate=true` and `worked_reason`.
+4. `rebuild-style-guide`.
+5. Add/import current trends.
+6. `plan-week-x` to create a reviewable weekly queue.
+7. Edit and approve queued posts.
+8. `publish-due-x` or `post-now-x` for approved items only.
+9. `sync-x-metrics` after posting.
+10. Review analytics or `weekly-report-x`.
+
+You can do steps 6 through 10 in the local UI after importing posts, annotating winners, and configuring a provider.
+
 Initialize the real local database:
 
 ```bash
 python3 -m leadpoet_social_brain.cli init
 ```
 
-Import your existing X corpus:
-
-```bash
-python3 -m leadpoet_social_brain.cli ingest-x-batch --csv data/x_posts.csv
-```
-
-Or pull your own posts from the X API:
+Pull your own posts from the X API:
 
 ```bash
 export X_BEARER_TOKEN="<your bearer token>"
@@ -182,6 +243,30 @@ python3 -m leadpoet_social_brain.cli sync-x-user \
   --exclude-retweets \
   --default-topic "Leadpoet" \
   --default-post-type founder_insight
+```
+
+CSV import remains available if you already have a hand-built corpus:
+
+```bash
+python3 -m leadpoet_social_brain.cli ingest-x-batch --csv data/x_posts.csv
+```
+
+Review imported posts and copy the IDs for the strongest examples:
+
+```bash
+python3 -m leadpoet_social_brain.cli list-posts --platform x --limit 30
+```
+
+Mark the best examples with human notes:
+
+```bash
+python3 -m leadpoet_social_brain.cli update-post-notes \
+  --post-id "<post id>" \
+  --worked-reason "Strong because it makes a sharp contrast and explains the product point in plain language." \
+  --imitate true \
+  --topic "sales LLMs" \
+  --post-type founder_insight \
+  --structure enemy_then_better_model
 ```
 
 Rebuild the writing guide from posts marked `imitate=true`:
@@ -202,7 +287,7 @@ Configure your provider before generating:
 export SOCIAL_BRAIN_PROVIDER="my_provider_module:create_provider"
 ```
 
-Generate X drafts:
+Generate standalone X drafts:
 
 ```bash
 python3 -m leadpoet_social_brain.cli generate-x \
@@ -211,6 +296,37 @@ python3 -m leadpoet_social_brain.cli generate-x \
   --angle "why buyer context beats AI SDR volume" \
   --use-trends \
   --variants 3
+```
+
+Or plan a week of queued X posts:
+
+```bash
+python3 -m leadpoet_social_brain.cli plan-week-x \
+  --week-start 2026-06-29 \
+  --posts 7 \
+  --use-trends \
+  --trend-window-days 14 \
+  --topic-mix "sales LLMs:3,Bittensor:2,product:2" \
+  --default-post-type founder_insight
+```
+
+Review, edit, and approve:
+
+```bash
+python3 -m leadpoet_social_brain.cli list-content-queue --status needs_review
+
+python3 -m leadpoet_social_brain.cli update-queued-post \
+  --queue-id "<queue id>" \
+  --text "edited post text" \
+  --scheduled-at "2026-06-30T10:00:00-04:00"
+
+python3 -m leadpoet_social_brain.cli approve-queued-post --queue-id "<queue id>"
+```
+
+Approved queued posts can be published when due:
+
+```bash
+python3 -m leadpoet_social_brain.cli publish-due-x
 ```
 
 Publish a draft into the system:
@@ -223,17 +339,12 @@ python3 -m leadpoet_social_brain.cli publish-draft-x \
   --author "Gavin"
 ```
 
-Add metrics after the post has had time to perform:
+Refresh public metrics after the post has had time to perform:
 
 ```bash
-python3 -m leadpoet_social_brain.cli add-metrics \
-  --post-id "<post id>" \
-  --impressions 22000 \
-  --likes 390 \
-  --replies 41 \
-  --reposts 62 \
-  --quotes 14 \
-  --bookmarks 120
+python3 -m leadpoet_social_brain.cli sync-x-metrics --post-id "<post id>"
+
+python3 -m leadpoet_social_brain.cli sync-x-metrics --since-days 90
 ```
 
 Review what is working:
@@ -413,6 +524,43 @@ The importer requests public metrics only. It maps available metrics into impres
 
 URL clicks, profile clicks, private analytics, and some impression data may require user-context auth or elevated API access. Those are intentionally not part of this simple importer.
 
+## X Metrics Sync
+
+Use `sync-x-metrics` to refresh public metrics for posts already stored in Social Brain.
+
+```bash
+export X_BEARER_TOKEN="<your bearer token>"
+
+python3 -m leadpoet_social_brain.cli sync-x-metrics --since-days 90
+
+python3 -m leadpoet_social_brain.cli sync-x-metrics --post-id "<post id>"
+
+python3 -m leadpoet_social_brain.cli sync-x-metrics --dry-run
+```
+
+What to know:
+
+- `sync-x-user` imports posts and their initial public metrics when the X API returns them.
+- `sync-x-metrics` refreshes metrics for existing stored posts with parseable X URLs.
+- Each refresh appends a new metric snapshot. It does not overwrite older snapshots.
+- Analytics uses the latest metric snapshot by default.
+- `add-metrics` remains available for manual corrections or metrics you collect elsewhere.
+- Public metrics are supported for now: impressions, likes, replies, reposts, quotes, and bookmarks when available.
+- Private clicks, profile clicks, and richer creator analytics are not included yet.
+
+Useful filters:
+
+```bash
+python3 -m leadpoet_social_brain.cli sync-x-metrics \
+  --x-post-id "<x post id>"
+
+python3 -m leadpoet_social_brain.cli sync-x-metrics \
+  --since-days 30 \
+  --limit 50
+```
+
+The command prints posts checked, metrics updated, skipped posts, errors, and top movers since the previous snapshot when there is enough history.
+
 ## Context
 
 Seeded context is editable and modular.
@@ -536,9 +684,90 @@ python3 -m leadpoet_social_brain.cli generate-x \
   --max-chars 280
 ```
 
+## Weekly Content Calendar
+
+`plan-week-x` creates a local posting queue. It does not post anything.
+
+It uses:
+
+- high-performing examples
+- observed writing guide
+- Leadpoet context
+- recent unused Trend Scout items when requested
+- analytics hints
+- skill files
+
+Plan a week:
+
+```bash
+python3 -m leadpoet_social_brain.cli plan-week-x \
+  --week-start 2026-06-29 \
+  --posts 7 \
+  --use-trends \
+  --trend-window-days 14 \
+  --topic-mix "sales LLMs:3,Bittensor:2,product:2" \
+  --cadence daily_mornings \
+  --default-post-type founder_insight
+```
+
+If `--use-trends` is passed and there are no recent unused trends, planning fails clearly instead of inventing news. To allow evergreen authority posts, pass:
+
+```bash
+python3 -m leadpoet_social_brain.cli plan-week-x \
+  --week-start 2026-06-29 \
+  --posts 7 \
+  --allow-evergreen
+```
+
+Review and edit:
+
+```bash
+python3 -m leadpoet_social_brain.cli list-content-queue --status needs_review
+
+python3 -m leadpoet_social_brain.cli update-queued-post \
+  --queue-id "<queue id>" \
+  --text "edited post text" \
+  --topic "sales LLMs" \
+  --post-type founder_insight \
+  --scheduled-at "2026-06-30T10:00:00-04:00" \
+  --notes "Looks strong after edit."
+```
+
+Approve:
+
+```bash
+python3 -m leadpoet_social_brain.cli approve-queued-post --queue-id "<queue id>"
+
+python3 -m leadpoet_social_brain.cli approve-week-x --week-start 2026-06-29
+```
+
+Nothing posts unless the queued item has `status=approved`.
+
+Post approved items:
+
+```bash
+python3 -m leadpoet_social_brain.cli post-now-x --queue-id "<queue id>"
+
+python3 -m leadpoet_social_brain.cli publish-due-x
+```
+
+For simple local scheduling, use cron or launchd to run:
+
+```bash
+python3 -m leadpoet_social_brain.cli publish-due-x
+```
+
+every 15 to 60 minutes. Social Brain does not run a background service.
+
+Weekly learning:
+
+```bash
+python3 -m leadpoet_social_brain.cli weekly-report-x --since-days 7
+```
+
 ## LLM Provider Mode
 
-Draft generation requires an LLM provider. Set `SOCIAL_BRAIN_PROVIDER` to `module.path:create_provider`.
+Draft generation and weekly planning require an LLM provider. Set `SOCIAL_BRAIN_PROVIDER` to `module.path:create_provider`.
 
 If no provider is configured, `generate-x` exits with:
 
@@ -571,6 +800,35 @@ python3 -m leadpoet_social_brain.cli generate-x \
 ```
 
 The provider can call any LLM you want. `generation.py` only assembles the prompt, calls `provider.generate(...)`, validates the returned drafts, and saves context metadata.
+
+## X Write Auth
+
+`X_BEARER_TOKEN` is for reading posts and public metrics. Posting requires user-context write credentials.
+
+Supported env options:
+
+OAuth 2.0 user access token:
+
+```bash
+export X_OAUTH2_ACCESS_TOKEN="<user access token with tweet.write>"
+```
+
+OAuth 1.0a user context:
+
+```bash
+export X_API_KEY="<consumer key>"
+export X_API_SECRET="<consumer secret>"
+export X_ACCESS_TOKEN="<access token>"
+export X_ACCESS_TOKEN_SECRET="<access token secret>"
+```
+
+Credentials stay in environment variables only. They are not stored in SQLite.
+
+If write auth is missing, posting commands exit with:
+
+```text
+No X write credentials configured. Set X write auth credentials before posting.
+```
 
 ## Trend Scout
 
@@ -724,6 +982,8 @@ Each draft stores:
 
 Publishing a draft creates a `posts` row with `status=published` and `source_draft_id=<draft id>`.
 
+Publishing an approved queued item also creates a normal `posts` row and keeps the queue row linked through its `draft_id`, trend IDs, X post ID, and X URL.
+
 ```bash
 python3 -m leadpoet_social_brain.cli publish-draft-x \
   --draft-id "<draft id>" \
@@ -759,6 +1019,25 @@ python3 -m leadpoet_social_brain.cli add-metrics \
   --reposts 62 \
   --quotes 14 \
   --bookmarks 120
+```
+
+For stored X posts with parseable URLs, you can refresh public metrics from the X API instead:
+
+```bash
+python3 -m leadpoet_social_brain.cli sync-x-metrics --post-id "<post id>"
+```
+
+`sync-x-metrics` appends a new metric snapshot. `add-metrics` is still useful for manual correction.
+
+Update notes on imported posts after review:
+
+```bash
+python3 -m leadpoet_social_brain.cli update-post-notes \
+  --post-id "<post id>" \
+  --worked-reason "Strong because it says the quiet product truth plainly." \
+  --imitate true \
+  --hook specific_observation \
+  --tone plainspoken
 ```
 
 List stored posts:
@@ -809,10 +1088,12 @@ Analytics is intentionally transparent. It should inform future prompts without 
 SQLite tables:
 
 - `posts`: platform, text, URL, published date, author, topic, post type, status, optional `source_draft_id`
-- `post_metrics`: impressions, likes, replies, reposts, quotes, bookmarks, engagement rate snapshots
+- `post_metrics`: measured snapshots for impressions, likes, replies, reposts, quotes, bookmarks, and engagement rate
 - `post_notes`: manual notes, why-it-worked rationale, hook, structure, tone, CTA, formatting, pattern, imitation flag
 - `post_influences`: links from posts to draft-selected examples, context, patterns, analytics hints, and trends
 - `generated_drafts`: draft text, request, explanation, influence labels, structured context snapshot
+- `content_queue`: local review/approval/posting queue for planned X content
+- `queued_post_versions`: manual and AI edit history for queued posts
 - `trend_items`: optional timely market context
 - `patterns`: reusable named patterns
 - `context_sections`: modular Leadpoet context and style guide sections
@@ -821,6 +1102,8 @@ The most important linkage:
 
 ```text
 generated_drafts.id -> posts.source_draft_id -> post_influences -> post_metrics
+content_queue.draft_id -> generated_drafts.id -> posts.source_draft_id
+content_queue.id -> queued_post_versions.queue_id
 ```
 
 That lets later metrics be analyzed against the context and trends that shaped the draft.
@@ -834,9 +1117,18 @@ init
 ingest-x
 ingest-x-batch
 sync-x-user
+sync-x-metrics
+update-post-notes
 add-context
 add-pattern
 generate-x
+plan-week-x
+list-content-queue
+update-queued-post
+approve-queued-post
+approve-week-x
+publish-due-x
+post-now-x
 add-trend
 ingest-trends-batch
 list-trends
@@ -846,6 +1138,7 @@ add-metrics
 list-posts
 rebuild-style-guide
 analytics
+weekly-report-x
 prompt-x
 ```
 
@@ -855,8 +1148,13 @@ Use built-in help for details:
 python3 -m leadpoet_social_brain.cli --help
 python3 -m leadpoet_social_brain.cli generate-x --help
 python3 -m leadpoet_social_brain.cli sync-x-user --help
+python3 -m leadpoet_social_brain.cli sync-x-metrics --help
+python3 -m leadpoet_social_brain.cli update-post-notes --help
+python3 -m leadpoet_social_brain.cli plan-week-x --help
+python3 -m leadpoet_social_brain.cli publish-due-x --help
 python3 -m leadpoet_social_brain.cli ingest-x-batch --help
 python3 -m leadpoet_social_brain.cli add-trend --help
+python3 -m leadpoet_social_brain.web.app --help
 ```
 
 ## Tests
@@ -886,8 +1184,15 @@ Current tests cover:
 - X API duplicate prevention and pagination
 - `sync-x-user --dry-run`
 - missing X API metrics
+- `sync-x-metrics` snapshot appends, skipped unresolved posts, and latest-snapshot analytics
+- `update-post-notes` field preservation and `imitate=true` workflow
 - style guide rebuild quality
 - provider-required generation behavior
+- weekly X planning into a local review queue
+- local UI API queue listing, editing, approval, AI revise, revision acceptance, and safety guards
+- trend-required planning guard and evergreen opt-in
+- queued post editing, approval, and approval gate before posting
+- X write credential failure messaging
 - draft-to-post source linkage
 - trend item storage
 - trend CSV import

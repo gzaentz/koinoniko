@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Social Brain</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <span>Leadpoet</span>
+        <strong>Social Brain</strong>
+      </div>
+      <nav>
+        <button class="nav-button active" data-view="dashboard">Dashboard</button>
+        <button class="nav-button" data-view="queue">Content Queue</button>
+        <button class="nav-button" data-view="edit">AI Edit Panel</button>
+        <button class="nav-button" data-view="planner">Weekly Planner</button>
+        <button class="nav-button" data-view="analytics">Analytics</button>
+        <button class="nav-button" data-view="trends">Trends</button>
+      </nav>
+      <div class="status-block" id="statusBlock"></div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div>
+          <h1 id="viewTitle">Dashboard</h1>
+          <p id="viewMeta">Local review and posting queue</p>
+        </div>
+        <div class="actions">
+          <button id="refreshButton">Refresh</button>
+          <button id="syncMetricsButton">Sync Metrics</button>
+          <button id="publishDueButton">Post Due</button>
+        </div>
+      </header>
+
+      <section id="message" class="message hidden"></section>
+
+      <section class="view active" id="dashboardView">
+        <div class="summary-grid" id="summaryGrid"></div>
+        <div class="two-column">
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Due Now</h2>
+            </div>
+            <div id="dueList" class="stack"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Signals</h2>
+            </div>
+            <div id="hintList" class="stack"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="queueView">
+        <div class="toolbar">
+          <label>
+            Status
+            <select id="queueStatus">
+              <option value="">All</option>
+              <option value="needs_review" selected>Needs review</option>
+              <option value="approved">Approved</option>
+              <option value="posted">Posted</option>
+              <option value="skipped">Skipped</option>
+              <option value="failed">Failed</option>
+            </select>
+          </label>
+          <button id="loadQueueButton">Load Queue</button>
+        </div>
+        <div id="queueList" class="queue-list"></div>
+      </section>
+
+      <section class="view" id="editView">
+        <div class="two-column edit-grid">
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Queued Post</h2>
+            </div>
+            <label>
+              Queue ID
+              <input id="editQueueId" placeholder="Select a post or paste an id">
+            </label>
+            <button id="loadEditButton">Load</button>
+            <textarea id="editText" rows="10" placeholder="Queued post text"></textarea>
+            <div class="form-grid">
+              <label>Topic<input id="editTopic"></label>
+              <label>Post type<input id="editPostType"></label>
+              <label>Scheduled<input id="editScheduled"></label>
+              <label>Status<input id="editStatus"></label>
+            </div>
+            <label>Notes<textarea id="editNotes" rows="4"></textarea></label>
+            <div class="actions left">
+              <button id="saveEditButton">Save</button>
+              <button id="approveEditButton">Approve</button>
+              <button id="skipEditButton">Skip</button>
+              <button id="postNowEditButton">Post Now</button>
+            </div>
+          </section>
+          <section class="panel">
+            <div class="panel-header">
+              <h2>AI Revision</h2>
+            </div>
+            <label>
+              Instruction
+              <textarea id="revisionInstruction" rows="5" placeholder="Make it sharper and more specific to sales teams evaluating AI SDR tools."></textarea>
+            </label>
+            <button id="reviseButton">Generate Revisions</button>
+            <div id="revisionList" class="stack"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="plannerView">
+        <section class="panel planner-panel">
+          <div class="panel-header">
+            <h2>Weekly Planner</h2>
+          </div>
+          <div class="form-grid">
+            <label>Week start<input id="planWeekStart" type="date"></label>
+            <label>Posts<input id="planPosts" type="number" min="1" max="14" value="5"></label>
+            <label>Topic mix<input id="planTopicMix" value="sales LLMs:3,Bittensor:2"></label>
+            <label>Post type<input id="planPostType" value="founder_insight"></label>
+            <label>Cadence
+              <select id="planCadence">
+                <option value="weekday_mornings">Weekday mornings</option>
+                <option value="daily_mornings">Daily mornings</option>
+              </select>
+            </label>
+            <label>Trend window<input id="planTrendWindow" type="number" min="1" value="14"></label>
+          </div>
+          <label class="inline-check"><input id="planUseTrends" type="checkbox"> Use trends</label>
+          <label class="inline-check"><input id="planAllowEvergreen" type="checkbox" checked> Allow evergreen</label>
+          <button id="planWeekButton">Create Queue</button>
+          <div id="planResult" class="stack"></div>
+        </section>
+      </section>
+
+      <section class="view" id="analyticsView">
+        <div id="analyticsHints" class="stack"></div>
+        <div class="analytics-grid" id="analyticsGrid"></div>
+      </section>
+
+      <section class="view" id="trendsView">
+        <div class="two-column">
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Add Trend</h2>
+            </div>
+            <label>Title<input id="trendTitle"></label>
+            <div class="form-grid">
+              <label>Topic<input id="trendTopic" value="sales LLMs"></label>
+              <label>Source type<input id="trendSourceType" value="news"></label>
+              <label>Urgency
+                <select id="trendUrgency">
+                  <option>medium</option>
+                  <option>high</option>
+                  <option>low</option>
+                </select>
+              </label>
+              <label>Status
+                <select id="trendStatus">
+                  <option>unused</option>
+                  <option>used</option>
+                  <option>skipped</option>
+                </select>
+              </label>
+            </div>
+            <label>Source URL<input id="trendSourceUrl"></label>
+            <label>Summary<textarea id="trendSummary" rows="3"></textarea></label>
+            <label>Why it matters<textarea id="trendWhy" rows="3"></textarea></label>
+            <label>Leadpoet angle<textarea id="trendAngle" rows="3"></textarea></label>
+            <button id="addTrendButton">Add Trend</button>
+          </section>
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Trend List</h2>
+            </div>
+            <div class="toolbar">
+              <label>Status
+                <select id="trendFilterStatus">
+                  <option value="unused">Unused</option>
+                  <option value="">All</option>
+                  <option value="used">Used</option>
+                  <option value="skipped">Skipped</option>
+                </select>
+              </label>
+              <button id="loadTrendsButton">Load Trends</button>
+            </div>
+            <div id="trendList" class="stack"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
+

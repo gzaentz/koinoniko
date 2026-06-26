@@ -84,6 +84,11 @@ class SocialBrainGenerator:
         raise ValueError(f"Unsupported platform '{platform}'. Add a platform adapter first.")
 
     def _trends_for(self, request: DraftRequest) -> list[TrendItem]:
+        if request.trend_ids:
+            return [
+                trend for trend_id in request.trend_ids
+                if (trend := self.store.get_trend_item(trend_id)) is not None
+            ]
         if not request.use_trends:
             return []
         return self.store.relevant_trends(topic=request.topic, angle=request.angle, limit=3)

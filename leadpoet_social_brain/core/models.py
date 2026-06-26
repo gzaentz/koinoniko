@@ -143,6 +143,38 @@ class TrendItem:
 
 
 @dataclass(frozen=True)
+class ContentQueueItem:
+    text: str
+    topic: str
+    post_type: str
+    scheduled_at: str
+    platform: str = "x"
+    draft_id: str | None = None
+    angle: str | None = None
+    trend_ids: list[str] = field(default_factory=list)
+    status: str = "needs_review"
+    reviewer_notes: str | None = None
+    approved_at: str | None = None
+    posted_at: str | None = None
+    x_post_id: str | None = None
+    x_url: str | None = None
+    failure_reason: str | None = None
+    id: str = field(default_factory=new_id)
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class QueuedPostVersion:
+    queue_id: str
+    text: str
+    edit_type: str
+    edit_instruction: str | None = None
+    id: str = field(default_factory=new_id)
+    created_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
 class DraftRequest:
     platform: str
     topic: str
@@ -154,6 +186,7 @@ class DraftRequest:
     max_chars: int | None = None
     extra_context: str | None = None
     use_trends: bool = False
+    trend_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
