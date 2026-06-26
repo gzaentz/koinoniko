@@ -587,7 +587,7 @@ function dashboardTrendRow(item) {
   return `
     <article class="trend-row" role="button" tabindex="0" onclick='openTrendDetails(${jsArg(item.id)})' onkeydown='openTrendDetailsFromKey(event, ${jsArg(item.id)})'>
       <div class="meta-row">
-        <span>${escapeHtml(item.topic || "")}</span>
+        <span>${escapeHtml(label(item.topic || ""))}</span>
         ${item.source_url ? `<a href="${escapeAttr(item.source_url)}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">Source</a>` : ""}
       </div>
       <h3>${escapeHtml(item.title)}</h3>
@@ -613,7 +613,7 @@ window.openTrendDetails = (id) => {
   $("trendModalTitle").textContent = trend.title || "Trend details";
   $("trendModalBody").innerHTML = `
     <div class="detail-grid">
-      ${detail("Topic", trend.topic || "Unknown")}
+      ${detail("Topic", label(trend.topic || "Unknown"))}
       ${detail("Urgency", label(trend.urgency || "medium"))}
       ${detail("Type", label(trend.source_type || "trend"))}
       ${detail("Date", formatDateTime(trend.date))}
@@ -1325,7 +1325,7 @@ function trendCard(item) {
     <article class="trend-card" role="button" tabindex="0" onclick='openTrendDetails(${jsArg(item.id)})' onkeydown='openTrendDetailsFromKey(event, ${jsArg(item.id)})'>
       <div class="meta-row">
         <span class="tag">${escapeHtml(item.urgency || "medium")}</span>
-        <span>${escapeHtml(item.topic || "")}</span>
+        <span>${escapeHtml(label(item.topic || ""))}</span>
         <span>${escapeHtml(label(item.source_type || ""))}</span>
       </div>
       <h3>${escapeHtml(item.title)}</h3>

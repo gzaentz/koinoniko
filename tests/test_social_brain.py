@@ -435,6 +435,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("status-badge", app_js)
         self.assertIn("openTrendDetails", app_js)
         self.assertIn("Stored Source Detail", app_js)
+        self.assertIn("escapeHtml(label(item.topic || \"\"))", app_js)
+        self.assertIn("detail(\"Topic\", label(trend.topic || \"Unknown\"))", app_js)
         self.assertNotIn('id="addTrendButton"', index_html)
         self.assertIn("/api/publish-due", app_js)
         self.assertIn("/api/plan-week", app_js)
