@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Koinoniko</title>
     <link rel="icon" type="image/svg+xml" href="/static/koinoniko-favicon.svg">
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=20260626-account2">
   </head>
   <body>
     <aside class="sidebar">
-      <div class="brand">
+      <div class="brand" aria-label="Koinoniko">
         <img src="/static/koinoniko-logo.png" alt="" class="brand-logo" width="34" height="34">
         <strong>Koinoniko</strong>
       </div>
@@ -134,7 +134,7 @@
                 OpenRouter model
                 <input id="accountModel" placeholder="anthropic/claude-sonnet-4.5">
               </label>
-              <p class="muted" id="accountModelMeta">Model is saved to SQLite. API keys stay in Railway variables.</p>
+              <p class="muted" id="accountModelMeta">Choose the model Social Brain should use for drafts and AI edits.</p>
               <div class="actions left">
                 <button id="saveAccountButton">Save Model</button>
               </div>
@@ -222,6 +222,6 @@
       </div>
     </section>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=20260626-account2"></script>
   </body>
 </html>

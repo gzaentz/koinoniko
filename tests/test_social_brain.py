@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import unittest
+from http import HTTPStatus
 from contextlib import redirect_stdout
 from unittest.mock import patch
 from pathlib import Path
@@ -261,6 +262,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('clip-path="url(#rounded-tile)"', favicon_svg)
         self.assertIn("<title>Koinoniko</title>", index_html)
         self.assertIn('rel="icon" type="image/svg+xml" href="/static/koinoniko-favicon.svg"', index_html)
+        self.assertIn('href="/static/styles.css?v=', index_html)
+        self.assertIn('src="/static/app.js?v=', index_html)
         self.assertIn('src="/static/koinoniko-logo.png" alt="" class="brand-logo" width="34" height="34"', index_html)
         self.assertIn("<strong>Koinoniko</strong>", index_html)
         self.assertNotIn("<span>Leadpoet</span>", index_html)
@@ -274,12 +277,42 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('id="trendsModal"', index_html)
         self.assertIn("Improve with AI", app_js)
         self.assertIn("saveAccount", app_js)
+        self.assertNotIn("Railway variables", index_html)
+        self.assertNotIn("Railway variables", app_js)
+        self.assertNotIn("X_BEARER_TOKEN", app_js)
+        self.assertNotIn("OPENROUTER_API_KEY", app_js)
         self.assertIn("Scheduled Content", index_html)
         self.assertNotIn('id="statusBlock"', index_html)
         self.assertNotIn("AI Edit Panel", index_html)
         self.assertNotIn("Weekly Planner", index_html)
         self.assertNotIn("Content Queue", index_html)
         self.assertNotIn('id="analyticsView"', index_html)
+
+    def test_web_static_serves_versioned_assets_without_cache(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            handler_class = make_handler(db_path)
+            handler = object.__new__(handler_class)
+            handler.path = "/static/app.js?v=test"
+            handler.wfile = io.BytesIO()
+            captured: dict[str, object] = {"headers": []}
+
+            def send_response(status: int) -> None:
+                captured["status"] = status
+
+            def send_header(key: str, value: str) -> None:
+                captured["headers"].append((key, value))
+
+            handler.send_response = send_response
+            handler.send_header = send_header
+            handler.end_headers = lambda: None
+            handler.send_error = lambda status: captured.update({"status": status})
+
+            handler._serve_static()
+
+        self.assertEqual(captured["status"], HTTPStatus.OK)
+        self.assertGreater(len(handler.wfile.getvalue()), 100)
+        self.assertIn(("Cache-Control", "no-cache, no-store, must-revalidate"), captured["headers"])
 
     def test_openrouter_provider_uses_env_and_parses_variants(self):
         captured: dict[str, object] = {}
@@ -989,9 +1022,7 @@ class SocialBrainTest(unittest.TestCase):
                 self.assertEqual(saved["settings"]["llm_model"], "anthropic/claude-sonnet-4.5")
                 self.assertEqual(saved["status"]["llm_model_source"], "account")
                 self.assertFalse(saved["status"]["x_read_configured"])
-                self.assertEqual(saved["status"]["x_read_env_var"], "X_BEARER_TOKEN")
                 self.assertFalse(saved["status"]["x_write_configured"])
-                self.assertIn("X_OAUTH2_ACCESS_TOKEN", saved["status"]["x_write_env_vars"])
 
                 status, account = handle_api_request("GET", "/api/account", db_path=db_path)
 

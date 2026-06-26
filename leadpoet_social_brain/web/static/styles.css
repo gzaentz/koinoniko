@@ -137,12 +137,14 @@ h3 {
 }
 
 .brand {
-  display: flex;
+  display: inline-flex;
+  flex-direction: row;
   align-items: center;
   gap: 10px;
   width: auto;
   height: 34px;
   flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .brand-logo {
@@ -160,6 +162,7 @@ h3 {
   font-size: 18px;
   font-weight: 700;
   line-height: 1;
+  white-space: nowrap;
 }
 
 nav {

@@ -283,41 +283,39 @@ function renderAccount() {
     statusCard(
       "Provider",
       status.provider_configured,
-      status.provider_path || "Set SOCIAL_BRAIN_PROVIDER in Railway variables."
+      status.provider_configured ? "Connected" : "Not connected"
     ),
     statusCard(
       "OpenRouter key",
       status.openrouter_api_key_configured,
-      status.openrouter_api_key_configured
-        ? "OPENROUTER_API_KEY is available to the app."
-        : "Set OPENROUTER_API_KEY in Railway variables."
+      status.openrouter_api_key_configured ? "Connected" : "Not connected"
     ),
     statusCard(
       "Model",
       Boolean(status.llm_model),
       status.llm_model
         ? `${status.llm_model} (${status.llm_model_source})`
-        : "Save a model here, or set OPENROUTER_MODEL."
+        : "No model selected"
     ),
     statusCard(
       "X read",
       status.x_read_configured,
       status.x_read_configured
-        ? "X_BEARER_TOKEN is available for imports and metric sync."
-        : "Missing X_BEARER_TOKEN. Add it in Railway variables to import posts and sync metrics."
+        ? "Imports and metrics are available"
+        : "Imports and metrics are not connected"
     ),
     statusCard(
       "X write",
       status.x_write_configured,
       status.x_write_configured
-        ? "X write credentials are available for posting."
-        : "Missing write auth. Set X_OAUTH2_ACCESS_TOKEN, or OAuth 1.0a key/secret/token/token secret."
+        ? "Posting is available"
+        : "Posting is not connected"
     ),
   ].join("");
   $("accountModel").value = settings.llm_model || status.llm_model || "";
   $("accountModelMeta").textContent = settings.llm_model
     ? `Saved in account settings. Effective model: ${settings.effective_llm_model || settings.llm_model}.`
-    : "Model is saved to SQLite. API keys stay in Railway variables.";
+    : "Choose the model Social Brain should use for drafts and AI edits.";
 }
 
 function statusCard(title, configured, detail) {

@@ -191,7 +191,8 @@ def make_handler(db_path: Path):
             self.wfile.write(json.dumps(payload).encode("utf-8"))
 
         def _serve_static(self) -> None:
-            requested = "index.html" if self.path == "/" else self.path.removeprefix("/static/")
+            parsed_path = urlparse(self.path).path
+            requested = "index.html" if parsed_path == "/" else parsed_path.removeprefix("/static/")
             path = (STATIC_DIR / requested).resolve()
             if not path.is_file() or STATIC_DIR.resolve() not in path.parents:
                 self.send_error(404)
@@ -199,6 +200,9 @@ def make_handler(db_path: Path):
             content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
             self.send_response(200)
             self.send_header("Content-Type", content_type)
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
             self.end_headers()
             self.wfile.write(path.read_bytes())
 
@@ -750,12 +754,7 @@ def status_payload(store: SQLiteStore | None = None) -> dict[str, Any]:
         "llm_model": model or "",
         "llm_model_source": model_source,
         "x_read_configured": bool(os.getenv("X_BEARER_TOKEN")),
-        "x_read_env_var": "X_BEARER_TOKEN",
         "x_write_configured": has_x_write_credentials(),
-        "x_write_env_vars": [
-            "X_OAUTH2_ACCESS_TOKEN",
-            "or X_API_KEY + X_API_SECRET + X_ACCESS_TOKEN + X_ACCESS_TOKEN_SECRET",
-        ],
         "task_trigger_configured": bool(os.getenv(TASK_TOKEN_ENV)),
     }
 
