@@ -99,12 +99,6 @@ label textarea {
   gap: 10px;
 }
 
-.brand div {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
 .brand-logo {
   width: 34px;
   height: 34px;
@@ -113,19 +107,11 @@ label textarea {
   border-radius: 6px;
 }
 
-.brand span {
-  display: block;
-  color: var(--muted);
-  font-size: 12px;
-  text-transform: uppercase;
-  font-weight: 700;
-}
-
 .brand strong {
   display: block;
   font-size: 22px;
   letter-spacing: 0;
-  line-height: 1.05;
+  line-height: 1;
 }
 
 nav {

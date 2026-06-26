@@ -353,7 +353,7 @@ def login_page(*, error: str | None = None, configured: bool = False) -> str:
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Social Brain Login</title>
+    <title>Koinoniko Login</title>
     <style>
       * {{ box-sizing: border-box; }}
       body {{
@@ -412,7 +412,7 @@ def login_page(*, error: str | None = None, configured: bool = False) -> str:
   <body>
     <main>
       <div>
-        <h1>Social Brain</h1>
+        <h1>Koinoniko</h1>
         <p>Sign in to continue.</p>
       </div>
       {config_html}

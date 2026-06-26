@@ -250,8 +250,12 @@ class SocialBrainTest(unittest.TestCase):
         index_html = (static_dir / "index.html").read_text(encoding="utf-8")
 
         self.assertTrue((static_dir / "koinoniko-logo.svg").exists())
+        self.assertIn("<title>Koinoniko</title>", index_html)
         self.assertIn('rel="icon" type="image/svg+xml" href="/static/koinoniko-logo.svg"', index_html)
         self.assertIn('src="/static/koinoniko-logo.svg"', index_html)
+        self.assertIn("<strong>Koinoniko</strong>", index_html)
+        self.assertNotIn("<span>Leadpoet</span>", index_html)
+        self.assertNotIn("<strong>Social Brain</strong>", index_html)
 
     def test_openrouter_provider_uses_env_and_parses_variants(self):
         captured: dict[str, object] = {}
