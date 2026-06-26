@@ -252,6 +252,7 @@ class SocialBrainTest(unittest.TestCase):
         favicon_svg = (static_dir / "koinoniko-favicon.svg").read_text(encoding="utf-8")
 
         self.assertTrue((static_dir / "koinoniko-logo.svg").exists())
+        self.assertTrue((static_dir / "koinoniko-logo.png").exists())
         self.assertTrue((static_dir / "koinoniko-favicon.svg").exists())
         self.assertIn('viewBox="0 0 64 64"', favicon_svg)
         self.assertIn('rx="13"', favicon_svg)
@@ -259,8 +260,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('clip-path="url(#rounded-tile)"', favicon_svg)
         self.assertIn("<title>Koinoniko</title>", index_html)
         self.assertIn('rel="icon" type="image/svg+xml" href="/static/koinoniko-favicon.svg"', index_html)
-        self.assertIn('src="/static/koinoniko-logo.svg" alt="" class="brand-logo" width="34" height="34"', index_html)
-        self.assertNotIn("<strong>Koinoniko</strong>", index_html)
+        self.assertIn('src="/static/koinoniko-logo.png" alt="" class="brand-logo" width="34" height="34"', index_html)
+        self.assertIn("<strong>Koinoniko</strong>", index_html)
         self.assertNotIn("<span>Leadpoet</span>", index_html)
         self.assertNotIn("<strong>Social Brain</strong>", index_html)
         self.assertIn('data-view="dashboard">Dashboard</button>', index_html)

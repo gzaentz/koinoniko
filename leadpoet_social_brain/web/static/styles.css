@@ -139,9 +139,9 @@ h3 {
 .brand {
   display: flex;
   align-items: center;
-  width: 34px;
+  gap: 10px;
+  width: auto;
   height: 34px;
-  overflow: hidden;
   flex: 0 0 auto;
 }
 
@@ -152,7 +152,14 @@ h3 {
   max-height: 34px;
   display: block;
   object-fit: contain;
-  border-radius: 6px;
+}
+
+.brand strong {
+  display: block;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 nav {
