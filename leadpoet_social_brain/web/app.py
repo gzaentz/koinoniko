@@ -494,6 +494,12 @@ def route_api(
     payload: dict[str, Any],
 ) -> tuple[int, dict[str, Any]]:
     parts = [part for part in path.split("/") if part]
+    if method == "POST" and parts == ["tasks", "sync-x-posts"]:
+        return 200, sync_x_posts_task_payload(store, payload)
+    if method == "POST" and parts == ["tasks", "sync-x-metrics"]:
+        return 200, sync_x_metrics_task_payload(store, payload)
+    if method == "POST" and parts == ["tasks", "sync-x-all"]:
+        return 200, sync_x_all_task_payload(store, payload)
     if method == "POST" and parts == ["tasks", "sync-x-daily"]:
         return 200, sync_x_daily_payload(store, payload)
     if not parts or parts[0] != "api":
@@ -686,6 +692,65 @@ def sync_x_all_account_payload(store: SQLiteStore, payload: dict[str, Any]) -> d
             X_METRICS_SYNC_KEY: sync_metadata_payload(metrics_sync),
         },
         "account": account_status_payload(store),
+    }
+
+
+def sync_x_posts_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    result, metadata = run_x_posts_sync(
+        store,
+        payload,
+        limit=int(payload.get("limit") or DAILY_X_POST_SYNC_LIMIT),
+    )
+    return {
+        "posts_fetched": result.get("fetched", 0),
+        "new_posts_imported": result.get("imported", 0),
+        "duplicates_skipped": result.get("duplicates", 0),
+        "errors": result.get("errors", []),
+        "completed_at": metadata.last_completed_at,
+        "sync": sync_metadata_payload(metadata),
+    }
+
+
+def sync_x_metrics_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    result, metadata = run_x_metrics_sync(
+        store,
+        payload,
+        limit=int(payload.get("limit") or DEFAULT_X_POST_SYNC_LIMIT),
+        since_days=optional_int(payload.get("since_days")) if "since_days" in payload else 90,
+    )
+    return {
+        "metrics_updated": result.get("updated", 0),
+        "posts_checked": result.get("checked", 0),
+        "skipped": result.get("skipped", 0),
+        "errors": result.get("errors", []),
+        "completed_at": metadata.last_completed_at,
+        "sync": sync_metadata_payload(metadata),
+    }
+
+
+def sync_x_all_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    posts_result, _ = run_x_posts_sync(
+        store,
+        payload,
+        limit=int(payload.get("post_limit") or payload.get("limit") or DAILY_X_POST_SYNC_LIMIT),
+    )
+    metrics_result, metrics_sync = run_x_metrics_sync(
+        store,
+        payload,
+        limit=int(payload.get("metrics_limit") or payload.get("limit") or DEFAULT_X_POST_SYNC_LIMIT),
+        since_days=optional_int(payload.get("since_days")) if "since_days" in payload else 90,
+    )
+    errors = [
+        *posts_result.get("errors", []),
+        *metrics_result.get("errors", []),
+    ]
+    return {
+        "posts_fetched": posts_result.get("fetched", 0),
+        "new_posts_imported": posts_result.get("imported", 0),
+        "duplicates_skipped": posts_result.get("duplicates", 0),
+        "metrics_updated": metrics_result.get("updated", 0),
+        "errors": errors,
+        "completed_at": metrics_sync.last_completed_at,
     }
 
 

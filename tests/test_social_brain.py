@@ -57,6 +57,7 @@ from leadpoet_social_brain.web.app import (
     validate_session_cookie_value,
     verify_credentials,
 )
+from leadpoet_social_brain.web.task_client import TASK_DEFAULTS, main as task_client_main
 
 
 class FakeProvider:
@@ -1355,6 +1356,114 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(dashboard_status, 200)
             self.assertEqual(dashboard["recent_posts"][0]["url"], "https://x.com/gavinzaentz/status/daily1")
             self.assertEqual(dashboard["recent_posts"][0]["metrics"]["likes"], 8)
+
+    def test_task_sync_posts_and_metrics_endpoints_can_run_separately(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+            fake_client = FakeXApiClient(
+                [
+                    {
+                        "id": "frequent1",
+                        "text": "Frequent sync should keep the dashboard current.",
+                        "created_at": "2026-06-25T12:00:00.000Z",
+                        "public_metrics": {"like_count": 4, "reply_count": 0, "impression_count": 200},
+                    }
+                ],
+                metrics_by_id={
+                    "frequent1": {"like_count": 12, "reply_count": 2, "impression_count": 900}
+                },
+            )
+
+            with patch.dict(os.environ, {"X_BEARER_TOKEN": "read-token"}, clear=False):
+                with patch("leadpoet_social_brain.web.app.XApiClient.from_env", return_value=fake_client):
+                    posts_status, posts_payload = handle_api_request(
+                        "POST",
+                        "/tasks/sync-x-posts",
+                        json.dumps({"limit": 100}),
+                        db_path=db_path,
+                    )
+                    metrics_status, metrics_payload = handle_api_request(
+                        "POST",
+                        "/tasks/sync-x-metrics",
+                        json.dumps({"since_days": 90, "limit": 100}),
+                        db_path=db_path,
+                    )
+
+            self.assertEqual(posts_status, 200)
+            self.assertEqual(posts_payload["new_posts_imported"], 1)
+            self.assertEqual(metrics_status, 200)
+            self.assertEqual(metrics_payload["metrics_updated"], 1)
+            store = SQLiteStore(db_path)
+            latest_metrics = store.latest_metrics_by_post_id([store.list_posts(platform="x", limit=1)[0].id])
+            self.assertEqual(next(iter(latest_metrics.values())).likes, 12)
+            self.assertEqual(store.get_sync_metadata("x_posts_sync").status, "success")
+            self.assertEqual(store.get_sync_metadata("x_metrics_sync").status, "success")
+            store.close()
+
+    def test_task_sync_all_runs_posts_then_metrics(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+            fake_client = FakeXApiClient(
+                [
+                    {
+                        "id": "alltask1",
+                        "text": "Combined sync imports the post before refreshing metrics.",
+                        "created_at": "2026-06-25T12:00:00.000Z",
+                        "public_metrics": {"like_count": 1, "reply_count": 0, "impression_count": 50},
+                    }
+                ],
+                metrics_by_id={
+                    "alltask1": {"like_count": 6, "reply_count": 1, "impression_count": 250}
+                },
+            )
+
+            with patch.dict(os.environ, {"X_BEARER_TOKEN": "read-token"}, clear=False):
+                with patch("leadpoet_social_brain.web.app.XApiClient.from_env", return_value=fake_client):
+                    status, payload = handle_api_request(
+                        "POST",
+                        "/tasks/sync-x-all",
+                        json.dumps({"post_limit": 100, "metrics_limit": 100}),
+                        db_path=db_path,
+                    )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["new_posts_imported"], 1)
+            self.assertEqual(payload["metrics_updated"], 1)
+            store = SQLiteStore(db_path)
+            self.assertEqual(store.count_posts(platform="x"), 1)
+            self.assertEqual(store.get_sync_metadata("x_posts_sync").summary["imported"], 1)
+            self.assertEqual(store.get_sync_metadata("x_metrics_sync").summary["updated"], 1)
+            store.close()
+
+    def test_task_client_defaults_support_frequent_railway_cron_jobs(self):
+        self.assertEqual(TASK_DEFAULTS["sync-x-posts"], {"limit": 100})
+        self.assertEqual(TASK_DEFAULTS["sync-x-metrics"]["since_days"], 90)
+        self.assertEqual(TASK_DEFAULTS["sync-x-metrics"]["limit"], 3200)
+        with patch(
+            "leadpoet_social_brain.web.task_client.post_task",
+            return_value={"ok": True, "errors": []},
+        ) as post_task:
+            with redirect_stdout(io.StringIO()):
+                exit_code = task_client_main(
+                    [
+                        "sync-x-posts",
+                        "--url",
+                        "https://example.com",
+                        "--secret",
+                        "task-secret",
+                        "--payload",
+                        '{"limit":50}',
+                    ]
+                )
+        self.assertEqual(exit_code, 0)
+        post_task.assert_called_once_with(
+            "https://example.com",
+            "sync-x-posts",
+            "task-secret",
+            {"limit": 50},
+        )
 
     def test_web_account_saves_model_and_reports_x_status(self):
         with tempfile.TemporaryDirectory() as tmpdir:

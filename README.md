@@ -217,6 +217,8 @@ Requirements:
 - `X_BEARER_TOKEN` for post import and public metrics.
 - Private X analytics such as URL clicks and profile clicks are not included yet.
 
+For a hosted dashboard that stays fresh, run `sync-x-posts` every 30 minutes and `sync-x-metrics` every 2 hours through Railway Cron. Manual Account buttons are still available when you want to force an immediate refresh.
+
 ## Railway Deployment
 
 This repo includes `railway.toml` for the local web UI:
@@ -241,7 +243,7 @@ Required Railway settings:
 - Set `OPENROUTER_API_KEY` and `SOCIAL_BRAIN_PROVIDER=leadpoet_social_brain.openrouter_provider:create_provider` before using generation, planning, or AI edits.
 - Set the OpenRouter model from the hosted app's Account page. `OPENROUTER_MODEL` remains available as an environment fallback.
 - Set X write credentials only if you want approved posts to be posted from Railway.
-- Set `TASK_SECRET` if you want Railway Cron to run the daily X sync endpoint.
+- Set `TASK_SECRET` if you want Railway Cron to run protected X sync endpoints.
 - Optional: set `SOCIAL_BRAIN_TASK_TOKEN` if you want an external cron service to trigger hosted task endpoints.
 
 SQLite notes for Railway:
@@ -276,37 +278,83 @@ For a new hosted database:
 12. Add trends if you want timely planning context.
 13. Plan the week, review/edit, then approve only posts you are ready to publish.
 14. Set X write auth before posting from the hosted app.
-15. Set `TASK_SECRET` if Railway Cron will call the daily X sync endpoint.
+15. Set `TASK_SECRET` if Railway Cron will call protected X sync endpoints.
 16. Set `SOCIAL_BRAIN_TASK_TOKEN` only if an external scheduler will call the older `/api/tasks/*` endpoints.
 
 ## Hosted Task Triggers
 
-Social Brain does not run a scheduler or background worker. On Railway, approved scheduled posts will stay queued until something triggers publishing.
+Social Brain does not run a scheduler or background worker. On Railway, approved scheduled posts will stay queued until something triggers publishing, and the dashboard stays current only after a sync task refreshes SQLite.
 
-You can trigger the same core jobs through protected HTTP task endpoints:
+Use these protected endpoints for hosted sync:
 
 ```text
+POST /tasks/sync-x-posts
+POST /tasks/sync-x-metrics
+POST /tasks/sync-x-all
 POST /tasks/sync-x-daily
-POST /api/tasks/sync-x-user
-POST /api/tasks/publish-due-x
-POST /api/tasks/sync-x-metrics
-POST /api/tasks/weekly-report-x
 ```
 
-Daily X sync uses `TASK_SECRET`:
+These endpoints use `TASK_SECRET`:
 
 ```bash
 TASK_SECRET="<long random secret>"
 ```
 
-Railway Cron example:
+Recommended Railway Cron setup for a fresh dashboard:
 
 ```text
-POST https://<app-domain>/tasks/sync-x-daily
+X post sync:    every 30 minutes    */30 * * * *
+X metrics sync: every 2 hours        15 */2 * * *
+```
+
+Create two Railway Cron services that run these start commands and exit:
+
+```bash
+python -m leadpoet_social_brain.web.task_client sync-x-posts
+python -m leadpoet_social_brain.web.task_client sync-x-metrics
+```
+
+Set these variables on each Cron service:
+
+```bash
+SOCIAL_BRAIN_URL="https://<app-domain>"
+TASK_SECRET="<same TASK_SECRET as the web app>"
+```
+
+The task client calls the main web app with:
+
+```text
+POST https://<app-domain>/tasks/sync-x-posts
+Authorization: Bearer <TASK_SECRET>
+
+POST https://<app-domain>/tasks/sync-x-metrics
 Authorization: Bearer <TASK_SECRET>
 ```
 
-Daily sync imports recent authored posts from X, skips duplicates by X post ID/canonical URL, refreshes public metrics for recent stored posts, and stores a summary under Account. Recommended frequency is daily for post import. Metrics can be refreshed every few hours if desired.
+`sync-x-posts` imports recent authored posts from X and skips duplicates by X post ID/canonical URL. `sync-x-metrics` appends fresh public metric snapshots for stored posts. The Dashboard reads the latest stored data and shows `Last X sync`.
+
+If you prefer one job instead of two, run this hourly:
+
+```bash
+python -m leadpoet_social_brain.web.task_client sync-x-all
+```
+
+The older daily endpoint remains available:
+
+```text
+POST /tasks/sync-x-daily
+```
+
+It imports recent posts, refreshes recent metrics, and stores a daily summary under Account. For the always-current dashboard, prefer the frequent post and metrics jobs above.
+
+Older task endpoints are still available for external schedulers that already use `SOCIAL_BRAIN_TASK_TOKEN`:
+
+```text
+POST /api/tasks/sync-x-user
+POST /api/tasks/publish-due-x
+POST /api/tasks/sync-x-metrics
+POST /api/tasks/weekly-report-x
+```
 
 Set a task token in Railway Variables:
 
