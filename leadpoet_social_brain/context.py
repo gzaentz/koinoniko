@@ -61,7 +61,7 @@ class ContextManager:
         example_shapes = _writing_shapes_from_notes(notes.values())
         content = "\n".join(
             [
-                "Observed Gavin/Leadpoet Writing Guide",
+                "Koinoniko Voice",
                 "",
                 "Recurring voice traits:",
                 "- Plain, direct, and specific.",

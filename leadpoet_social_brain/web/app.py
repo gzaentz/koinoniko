@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, urlparse
 
 from leadpoet_social_brain.analytics import build_analytics_summary
 from leadpoet_social_brain.categorization import XPostLLMCategorizer
+from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.content_queue import (
     accept_queued_post_version,
     approve_queue_item,
@@ -32,7 +33,9 @@ from leadpoet_social_brain.content_queue import (
 )
 from leadpoet_social_brain.core.models import (
     ContentQueueItem,
+    PostNote,
     QueuedPostVersion,
+    SocialPost,
     SyncMetadata,
     TrendItem,
     new_id,
@@ -45,6 +48,7 @@ from leadpoet_social_brain.platforms.x_api import (
     UNCATEGORIZED_TOPIC,
     XApiClient,
     XWriteClient,
+    parse_x_post_id,
     sync_x_metrics,
     sync_x_user_posts,
 )
@@ -74,11 +78,13 @@ LLM_MODEL_SETTING = MODEL_SETTING_KEYS["default"]
 DEFAULT_AUTH_USERNAME = DEFAULT_WEB_AUTH_USERNAME
 DEFAULT_X_SYNC_USERNAME = "gavinzaentz"
 DEFAULT_X_POST_SYNC_LIMIT = 3200
-DAILY_X_POST_SYNC_LIMIT = 100
+DAILY_X_POST_SYNC_LIMIT = 25
+X_POST_INCREMENTAL_LOOKBACK_MINUTES = 10
 X_POSTS_SYNC_KEY = "x_posts_sync"
 X_METRICS_SYNC_KEY = "x_metrics_sync"
 X_DAILY_SYNC_KEY = "x_daily_sync"
 TRENDS_SYNC_KEY = "trends_sync"
+VOICE_CONTEXT_NAME = "learned_from_high_performers"
 SESSION_COOKIE = "social_brain_session"
 SESSION_TTL_SECONDS = 60 * 60 * 12
 AUTH_REQUIRED_MESSAGE = "Authentication required."
@@ -531,6 +537,39 @@ def route_api(
         return test_provider_response(store)
     if method == "GET" and parts == ["api", "dashboard"]:
         return 200, dashboard_payload(store)
+    if method == "GET" and parts == ["api", "voice", "status"]:
+        return 200, voice_status_payload(store)
+    if method == "GET" and parts == ["api", "voice", "current"]:
+        return 200, voice_current_payload(store)
+    if method == "GET" and parts == ["api", "voice", "examples"]:
+        return 200, {"items": voice_examples_payload(store)}
+    if method == "GET" and parts == ["api", "voice", "suggestions"]:
+        return 200, {"items": voice_suggestions_payload(store)}
+    if method == "POST" and parts == ["api", "voice", "update"]:
+        limit = int(payload.get("limit") or 12)
+        section = ContextManager(store).rebuild_style_guide_from_examples(limit=limit)
+        status = voice_status_payload(store)
+        return 200, {
+            "message": "Voice updated from selected examples.",
+            "examples_used": status["examples_count"],
+            "current": voice_current_payload(store, section=section),
+            "status": voice_status_payload(store),
+        }
+    if method == "GET" and len(parts) == 3 and parts[:2] == ["api", "posts"]:
+        post = store.get_post(parts[2])
+        if not post:
+            return 404, {"error": "Post not found."}
+        return 200, {"post": post_detail_payload(store, post)}
+    if method == "POST" and len(parts) == 4 and parts[:2] == ["api", "posts"] and parts[3] == "voice":
+        post = store.get_post(parts[2])
+        if not post:
+            return 404, {"error": "Post not found."}
+        updated = save_post_voice_payload(store, post, payload)
+        return 200, {
+            "message": "Saved as a Voice Example." if updated["voice"]["is_voice_example"] else "Voice settings saved.",
+            "post": updated,
+            "voice_status": voice_status_payload(store),
+        }
     if method == "GET" and parts == ["api", "queue"]:
         items = store.list_content_queue(
             platform="x",
@@ -930,6 +969,7 @@ def run_x_posts_sync(
             if not provider:
                 raise ValueError(MISSING_PROVIDER_MESSAGE)
             categorizer = XPostLLMCategorizer(provider).categorize
+        since_id, start_time = x_posts_incremental_cutoff(store, payload)
         result = sync_x_user_posts(
             store,
             XApiClient.from_env(),
@@ -939,7 +979,8 @@ def run_x_posts_sync(
                 UNCATEGORIZED_TOPIC if auto_categorize else DEFAULT_IMPORT_TOPIC
             ),
             default_post_type=clean_optional(payload.get("default_post_type")) or DEFAULT_IMPORT_POST_TYPE,
-            start_time=clean_optional(payload.get("start_time")),
+            since_id=since_id,
+            start_time=start_time,
             end_time=clean_optional(payload.get("end_time")),
             exclude_replies=bool_from_payload(payload, "exclude_replies", True),
             exclude_retweets=bool_from_payload(payload, "exclude_retweets", True),
@@ -948,6 +989,11 @@ def run_x_posts_sync(
             categorizer=categorizer,
         )
         summary = sync_x_user_result_payload(result)
+        summary["incremental"] = bool(since_id or start_time)
+        if since_id:
+            summary["since_id"] = since_id
+        if start_time:
+            summary["start_time"] = start_time
         metadata = store.save_sync_metadata(
             SyncMetadata(
                 key=X_POSTS_SYNC_KEY,
@@ -971,6 +1017,29 @@ def run_x_posts_sync(
             )
         )
         raise ValueError(str(exc)) from exc
+
+
+def x_posts_incremental_cutoff(store: SQLiteStore, payload: dict[str, Any]) -> tuple[str | None, str | None]:
+    explicit_since_id = clean_optional(payload.get("since_id"))
+    explicit_start_time = clean_optional(payload.get("start_time"))
+    if explicit_since_id or explicit_start_time or bool_from_payload(payload, "full_sync", False):
+        return explicit_since_id, explicit_start_time
+
+    latest = store.list_posts(platform="x", limit=1)
+    if not latest:
+        return None, None
+
+    latest_post = latest[0]
+    if latest_post.url:
+        latest_x_post_id = parse_x_post_id(latest_post.url)
+        if latest_x_post_id:
+            return latest_x_post_id, None
+
+    latest_at = parse_optional_dt(latest_post.published_at) or parse_optional_dt(latest_post.created_at)
+    if not latest_at:
+        return None, None
+    start_time = latest_at - timedelta(minutes=X_POST_INCREMENTAL_LOOKBACK_MINUTES)
+    return None, start_time.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def run_x_metrics_sync(
@@ -1144,6 +1213,208 @@ def require_queue_item_for_web(store: SQLiteStore, queue_id: str) -> ContentQueu
     return item
 
 
+def voice_status_payload(store: SQLiteStore) -> dict[str, Any]:
+    examples = voice_example_posts(store)
+    current = current_voice_section(store)
+    examples_count = len(examples)
+    last_example_change = latest_voice_example_change(store, examples)
+    if examples_count == 0:
+        status = "needs_examples"
+        label_text = "Needs examples"
+        description = "No Voice Examples yet. Mark a few strong posts so Koinoniko can learn Gavin's voice."
+    elif current is None:
+        status = "not_updated_yet"
+        label_text = "Not updated yet"
+        description = "Voice Examples selected. Update Voice to use them in generation."
+    elif last_example_change and current.updated_at and last_example_change > current.updated_at:
+        status = "needs_update"
+        label_text = "Needs update"
+        description = "Voice Examples changed since the last Voice update."
+    else:
+        status = "ready"
+        label_text = "Ready"
+        description = "Koinoniko Voice is current."
+    return {
+        "status": status,
+        "label": label_text,
+        "description": description,
+        "examples_count": examples_count,
+        "last_updated_at": current.updated_at if current else None,
+        "last_example_change_at": last_example_change,
+    }
+
+
+def voice_current_payload(store: SQLiteStore, *, section=None) -> dict[str, Any]:
+    current = section or current_voice_section(store)
+    if not current:
+        return {
+            "exists": False,
+            "title": "Koinoniko Voice",
+            "content": "",
+            "sections": [],
+            "updated_at": None,
+            "empty_message": "No Voice Profile yet. Mark a few strong posts as Voice Examples, then update Voice.",
+        }
+    return {
+        "exists": True,
+        "title": "Koinoniko Voice",
+        "content": current.content,
+        "sections": voice_content_sections(current.content),
+        "updated_at": current.updated_at,
+    }
+
+
+def voice_examples_payload(store: SQLiteStore) -> list[dict[str, Any]]:
+    posts = voice_example_posts(store)
+    notes = store.notes_by_post_id([post.id for post in posts])
+    metrics = store.latest_metrics_by_post_id([post.id for post in posts])
+    return [
+        voice_post_payload(post, notes.get(post.id), metrics.get(post.id))
+        for post in posts
+    ]
+
+
+def voice_suggestions_payload(store: SQLiteStore, *, limit: int = 6) -> list[dict[str, Any]]:
+    posts = store.list_posts(platform="x", limit=None)
+    notes = store.notes_by_post_id([post.id for post in posts])
+    metrics = store.latest_metrics_by_post_id([post.id for post in posts])
+    candidates = [
+        (voice_suggestion_score(metrics.get(post.id)), post)
+        for post in posts
+        if not (notes.get(post.id) and notes[post.id].imitate)
+    ]
+    candidates = [(score, post) for score, post in candidates if any(value > 0 for value in score)]
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return [
+        {
+            **voice_post_payload(post, notes.get(post.id), metrics.get(post.id)),
+            "reason": voice_suggestion_reason(metrics.get(post.id)),
+        }
+        for _, post in candidates[:limit]
+    ]
+
+
+def save_post_voice_payload(store: SQLiteStore, post: SocialPost, payload: dict[str, Any]) -> dict[str, Any]:
+    existing = store.notes_by_post_id([post.id]).get(post.id)
+    if "topic" in payload or "post_type" in payload:
+        post = store.save_post(
+            SocialPost(
+                **{
+                    **post.__dict__,
+                    "topic": value_or_current(payload, "topic", post.topic),
+                    "post_type": value_or_current(payload, "post_type", post.post_type),
+                }
+            )
+        )
+    note = store.save_note(
+        PostNote(
+            post_id=post.id,
+            worked_reason=value_or_current(payload, "why_this_worked", existing.worked_reason if existing else None),
+            pattern_name=value_or_current(payload, "pattern", existing.pattern_name if existing else None),
+            hook=value_or_current(payload, "hook", existing.hook if existing else None),
+            structure=value_or_current(payload, "structure", existing.structure if existing else None),
+            tone=value_or_current(payload, "tone", existing.tone if existing else None),
+            cta=value_or_current(payload, "cta", existing.cta if existing else None),
+            formatting=value_or_current(payload, "formatting", existing.formatting if existing else None),
+            imitate=bool_from_payload(payload, "voice_example", existing.imitate if existing else False),
+        )
+    )
+    metrics = store.latest_metrics_by_post_id([post.id]).get(post.id)
+    return post_detail_payload(store, post, note=note, metrics=metrics)
+
+
+def post_detail_payload(
+    store: SQLiteStore,
+    post: SocialPost,
+    *,
+    note: PostNote | None = None,
+    metrics: Any | None = None,
+) -> dict[str, Any]:
+    resolved_note = note if note is not None else store.notes_by_post_id([post.id]).get(post.id)
+    resolved_metrics = metrics if metrics is not None else store.latest_metrics_by_post_id([post.id]).get(post.id)
+    payload = recent_post_payload(post, resolved_metrics, resolved_note)
+    payload["voice"] = voice_note_payload(resolved_note)
+    return payload
+
+
+def voice_example_posts(store: SQLiteStore) -> list[SocialPost]:
+    posts = store.list_posts(platform="x", limit=None)
+    notes = store.notes_by_post_id([post.id for post in posts])
+    return [post for post in posts if notes.get(post.id) and notes[post.id].imitate]
+
+
+def current_voice_section(store: SQLiteStore):
+    sections = [
+        section for section in store.list_context_sections(kinds={"style_guide"})
+        if section.name == VOICE_CONTEXT_NAME
+    ]
+    return sections[0] if sections else None
+
+
+def latest_voice_example_change(store: SQLiteStore, posts: list[SocialPost]) -> str | None:
+    notes = store.notes_by_post_id([post.id for post in posts])
+    timestamps = [
+        value
+        for post in posts
+        for value in [post.updated_at, notes.get(post.id).updated_at if notes.get(post.id) else None]
+        if value
+    ]
+    return max(timestamps) if timestamps else None
+
+
+def voice_content_sections(content: str) -> list[dict[str, Any]]:
+    sections: list[dict[str, Any]] = []
+    current_title = ""
+    current_lines: list[str] = []
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line in {"Observed Gavin/Leadpoet Writing Guide", "Koinoniko Voice"}:
+            continue
+        if line.endswith(":"):
+            if current_title or current_lines:
+                sections.append({"title": current_title or "Koinoniko Voice", "items": current_lines})
+            current_title = line[:-1]
+            current_lines = []
+            continue
+        current_lines.append(line[2:] if line.startswith("- ") else line)
+    if current_title or current_lines:
+        sections.append({"title": current_title or "Koinoniko Voice", "items": current_lines})
+    return sections
+
+
+def voice_suggestion_score(metrics: Any | None) -> tuple[float, float, float, float]:
+    if not metrics:
+        return (0, 0, 0, 0)
+    return (
+        float(metrics.engagement_rate or 0),
+        float(metrics.bookmarks or 0),
+        float(metrics.replies or 0),
+        float(metrics.impressions or 0),
+    )
+
+
+def voice_suggestion_reason(metrics: Any | None) -> str:
+    if not metrics:
+        return "Performance data available."
+    if metrics.engagement_rate:
+        return f"Strong engagement rate: {metrics.engagement_rate:.2%}."
+    if metrics.bookmarks:
+        return f"High bookmarks: {metrics.bookmarks}."
+    if metrics.replies:
+        return f"High replies: {metrics.replies}."
+    if metrics.impressions:
+        return f"High impressions: {metrics.impressions}."
+    return "High-performing post."
+
+
+def voice_post_payload(post: SocialPost, note: PostNote | None, metrics: Any | None) -> dict[str, Any]:
+    payload = recent_post_payload(post, metrics, note)
+    payload["why_this_worked"] = note.worked_reason if note else None
+    return payload
+
+
 def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
     queue = store.list_content_queue(platform="x", limit=500)
     counts: dict[str, int] = {}
@@ -1156,6 +1427,7 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
     analytics = build_analytics_summary(store)
     recent_posts = store.list_posts(platform="x", limit=None)
     latest_metrics = store.latest_metrics_by_post_id([post.id for post in recent_posts])
+    notes = store.notes_by_post_id([post.id for post in recent_posts])
     trend_groups = web_trend_groups(store)
     trends = [*trend_groups.daily, *trend_groups.weekly]
     return {
@@ -1164,7 +1436,7 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
         "due": [queue_item_payload(store, item) for item in due],
         "recent_queue": [queue_item_payload(store, item) for item in queue[:10]],
         "recent_posts": [
-            recent_post_payload(post, latest_metrics.get(post.id))
+            recent_post_payload(post, latest_metrics.get(post.id), notes.get(post.id))
             for post in recent_posts
         ],
         "trends": [trend_payload(trend) for trend in trends],
@@ -1581,10 +1853,25 @@ def post_payload(post) -> dict[str, Any]:
     }
 
 
-def recent_post_payload(post, metrics: Any | None) -> dict[str, Any]:
+def recent_post_payload(post, metrics: Any | None, note: PostNote | None = None) -> dict[str, Any]:
     payload = post_payload(post)
     payload["metrics"] = metrics_payload(metrics)
+    payload["voice"] = voice_note_payload(note)
     return payload
+
+
+def voice_note_payload(note: PostNote | None) -> dict[str, Any]:
+    return {
+        "is_voice_example": bool(note.imitate) if note else False,
+        "why_this_worked": note.worked_reason if note else None,
+        "hook": note.hook if note else None,
+        "structure": note.structure if note else None,
+        "tone": note.tone if note else None,
+        "cta": note.cta if note else None,
+        "formatting": note.formatting if note else None,
+        "pattern": note.pattern_name if note else None,
+        "updated_at": note.updated_at if note else None,
+    }
 
 
 def metrics_payload(metrics: Any | None) -> dict[str, Any]:
@@ -1759,6 +2046,15 @@ def parse_dt(value: str) -> datetime:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def parse_optional_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return parse_dt(value)
+    except ValueError:
+        return None
 
 
 if __name__ == "__main__":

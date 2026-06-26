@@ -6,11 +6,13 @@ const state = {
   analytics: null,
   status: null,
   account: null,
+  voice: null,
   reviewItems: [],
   scheduledItems: [],
   savedTrends: [],
   draggedQueueId: "",
   queueDetail: null,
+  postDetail: null,
   recentPostsSort: { key: "date", direction: "desc" },
 };
 
@@ -85,6 +87,10 @@ const views = {
   reviewer: {
     title: "Queue",
     meta: "Review, improve, approve, and schedule X posts.",
+  },
+  voice: {
+    title: "Voice",
+    meta: "Teach Koinoniko what Gavin's best posts sound like.",
   },
   account: {
     title: "Account",
@@ -196,6 +202,7 @@ async function loadQueueStatuses(statuses) {
 function renderCurrentView() {
   if (state.view === "dashboard") renderDashboard();
   if (state.view === "reviewer") renderReviewer();
+  if (state.view === "voice") loadVoice().catch((error) => showMessage(error.message, true));
   if (state.view === "account") loadAccount().catch((error) => showMessage(error.message, true));
 }
 
@@ -244,9 +251,11 @@ function renderRecentPosts() {
 
 function filteredRecentPosts() {
   const search = $("postSearch").value.trim().toLowerCase();
+  const voiceFilter = $("postVoiceFilter").value;
   const from = $("postDateFrom").value;
   const to = $("postDateTo").value;
   const filtered = (state.dashboard?.recent_posts || []).filter((post) => {
+    if (voiceFilter === "voice" && !post.voice?.is_voice_example) return false;
     const haystack = [post.text, post.summary, post.topic, post.post_type].join(" ").toLowerCase();
     if (search && !haystack.includes(search)) return false;
     const dateText = String(post.published_at || "").slice(0, 10);
@@ -329,10 +338,11 @@ function renderRecentPostSortHeaders() {
 
 function recentPostRow(post) {
   const metrics = post.metrics || {};
+  const voiceBadge = post.voice?.is_voice_example ? `<span class="voice-badge">Voice</span>` : "";
   return `
     <tr onclick='openPostDetails(${jsArg(post.id)})'>
       <td>${escapeHtml(formatDate(post.published_at))}</td>
-      <td class="post-summary">${escapeHtml(post.summary || summarize(post.text))}</td>
+      <td class="post-summary"><span>${escapeHtml(post.summary || summarize(post.text))}</span>${voiceBadge}</td>
       <td>${escapeHtml(post.topic || "")}</td>
       <td>${escapeHtml(label(post.post_type))}</td>
       <td>${metric(metrics.likes)}</td>
@@ -348,9 +358,19 @@ function recentPostRow(post) {
 }
 
 window.openPostDetails = (id) => {
-  const post = (state.dashboard?.recent_posts || []).find((item) => item.id === id);
+  runButton(null, "", async () => {
+    const payload = await api(`/api/posts/${encodeURIComponent(id)}`);
+    state.postDetail = payload.post;
+    renderPostModal();
+    openModal("postModal");
+  });
+};
+
+function renderPostModal() {
+  const post = state.postDetail;
   if (!post) return;
   const metrics = post.metrics || {};
+  const voice = post.voice || {};
   $("postModalTitle").textContent = post.summary || "Post details";
   $("postModalBody").innerHTML = `
     <div class="full-text">${escapeHtml(post.text)}</div>
@@ -367,8 +387,64 @@ window.openPostDetails = (id) => {
       ${detail("Engagement rate", formatRate(metrics.engagement_rate))}
     </div>
     ${post.url ? `<a class="button-link" href="${escapeAttr(post.url)}" target="_blank" rel="noreferrer">Open on X</a>` : ""}
+    <section class="voice-edit-section">
+      <div>
+        <h3>Voice</h3>
+        <p class="muted">${voice.is_voice_example ? "Used as a Voice Example." : "Not currently used as a Voice Example."}</p>
+      </div>
+      <label class="inline-check">
+        <input id="postVoiceExample" type="checkbox" ${voice.is_voice_example ? "checked" : ""}>
+        Use this as a Voice Example
+      </label>
+      <label>Why this worked
+        <textarea id="postWhyWorked" rows="4" placeholder="What made this post sound like Gavin and work with the audience?">${escapeHtml(voice.why_this_worked || "")}</textarea>
+      </label>
+      <div class="form-grid">
+        <label>Topic<input id="postVoiceTopic" value="${escapeAttr(post.topic || "")}"></label>
+        <label>Post type<input id="postVoicePostType" value="${escapeAttr(post.post_type || "")}"></label>
+      </div>
+      <details class="advanced-fields">
+        <summary>Advanced fields</summary>
+        <div class="form-grid">
+          <label>Hook<input id="postVoiceHook" value="${escapeAttr(voice.hook || "")}"></label>
+          <label>Structure<input id="postVoiceStructure" value="${escapeAttr(voice.structure || "")}"></label>
+          <label>Tone<input id="postVoiceTone" value="${escapeAttr(voice.tone || "")}"></label>
+          <label>CTA<input id="postVoiceCta" value="${escapeAttr(voice.cta || "")}"></label>
+          <label>Formatting<input id="postVoiceFormatting" value="${escapeAttr(voice.formatting || "")}"></label>
+          <label>Pattern<input id="postVoicePattern" value="${escapeAttr(voice.pattern || "")}"></label>
+        </div>
+      </details>
+      <div class="actions left">
+        <button onclick="savePostVoice(event)">Save Voice</button>
+      </div>
+    </section>
   `;
-  openModal("postModal");
+}
+
+window.savePostVoice = (event) => {
+  runButton(event.currentTarget, "Saving...", async () => {
+    const post = state.postDetail;
+    const payload = await api(`/api/posts/${encodeURIComponent(post.id)}/voice`, {
+      method: "POST",
+      body: JSON.stringify({
+        voice_example: $("postVoiceExample").checked,
+        why_this_worked: $("postWhyWorked").value,
+        topic: $("postVoiceTopic").value,
+        post_type: $("postVoicePostType").value,
+        hook: $("postVoiceHook").value,
+        structure: $("postVoiceStructure").value,
+        tone: $("postVoiceTone").value,
+        cta: $("postVoiceCta").value,
+        formatting: $("postVoiceFormatting").value,
+        pattern: $("postVoicePattern").value,
+      }),
+    });
+    state.postDetail = payload.post;
+    showMessage(payload.message || "Voice settings saved.");
+    await refresh();
+    if (state.view === "voice") await loadVoice();
+    renderPostModal();
+  });
 };
 
 function renderDashboardTrends() {
@@ -851,12 +927,11 @@ async function syncPosts() {
     method: "POST",
     body: JSON.stringify({
       username: DEFAULT_SYNC_USERNAME,
-      limit: 3200,
+      limit: 25,
       ...(autoCategorize ? { auto_categorize: true } : { default_topic: "Leadpoet" }),
       default_post_type: "founder_insight",
       exclude_replies: true,
       exclude_retweets: true,
-      imitate: false,
     }),
   });
   const result = payload.result || {};
@@ -867,7 +942,7 @@ async function syncPosts() {
 async function syncMetrics() {
   const payload = await api("/api/account/sync-x-metrics", {
     method: "POST",
-    body: JSON.stringify({ since_days: 90, limit: 3200 }),
+    body: JSON.stringify({ since_days: 30, limit: 250 }),
   });
   const result = payload.result || {};
   showMessage(`Metrics updated: ${result.updated || 0}. Skipped: ${result.skipped || 0}.`);
@@ -880,13 +955,13 @@ async function syncAllXData() {
     method: "POST",
     body: JSON.stringify({
       username: DEFAULT_SYNC_USERNAME,
-      limit: 3200,
+      post_limit: 25,
+      metrics_limit: 250,
       ...(autoCategorize ? { auto_categorize: true } : { default_topic: "Leadpoet" }),
       default_post_type: "founder_insight",
       exclude_replies: true,
       exclude_retweets: true,
-      since_days: 90,
-      imitate: false,
+      since_days: 30,
     }),
   });
   const posts = payload.posts || {};
@@ -912,6 +987,183 @@ async function refreshAfterAccountAction() {
     await loadAccount();
   }
 }
+
+async function loadVoice() {
+  const [status, current, examples, suggestions] = await Promise.all([
+    api("/api/voice/status"),
+    api("/api/voice/current"),
+    api("/api/voice/examples"),
+    api("/api/voice/suggestions"),
+  ]);
+  state.voice = {
+    status,
+    current,
+    examples: examples.items || [],
+    suggestions: suggestions.items || [],
+  };
+  renderVoice();
+}
+
+function renderVoice() {
+  const voice = state.voice || {};
+  const status = voice.status || {};
+  $("voiceStatusLabel").textContent = status.label || "Loading";
+  $("voiceStatusDescription").textContent = status.description || "";
+  $("voiceExampleCount").textContent = String(status.examples_count || 0);
+  $("voiceLastUpdated").textContent = status.last_updated_at ? formatDateTime(status.last_updated_at) : "Never";
+  $("updateVoiceButton").disabled = status.status === "needs_examples";
+  renderCurrentVoice();
+  renderVoiceTopicOptions();
+  renderVoiceExamples();
+  renderVoiceSuggestions();
+}
+
+function renderCurrentVoice() {
+  const current = state.voice?.current || {};
+  if (!current.exists) {
+    $("currentVoiceSummary").innerHTML = `<p class="empty-copy">${escapeHtml(current.empty_message || "No Voice Profile yet. Mark a few strong posts as Voice Examples, then update Voice.")}</p>`;
+    return;
+  }
+  const sections = current.sections || [];
+  $("currentVoiceSummary").innerHTML = sections.length
+    ? sections.map((section) => `
+      <article class="voice-summary-section">
+        <h3>${escapeHtml(section.title)}</h3>
+        <ul>${(section.items || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </article>
+    `).join("")
+    : `<div class="source-text">${escapeHtml(current.content || "")}</div>`;
+}
+
+function renderVoiceTopicOptions() {
+  const select = $("voiceTopicFilter");
+  const current = select.value || "all";
+  const topics = [...new Set((state.voice?.examples || []).map((post) => post.topic).filter(Boolean))].sort();
+  select.innerHTML = [
+    `<option value="all">All topics</option>`,
+    ...topics.map((topic) => `<option value="${escapeAttr(topic)}">${escapeHtml(topic)}</option>`),
+  ].join("");
+  select.value = topics.includes(current) ? current : "all";
+}
+
+function renderVoiceExamples() {
+  const examples = filteredVoiceExamples();
+  $("voiceExamplesList").innerHTML = examples.length
+    ? examples.map((post) => voiceExampleCard(post, { removable: true })).join("")
+    : `<p class="empty-copy">No Voice Examples yet. Mark a few strong posts so Koinoniko can learn Gavin's voice.</p>`;
+}
+
+function filteredVoiceExamples() {
+  const search = $("voiceSearch").value.trim().toLowerCase();
+  const topic = $("voiceTopicFilter").value;
+  const sort = $("voiceSort").value;
+  const examples = (state.voice?.examples || []).filter((post) => {
+    if (topic !== "all" && post.topic !== topic) return false;
+    const haystack = [post.text, post.summary, post.topic, post.post_type, post.why_this_worked].join(" ").toLowerCase();
+    return !search || haystack.includes(search);
+  });
+  return [...examples].sort((first, second) => {
+    if (sort === "performance") return performanceScore(second) - performanceScore(first);
+    return Date.parse(second.published_at || 0) - Date.parse(first.published_at || 0);
+  });
+}
+
+function renderVoiceSuggestions() {
+  const suggestions = state.voice?.suggestions || [];
+  $("voiceSuggestionsList").innerHTML = suggestions.length
+    ? suggestions.map((post) => voiceSuggestionCard(post)).join("")
+    : `<p class="empty-copy">No suggestions yet. Sync metrics to identify high-performing posts.</p>`;
+}
+
+function voiceExampleCard(post, { removable = false } = {}) {
+  const metrics = post.metrics || {};
+  return `
+    <article class="voice-card">
+      <div class="voice-card-main">
+        <div class="meta-row">
+          <span>${escapeHtml(formatDate(post.published_at))}</span>
+          <span>${escapeHtml(post.topic || "No topic")}</span>
+          <span>${escapeHtml(label(post.post_type || "post"))}</span>
+        </div>
+        <h3>${escapeHtml(post.summary || summarize(post.text, 110))}</h3>
+        <p>${escapeHtml(post.why_this_worked || "No note yet.")}</p>
+      </div>
+      <div class="voice-metrics">
+        <span>${metric(metrics.likes)} likes</span>
+        <span>${metric(metrics.replies)} replies</span>
+        <span>${metric(metrics.reposts)} reposts</span>
+        <span>${metric(metrics.bookmarks)} bookmarks</span>
+        <span>${metric(metrics.impressions)} impressions</span>
+        <span>${formatRate(metrics.engagement_rate)} ER</span>
+      </div>
+      <div class="actions left">
+        <button class="secondary" onclick='openPostDetails(${jsArg(post.id)})'>Open post</button>
+        ${post.url ? `<a class="button-link secondary-link" href="${escapeAttr(post.url)}" target="_blank" rel="noreferrer">Open on X</a>` : ""}
+        ${removable ? `<button class="quiet-button" onclick='removeVoiceExample(event, ${jsArg(post.id)})'>Remove from Voice Examples</button>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function voiceSuggestionCard(post) {
+  return `
+    <article class="voice-card suggested">
+      <div class="voice-card-main">
+        <div class="meta-row">
+          <span>${escapeHtml(post.reason || "Suggested by performance")}</span>
+          <span>${escapeHtml(post.topic || "No topic")}</span>
+        </div>
+        <h3>${escapeHtml(post.summary || summarize(post.text, 110))}</h3>
+      </div>
+      <div class="actions left">
+        <button onclick='markSuggestedVoiceExample(event, ${jsArg(post.id)})'>Mark as Voice Example</button>
+        <button class="secondary" onclick='openPostDetails(${jsArg(post.id)})'>Open post</button>
+      </div>
+    </article>
+  `;
+}
+
+function performanceScore(post) {
+  const metrics = post.metrics || {};
+  return Number(metrics.engagement_rate || 0) * 100000
+    + Number(metrics.bookmarks || 0) * 10
+    + Number(metrics.replies || 0) * 8
+    + Number(metrics.reposts || 0) * 6
+    + Number(metrics.impressions || 0) / 1000;
+}
+
+async function updateVoice() {
+  const payload = await api("/api/voice/update", {
+    method: "POST",
+    body: "{}",
+  });
+  showMessage(`${payload.message || "Voice updated from selected examples."} Used ${payload.examples_used || 0} Voice Examples.`);
+  await loadVoice();
+}
+
+window.markSuggestedVoiceExample = (event, id) => {
+  runButton(event.currentTarget, "Saving...", async () => {
+    const payload = await api(`/api/posts/${encodeURIComponent(id)}/voice`, {
+      method: "POST",
+      body: JSON.stringify({ voice_example: true }),
+    });
+    showMessage(payload.message || "Saved as a Voice Example.");
+    await refresh();
+    await loadVoice();
+  });
+};
+
+window.removeVoiceExample = (event, id) => {
+  runButton(event.currentTarget, "Removing...", async () => {
+    await api(`/api/posts/${encodeURIComponent(id)}/voice`, {
+      method: "POST",
+      body: JSON.stringify({ voice_example: false }),
+    });
+    showMessage("Removed from Voice Examples.");
+    await refresh();
+    await loadVoice();
+  });
+};
 
 async function refreshTopbar() {
   if (state.status?.x_read_configured) {
@@ -1330,8 +1582,11 @@ function setup() {
   document.querySelectorAll("[data-close-modal]").forEach((node) => {
     node.addEventListener("click", () => closeModal(node.dataset.closeModal));
   });
-  ["postSearch", "postDateFrom", "postDateTo"].forEach((id) => {
+  ["postSearch", "postVoiceFilter", "postDateFrom", "postDateTo"].forEach((id) => {
     $(id).addEventListener("input", renderRecentPosts);
+  });
+  ["voiceSearch", "voiceTopicFilter", "voiceSort"].forEach((id) => {
+    $(id).addEventListener("input", renderVoiceExamples);
   });
   document.querySelectorAll(".posts-table th[data-sort-key]").forEach((header) => {
     header.querySelector("button")?.addEventListener("click", () => setRecentPostsSort(header.dataset.sortKey));
@@ -1357,6 +1612,7 @@ function setup() {
   $("accountSyncMetricsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncMetrics));
   $("accountSyncAllButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncAllXData));
   $("accountRefreshTrendsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Refreshing...", refreshTrendsFromAccount));
+  $("updateVoiceButton").addEventListener("click", (event) => runButton(event.currentTarget, "Updating...", updateVoice));
 
   $("reviewList").addEventListener("dragover", (event) => event.preventDefault());
   $("reviewList").addEventListener("drop", (event) => {

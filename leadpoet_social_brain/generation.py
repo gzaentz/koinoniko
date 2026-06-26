@@ -223,7 +223,7 @@ def build_generation_prompt(
         section for section in bundle.style_sections
         if section.name != "gavin_founder_voice_v0"
     ]
-    style = "\n".join(f"- {section.name}: {section.content}" for section in observed_style_sections)
+    voice = "\n".join(f"- {section.name}: {section.content}" for section in observed_style_sections)
     context = "\n".join(f"- {section.kind}/{section.name}: {section.content}" for section in bundle.positioning_sections)
     examples_text = "\n\n".join(_format_example(post, bundle) for post in bundle.examples)
     if not examples_text:
@@ -240,8 +240,8 @@ Study these Gavin/Leadpoet examples first:
 Leadpoet context:
 {context or "- No positioning context yet."}
 
-Observed style guide:
-{style or "- No style guide yet."}
+Koinoniko Voice:
+{voice or "- No Koinoniko Voice profile yet."}
 {trend_section}
 {analytics_section}
 
@@ -509,7 +509,7 @@ def provider_name_for(provider: DraftProvider) -> str:
 
 def build_influence_labels(bundle: ContextBundle, *, trends: list[TrendItem]) -> list[str]:
     labels: list[str] = []
-    labels.extend(f"style:{section.name}" for section in bundle.style_sections)
+    labels.extend(f"voice:{section.name}" for section in bundle.style_sections)
     labels.extend(f"context:{section.name}" for section in bundle.positioning_sections)
     labels.extend(f"example:{post.id}" for post in bundle.examples)
     labels.extend(f"pattern:{pattern['name']}" for pattern in _selected_pattern_refs(bundle))
@@ -583,7 +583,7 @@ def explain_influence(bundle: ContextBundle, *, trends: list[TrendItem]) -> str:
         parts.append("recent performance hints")
     if trends:
         parts.append(f"{len(trends)} timely trend(s)")
-    return "Influenced by " + "; ".join(parts) + "." if parts else "Influenced by the base Gavin/Leadpoet style rules."
+    return "Influenced by " + "; ".join(parts) + "." if parts else "Influenced by the base Koinoniko Voice rules."
 
 
 def build_quality_notes(

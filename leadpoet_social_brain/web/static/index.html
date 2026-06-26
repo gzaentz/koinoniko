@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260626-account-spacing">
+    <link rel="stylesheet" href="/static/styles.css?v=20260626-voice">
   </head>
   <body>
     <aside class="sidebar">
@@ -22,6 +22,7 @@
           <span>Queue</span>
           <span id="reviewNavBadge" class="nav-badge">0</span>
         </button>
+        <button class="nav-button" data-view="voice">Voice</button>
       </nav>
       <div class="sidebar-footer">
         <button class="nav-button" data-view="account">Account</button>
@@ -68,6 +69,10 @@
             </div>
             <div class="table-tools">
               <input id="postSearch" placeholder="Search posts">
+              <select id="postVoiceFilter" aria-label="Post voice filter">
+                <option value="all">All posts</option>
+                <option value="voice">Voice Examples</option>
+              </select>
               <input id="postDateFrom" type="date" aria-label="Start date">
               <input id="postDateTo" type="date" aria-label="End date">
             </div>
@@ -122,6 +127,70 @@
               <span id="scheduledCount" class="count-pill">0</span>
             </div>
             <div id="scheduledList" class="card-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="voiceView">
+        <div class="voice-layout">
+          <section class="panel voice-status-panel">
+            <div>
+              <span class="eyebrow">Koinoniko Voice</span>
+              <h2>Voice Status</h2>
+              <p id="voiceStatusDescription" class="muted">Loading Voice status.</p>
+            </div>
+            <div class="voice-status-grid">
+              <div class="voice-stat">
+                <span>Status</span>
+                <strong id="voiceStatusLabel">Loading</strong>
+              </div>
+              <div class="voice-stat">
+                <span>Voice Examples</span>
+                <strong id="voiceExampleCount">0</strong>
+              </div>
+              <div class="voice-stat">
+                <span>Last updated</span>
+                <strong id="voiceLastUpdated">Never</strong>
+              </div>
+            </div>
+            <div class="actions left">
+              <button id="updateVoiceButton">Update Voice</button>
+            </div>
+          </section>
+
+          <section class="panel voice-current-panel">
+            <div class="panel-header">
+              <div>
+                <h2>Current Voice</h2>
+              </div>
+            </div>
+            <div id="currentVoiceSummary" class="voice-summary"></div>
+          </section>
+
+          <section class="panel voice-examples-panel">
+            <div class="panel-header">
+              <div>
+                <h2>Voice Examples</h2>
+              </div>
+              <div class="table-tools compact">
+                <input id="voiceSearch" placeholder="Search examples">
+                <select id="voiceTopicFilter" aria-label="Voice topic filter"></select>
+                <select id="voiceSort" aria-label="Voice sort">
+                  <option value="date">Sort by date</option>
+                  <option value="performance">Sort by performance</option>
+                </select>
+              </div>
+            </div>
+            <div id="voiceExamplesList" class="voice-list"></div>
+          </section>
+
+          <section class="panel voice-suggestions-panel">
+            <div class="panel-header">
+              <div>
+                <h2>Suggested Voice Examples</h2>
+              </div>
+            </div>
+            <div id="voiceSuggestionsList" class="voice-list compact"></div>
           </section>
         </div>
       </section>

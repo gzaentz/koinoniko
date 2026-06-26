@@ -10,10 +10,10 @@ from typing import Any
 
 
 TASK_DEFAULTS: dict[str, dict[str, Any]] = {
-    "sync-x-posts": {"limit": 100},
-    "sync-x-metrics": {"since_days": 90, "limit": 3200},
-    "sync-x-all": {"post_limit": 100, "metrics_limit": 3200, "since_days": 90},
-    "sync-x-daily": {"post_limit": 100, "metrics_limit": 3200, "since_days": 90},
+    "sync-x-posts": {"limit": 25},
+    "sync-x-metrics": {"since_days": 30, "limit": 250},
+    "sync-x-all": {"post_limit": 25, "metrics_limit": 250, "since_days": 30},
+    "sync-x-daily": {"post_limit": 25, "metrics_limit": 250, "since_days": 30},
     "refresh-trends": {"limit": 5},
 }
 

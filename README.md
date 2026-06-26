@@ -23,8 +23,8 @@ Koinoniko currently supports:
 - importing X examples manually, from CSV, or from the X API
 - syncing posts created directly on X back into SQLite
 - syncing public X metrics into append-only metric snapshots
-- annotating strong posts with `imitate=true` and human notes
-- rebuilding a reusable style guide from selected winners
+- marking strong posts as Voice Examples with "Why this worked" notes
+- updating Koinoniko Voice from selected Voice Examples
 - generating X drafts through a configured LLM provider
 - using OpenRouter as the built-in provider
 - routing Standard and Best Version generation to configurable models
@@ -54,7 +54,7 @@ leadpoet_social_brain/
   storage/sqlite_store.py     SQLite schema, migrations, repository functions
   ingestion.py                X import, trend import, publish workflow
   content_queue.py            Weekly planning, queue, approval, posting helpers
-  context.py                  Context retrieval and style guide rebuilds
+  context.py                  Context retrieval and Voice rebuilds
   generation.py               Prompt assembly, provider call, draft validation
   skills.py                   Markdown skill loader
   providers.py                Provider protocol and env loader
@@ -175,10 +175,11 @@ The command prompts for the password and stores only a salted PBKDF2 hash. Reset
 
 ### Screens
 
-The UI has three main areas:
+The UI has four main areas:
 
 - `Dashboard`: recent X posts, daily and weekly trends, performance signals, and a quiet last-sync line
-- `Content Reviewer`: review, edit, AI revise, approve, schedule, and post approved content
+- `Queue`: review, edit, AI revise, approve, schedule, and post approved content
+- `Voice`: selected Voice Examples, current Koinoniko Voice, update status, and suggested examples
 - `Account`: connection status, data sync actions, model routing, provider test, and account/security controls
 
 Account uses polished status rows for:
@@ -191,6 +192,34 @@ Account uses polished status rows for:
 - Daily Sync
 
 The Account page shows `Connected`, `Not connected`, or `Not configured`. It does not show API keys, tokens, or secret values.
+
+## Voice Workflow
+
+Voice is how Koinoniko learns what Gavin-written posts sound like.
+
+Use it like this:
+
+1. Sync X posts.
+2. Open Dashboard.
+3. Click a strong post.
+4. Check `Use this as a Voice Example`.
+5. Add `Why this worked`.
+6. Save.
+7. Open `Voice`.
+8. Click `Update Voice`.
+
+The Voice page shows:
+
+- status: Ready, Needs examples, Needs update, or Not updated yet
+- number of Voice Examples
+- last Voice update time
+- current Koinoniko Voice summary
+- selected Voice Examples
+- Suggested Voice Examples based on simple performance signals
+
+The Dashboard recent posts table can filter to `Voice Examples`. The post detail modal can mark or unmark a post as a Voice Example and edit the note.
+
+Internally this reuses existing `post_notes` and context storage. The product-facing UI uses Voice language; the older CLI names remain available for compatibility.
 
 ## Environment Variables
 
@@ -319,9 +348,9 @@ Default X post sync behavior:
 - default post type: `founder_insight`
 - exclude replies: `true`
 - exclude retweets: `true`
-- `imitate=false`
+- imported posts are not Voice Examples by default
 
-Post sync does not guess `worked_reason`, hook, structure, tone, CTA, formatting, pattern, or imitate status. Add those manually only for posts you want the system to learn from.
+Post sync does not guess why a post worked, hook, structure, tone, CTA, formatting, pattern, or Voice Example status. Add those manually only for posts you want the system to learn from.
 
 Sync metadata is stored under simple keys:
 
@@ -416,6 +445,8 @@ python -m leadpoet_social_brain.web.task_client sync-x-metrics
 python -m leadpoet_social_brain.web.task_client refresh-trends
 ```
 
+`sync-x-posts` is incremental by default: after the first import, it asks X only for posts newer than the latest stored X post. The default cron payloads also keep post and metric limits modest to avoid repeated backfills.
+
 Set these variables on each Cron service:
 
 ```bash
@@ -472,8 +503,8 @@ For a new hosted database:
 8. Set Account model routing.
 9. Set `X_BEARER_TOKEN`.
 10. Open Account and run `Sync All X Data`.
-11. Mark strongest imported posts with `imitate=true` and `worked_reason`.
-12. Run `rebuild-style-guide`.
+11. Open Dashboard and mark the strongest posts as Voice Examples.
+12. Open Voice and click `Update Voice`.
 13. Set `SCRAPINGDOG_API_KEY` or `SCRAPING_DOG_API_KEY`.
 14. Run `Refresh Trends`.
 15. Set `TASK_SECRET`.
@@ -487,8 +518,8 @@ The normal web-first loop:
 1. Open Account.
 2. Run `Sync All X Data`.
 3. Review recent posts on Dashboard.
-4. Use CLI `update-post-notes` to mark the strongest examples.
-5. Run `rebuild-style-guide`.
+4. Click strong posts and mark them as Voice Examples.
+5. Open Voice and click `Update Voice`.
 6. Refresh Trends.
 7. Create a weekly plan.
 8. Review and edit queued posts.
@@ -524,6 +555,8 @@ python3 -m leadpoet_social_brain.cli rebuild-style-guide
 
 python3 -m leadpoet_social_brain.cli analytics
 ```
+
+The CLI still uses the original internal names: `--imitate true` means "use this as a Voice Example," and `--worked-reason` means "Why this worked."
 
 ## X Import
 
@@ -574,7 +607,7 @@ The importer:
 - imports available public metrics
 - does not store `X_BEARER_TOKEN`
 - does not infer why a post worked
-- defaults `imitate=false`
+- does not mark imported posts as Voice Examples by default
 
 Private analytics such as URL clicks and profile clicks are not included.
 
@@ -627,11 +660,11 @@ python3 -m leadpoet_social_brain.cli add-metrics \
 
 Analytics uses the latest metric snapshot by default.
 
-## Notes And Style Guide
+## Voice Examples From CLI
 
-Imported posts are raw examples until you annotate them.
+The web UI is the preferred way to teach Voice. The CLI remains available for batch or scripted updates.
 
-Mark a strong post:
+Mark a strong post as a Voice Example:
 
 ```bash
 python3 -m leadpoet_social_brain.cli update-post-notes \
@@ -648,13 +681,13 @@ python3 -m leadpoet_social_brain.cli update-post-notes \
 
 Missing fields preserve existing values.
 
-Rebuild the observed writing guide:
+Update Koinoniko Voice from selected examples:
 
 ```bash
 python3 -m leadpoet_social_brain.cli rebuild-style-guide --limit 12
 ```
 
-The guide is meant to improve writing taste, not turn the workflow into a tagging chore.
+Koinoniko Voice is meant to improve writing taste, not turn the workflow into a tagging chore.
 
 ## Generation
 
@@ -704,7 +737,7 @@ Generation uses:
 
 - exact high-performing examples
 - human notes on why posts worked
-- observed style guide
+- Koinoniko Voice
 - modular Leadpoet context
 - optional trends
 - analytics hints when enough data exists
@@ -895,14 +928,14 @@ Important SQLite tables:
 
 - `posts`: platform, text, URL, author, topic, post type, status, optional `source_draft_id`
 - `post_metrics`: append-only metric snapshots
-- `post_notes`: human notes, labels, and imitation flag
+- `post_notes`: Voice Example flag, Why this worked notes, and optional labels
 - `post_influences`: links published posts to draft influences
 - `generated_drafts`: generated text and structured context snapshot
 - `content_queue`: review/approval/posting queue
 - `queued_post_versions`: manual and AI edit history
 - `trend_items`: timely market context
 - `patterns`: reusable named patterns
-- `context_sections`: Leadpoet context and style guide sections
+- `context_sections`: Leadpoet context and Koinoniko Voice sections
 - `web_auth_users`: single local web login
 - `sync_metadata`: X and trend sync status summaries
 - `app_settings`: saved model routing
@@ -984,8 +1017,8 @@ Current tests cover:
 - long X examples
 - X API normalization, pagination, duplicate prevention, and dry runs
 - metrics sync snapshots and latest-snapshot analytics
-- post notes and `imitate=true` workflows
-- style guide rebuilds
+- Voice Example note workflows
+- Voice updates from selected examples
 - skill loading and prompt assembly
 - provider-required generation
 - OpenRouter provider behavior

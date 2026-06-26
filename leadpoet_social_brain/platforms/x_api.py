@@ -133,6 +133,7 @@ class XApiClient:
         user_id: str,
         *,
         limit: int = 100,
+        since_id: str | None = None,
         start_time: str | None = None,
         end_time: str | None = None,
         exclude_replies: bool = True,
@@ -153,6 +154,8 @@ class XApiClient:
                 excluded.append("retweets")
             if excluded:
                 params["exclude"] = ",".join(excluded)
+            if since_id:
+                params["since_id"] = since_id
             if start_time:
                 params["start_time"] = start_time
             if end_time:
@@ -318,6 +321,7 @@ def sync_x_user_posts(
     limit: int,
     default_topic: str,
     default_post_type: str,
+    since_id: str | None = None,
     start_time: str | None = None,
     end_time: str | None = None,
     exclude_replies: bool = True,
@@ -341,6 +345,7 @@ def sync_x_user_posts(
     for tweet in client.iter_user_posts(
         user_id,
         limit=limit,
+        since_id=since_id,
         start_time=start_time,
         end_time=end_time,
         exclude_replies=exclude_replies,

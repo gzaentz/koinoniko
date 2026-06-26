@@ -17,7 +17,7 @@ from leadpoet_social_brain.categorization import XPostLLMCategorizer, parse_x_ca
 from leadpoet_social_brain.content_queue import create_post_x, plan_week_x, post_queue_item_x
 from leadpoet_social_brain.cli import main as cli_main
 from leadpoet_social_brain.context import ContextManager
-from leadpoet_social_brain.core.models import ContentQueueItem, DraftRequest, EngagementMetrics, SocialPost, TrendItem, utc_now
+from leadpoet_social_brain.core.models import ContentQueueItem, DraftRequest, EngagementMetrics, PostNote, SocialPost, TrendItem, utc_now
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
 from leadpoet_social_brain.openrouter_provider import OpenRouterProvider, create_provider
@@ -143,12 +143,14 @@ class FakeXApiClient:
         self.tweets = tweets
         self.metrics_by_id = metrics_by_id or {}
         self.resolved_usernames: list[str] = []
+        self.iter_user_posts_calls: list[dict[str, object]] = []
 
     def resolve_user_id(self, username: str) -> str:
         self.resolved_usernames.append(username)
         return "42"
 
     def iter_user_posts(self, user_id: str, **kwargs):
+        self.iter_user_posts_calls.append(kwargs)
         yield from self.tweets
 
     def fetch_tweets_by_ids(self, tweet_ids):
@@ -338,6 +340,11 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('data-view="dashboard">Dashboard</button>', index_html)
         self.assertIn('data-view="reviewer"', index_html)
         self.assertIn(">Queue</span>", index_html)
+        self.assertIn('data-view="voice">Voice</button>', index_html)
+        self.assertIn('id="voiceView"', index_html)
+        self.assertIn("Koinoniko Voice", index_html)
+        self.assertIn("Voice Examples", index_html)
+        self.assertIn("Update Voice", index_html)
         self.assertNotIn("<h2>Queue</h2>", index_html)
         self.assertIn('id="reviewNavBadge"', index_html)
         self.assertIn('data-view="account">Account</button>', index_html)
@@ -361,6 +368,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('id="postModal"', index_html)
         self.assertIn('id="queueModal"', index_html)
         self.assertIn('id="recentPostsTable"', index_html)
+        self.assertIn('id="postVoiceFilter"', index_html)
         self.assertIn('id="dailyTrendList"', index_html)
         self.assertIn('id="weeklyTrendList"', index_html)
         self.assertNotIn("All X Posts", index_html)
@@ -412,6 +420,14 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("/api/account/sync-x-posts", app_js)
         self.assertIn("/api/account/sync-x-metrics", app_js)
         self.assertIn("/api/account/sync-x-all", app_js)
+        self.assertIn("/api/voice/status", app_js)
+        self.assertIn("/api/voice/update", app_js)
+        self.assertIn("/api/voice/examples", app_js)
+        self.assertIn("/api/voice/current", app_js)
+        self.assertIn("/api/voice/suggestions", app_js)
+        self.assertIn("/api/posts/", app_js)
+        self.assertIn("Mark as Voice Example", app_js)
+        self.assertIn("Why this worked", app_js)
         self.assertIn("auto_categorize", app_js)
         self.assertIn("Recategorized", app_js)
         self.assertIn("/api/trends/refresh", app_js)
@@ -426,6 +442,10 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn("Railway variables", app_js)
         self.assertNotIn("X_BEARER_TOKEN", app_js)
         self.assertNotIn("OPENROUTER_API_KEY", app_js)
+        self.assertNotIn("imitate=true", index_html + app_js)
+        self.assertNotIn("worked_reason", index_html + app_js)
+        self.assertNotIn("rebuild-style-guide", index_html + app_js)
+        self.assertNotIn("style guide", (index_html + app_js).lower())
         self.assertIn("Scheduled Content", index_html)
         self.assertNotIn('id="statusBlock"', index_html)
         self.assertNotIn('id="attentionList"', index_html)
@@ -891,7 +911,7 @@ class SocialBrainTest(unittest.TestCase):
 
             section = ContextManager(store).rebuild_style_guide_from_examples()
 
-            self.assertIn("Observed Gavin/Leadpoet Writing Guide", section.content)
+            self.assertIn("Koinoniko Voice", section.content)
             self.assertIn("Reusable writing principles", section.content)
             self.assertNotIn("Repeated patterns to consider", section.content)
             store.close()
@@ -1720,6 +1740,204 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(connected["connections"]["scrapingdog"]["status"], "connected")
             self.assertNotIn("alias-key", json.dumps(connected))
 
+    def test_voice_status_examples_update_and_current_summary(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            post = ingest_x_post(
+                store,
+                text="Most sales AI is still mail merge with better adjectives.",
+                url="https://x.com/gavin/status/voice101",
+                date="2026-06-20",
+                author="Gavin",
+                topic="sales LLMs",
+                post_type="founder_insight",
+                metrics=EngagementMetrics(impressions=2000, likes=80, replies=8, bookmarks=20),
+            )
+            store.close()
+
+            status, payload = handle_api_request("GET", "/api/voice/status", db_path=db_path)
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["status"], "needs_examples")
+            self.assertEqual(payload["examples_count"], 0)
+
+            status, saved = handle_api_request(
+                "POST",
+                f"/api/posts/{post.id}/voice",
+                json.dumps(
+                    {
+                        "voice_example": True,
+                        "why_this_worked": "Names the weak default and gives a sharper model.",
+                        "topic": "sales LLMs",
+                        "post_type": "founder_insight",
+                    }
+                ),
+                db_path=db_path,
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(saved["message"], "Saved as a Voice Example.")
+            self.assertTrue(saved["post"]["voice"]["is_voice_example"])
+            self.assertEqual(saved["post"]["voice"]["why_this_worked"], "Names the weak default and gives a sharper model.")
+
+            status, payload = handle_api_request("GET", "/api/voice/status", db_path=db_path)
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["examples_count"], 1)
+            self.assertEqual(payload["status"], "not_updated_yet")
+
+            status, updated = handle_api_request("POST", "/api/voice/update", b"{}", db_path=db_path)
+            self.assertEqual(status, 200)
+            self.assertEqual(updated["message"], "Voice updated from selected examples.")
+            self.assertEqual(updated["examples_used"], 1)
+            self.assertTrue(updated["current"]["exists"])
+            self.assertIn("Reusable writing principles", {section["title"] for section in updated["current"]["sections"]})
+            self.assertEqual(updated["status"]["status"], "ready")
+
+            status, current = handle_api_request("GET", "/api/voice/current", db_path=db_path)
+            self.assertEqual(status, 200)
+            self.assertTrue(current["exists"])
+            self.assertEqual(current["title"], "Koinoniko Voice")
+
+    def test_voice_save_preserves_unspecified_note_fields_and_can_unmark(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            post = ingest_x_post(
+                store,
+                text="Useful sales AI starts with buyer timing.",
+                url="https://x.com/gavin/status/voice102",
+                date="2026-06-20",
+                author="Gavin",
+                topic="Leadpoet",
+                post_type="founder_insight",
+            )
+            store.save_note(
+                PostNote(
+                    post_id=post.id,
+                    worked_reason="Original reason.",
+                    hook="specific_observation",
+                    structure="contrast",
+                    tone="plainspoken",
+                    cta="none",
+                    formatting="single_paragraph",
+                    pattern_name="enemy_then_better_model",
+                    imitate=True,
+                )
+            )
+            store.close()
+
+            status, payload = handle_api_request(
+                "POST",
+                f"/api/posts/{post.id}/voice",
+                json.dumps({"voice_example": False, "why_this_worked": "Updated reason."}),
+                db_path=db_path,
+            )
+
+            self.assertEqual(status, 200)
+            voice = payload["post"]["voice"]
+            self.assertFalse(voice["is_voice_example"])
+            self.assertEqual(voice["why_this_worked"], "Updated reason.")
+            self.assertEqual(voice["hook"], "specific_observation")
+            self.assertEqual(voice["structure"], "contrast")
+            self.assertEqual(voice["tone"], "plainspoken")
+            self.assertEqual(voice["cta"], "none")
+            self.assertEqual(voice["formatting"], "single_paragraph")
+            self.assertEqual(voice["pattern"], "enemy_then_better_model")
+
+    def test_voice_examples_and_suggestions_exclude_selected_examples(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            selected = ingest_x_post(
+                store,
+                text="The product point is that context beats volume.",
+                url="https://x.com/gavin/status/voice201",
+                date="2026-06-21",
+                author="Gavin",
+                topic="sales LLMs",
+                post_type="founder_insight",
+                metrics=EngagementMetrics(impressions=5000, likes=100, replies=10, bookmarks=30),
+                worked_reason="Plain contrast.",
+                imitate=True,
+            )
+            suggested = ingest_x_post(
+                store,
+                text="The best AI SDR does less guessing.",
+                url="https://x.com/gavin/status/voice202",
+                date="2026-06-22",
+                author="Gavin",
+                topic="sales LLMs",
+                post_type="founder_insight",
+                metrics=EngagementMetrics(impressions=8000, likes=120, replies=20, bookmarks=60),
+            )
+            store.close()
+
+            status, examples = handle_api_request("GET", "/api/voice/examples", db_path=db_path)
+            self.assertEqual(status, 200)
+            self.assertEqual([item["id"] for item in examples["items"]], [selected.id])
+            self.assertEqual(examples["items"][0]["why_this_worked"], "Plain contrast.")
+
+            status, suggestions = handle_api_request("GET", "/api/voice/suggestions", db_path=db_path)
+            self.assertEqual(status, 200)
+            suggestion_ids = {item["id"] for item in suggestions["items"]}
+            self.assertIn(suggested.id, suggestion_ids)
+            self.assertNotIn(selected.id, suggestion_ids)
+            self.assertIn("reason", suggestions["items"][0])
+
+    def test_post_detail_and_dashboard_payload_include_voice_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            post = ingest_x_post(
+                store,
+                text="Founder-led content should make one useful point.",
+                url="https://x.com/gavin/status/voice301",
+                date="2026-06-23",
+                author="Gavin",
+                topic="founder content",
+                post_type="founder_insight",
+                worked_reason="Feels direct and useful.",
+                imitate=True,
+            )
+            store.close()
+
+            status, detail = handle_api_request("GET", f"/api/posts/{post.id}", db_path=db_path)
+            self.assertEqual(status, 200)
+            self.assertTrue(detail["post"]["voice"]["is_voice_example"])
+            self.assertEqual(detail["post"]["voice"]["why_this_worked"], "Feels direct and useful.")
+
+            status, dashboard = handle_api_request("GET", "/api/dashboard", db_path=db_path)
+            self.assertEqual(status, 200)
+            recent = dashboard["recent_posts"][0]
+            self.assertTrue(recent["voice"]["is_voice_example"])
+
+    def test_generation_prompt_labels_rebuilt_guide_as_voice(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            ingest_x_post(
+                store,
+                text="Most sales AI is just volume. Useful sales AI starts with timing.",
+                url="https://x.com/gavin/status/voice401",
+                date="2026-06-24",
+                author="Gavin",
+                topic="sales LLMs",
+                post_type="founder_insight",
+                worked_reason="Sharp contrast.",
+                imitate=True,
+            )
+            ContextManager(store).rebuild_style_guide_from_examples()
+            prompt = SocialBrainGenerator(store).build_prompt(
+                DraftRequest(
+                    platform="x",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="buyer timing beats volume",
+                )
+            )
+
+            self.assertIn("Koinoniko Voice:", prompt)
+            self.assertNotIn("Observed style guide:", prompt)
+            store.close()
+
     def test_account_sync_x_posts_endpoint_imports_defaults_and_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"
@@ -2032,11 +2250,22 @@ class SocialBrainTest(unittest.TestCase):
                         json.dumps({"since_days": 90, "limit": 100}),
                         db_path=db_path,
                     )
+                    second_posts_status, second_posts_payload = handle_api_request(
+                        "POST",
+                        "/tasks/sync-x-posts",
+                        json.dumps({"limit": 100}),
+                        db_path=db_path,
+                    )
 
             self.assertEqual(posts_status, 200)
             self.assertEqual(posts_payload["new_posts_imported"], 1)
             self.assertEqual(metrics_status, 200)
             self.assertEqual(metrics_payload["metrics_updated"], 1)
+            self.assertEqual(second_posts_status, 200)
+            self.assertEqual(second_posts_payload["duplicates_skipped"], 1)
+            self.assertIsNone(fake_client.iter_user_posts_calls[0].get("since_id"))
+            self.assertEqual(fake_client.iter_user_posts_calls[1].get("since_id"), "frequent1")
+            self.assertEqual(second_posts_payload["sync"]["summary"]["since_id"], "frequent1")
             store = SQLiteStore(db_path)
             latest_metrics = store.latest_metrics_by_post_id([store.list_posts(platform="x", limit=1)[0].id])
             self.assertEqual(next(iter(latest_metrics.values())).likes, 12)
@@ -2081,9 +2310,9 @@ class SocialBrainTest(unittest.TestCase):
             store.close()
 
     def test_task_client_defaults_support_frequent_railway_cron_jobs(self):
-        self.assertEqual(TASK_DEFAULTS["sync-x-posts"], {"limit": 100})
-        self.assertEqual(TASK_DEFAULTS["sync-x-metrics"]["since_days"], 90)
-        self.assertEqual(TASK_DEFAULTS["sync-x-metrics"]["limit"], 3200)
+        self.assertEqual(TASK_DEFAULTS["sync-x-posts"], {"limit": 25})
+        self.assertEqual(TASK_DEFAULTS["sync-x-metrics"]["since_days"], 30)
+        self.assertEqual(TASK_DEFAULTS["sync-x-metrics"]["limit"], 250)
         self.assertEqual(TASK_DEFAULTS["refresh-trends"], {"limit": 5})
         with patch(
             "leadpoet_social_brain.web.task_client.post_task",
