@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Koinoniko</title>
     <link rel="icon" type="image/svg+xml" href="/static/koinoniko-favicon.svg">
-    <link rel="stylesheet" href="/static/styles.css?v=20260626-sortable-posts">
+    <link rel="stylesheet" href="/static/styles.css?v=20260626-dashboard-table-scroll">
   </head>
   <body>
     <aside class="sidebar">
@@ -46,10 +46,33 @@
       <section id="message" class="message hidden"></section>
 
       <section class="view active" id="dashboardView">
+        <div class="dashboard-grid">
+          <section class="panel trends-panel">
+            <div class="panel-header">
+              <div>
+                <span class="eyebrow">Current Trends</span>
+                <h2>Worth considering</h2>
+              </div>
+              <button class="secondary" id="openTrendsDashboardButton">Add Trend</button>
+            </div>
+            <div id="dashboardTrendList" class="trend-list"></div>
+          </section>
+
+          <section class="panel signal-panel">
+            <div class="panel-header">
+              <div>
+                <span class="eyebrow">Performance Signals</span>
+                <h2>What is working</h2>
+              </div>
+            </div>
+            <div id="signalList" class="signal-list"></div>
+          </section>
+        </div>
+
         <section class="panel recent-posts-panel">
           <div class="panel-header">
             <div>
-              <span class="eyebrow">Recent X Posts</span>
+              <span class="eyebrow">All X Posts</span>
               <h2>What has been posted</h2>
             </div>
             <div class="table-tools">
@@ -81,29 +104,6 @@
           </div>
           <p class="sync-line" id="dashboardSyncLine">Last X sync: never</p>
         </section>
-
-        <div class="dashboard-grid">
-          <section class="panel trends-panel">
-            <div class="panel-header">
-              <div>
-                <span class="eyebrow">Current Trends</span>
-                <h2>Worth considering</h2>
-              </div>
-              <button class="secondary" id="openTrendsDashboardButton">Add Trend</button>
-            </div>
-            <div id="dashboardTrendList" class="trend-list"></div>
-          </section>
-
-          <section class="panel signal-panel">
-            <div class="panel-header">
-              <div>
-                <span class="eyebrow">Performance Signals</span>
-                <h2>What is working</h2>
-              </div>
-            </div>
-            <div id="signalList" class="signal-list"></div>
-          </section>
-        </div>
       </section>
 
       <section class="view" id="reviewerView">
@@ -293,6 +293,6 @@
       </div>
     </section>
 
-    <script src="/static/app.js?v=20260626-sortable-posts"></script>
+    <script src="/static/app.js?v=20260626-dashboard-table-scroll"></script>
   </body>
 </html>

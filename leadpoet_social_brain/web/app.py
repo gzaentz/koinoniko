@@ -1048,7 +1048,7 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
         if item.status == "approved" and parse_dt(item.scheduled_at) <= datetime.now(timezone.utc)
     ][:10]
     analytics = build_analytics_summary(store)
-    recent_posts = store.list_posts(platform="x", limit=100)
+    recent_posts = store.list_posts(platform="x", limit=None)
     latest_metrics = store.latest_metrics_by_post_id([post.id for post in recent_posts])
     trends = store.list_trends(status="unused", limit=10)
     return {

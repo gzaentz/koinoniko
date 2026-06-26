@@ -330,8 +330,11 @@ main {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
   gap: 18px;
-  margin-top: 18px;
   align-items: start;
+}
+
+.recent-posts-panel {
+  margin-top: 18px;
 }
 
 .table-tools {
@@ -344,7 +347,9 @@ main {
 .table-wrap {
   width: 100%;
   margin-top: 18px;
-  overflow-x: auto;
+  max-height: clamp(320px, calc(100vh - 430px), 700px);
+  overflow: auto;
+  border-bottom: 1px solid var(--line);
 }
 
 .sync-line {
@@ -369,10 +374,15 @@ main {
 }
 
 .posts-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--white);
   color: var(--muted);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0;
+  box-shadow: 0 1px 0 var(--line);
 }
 
 .table-sort-button {

@@ -1092,7 +1092,7 @@ class SQLiteStore:
         status: str | None = None,
         topic: str | None = None,
         post_type: str | None = None,
-        limit: int = 50,
+        limit: int | None = 50,
     ) -> list[SocialPost]:
         clauses: list[str] = []
         params: list[object] = []
@@ -1109,9 +1109,12 @@ class SQLiteStore:
             clauses.append("post_type = ?")
             params.append(post_type)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        limit_sql = " LIMIT ?" if limit is not None else ""
+        if limit is not None:
+            params.append(limit)
         rows = self.conn.execute(
-            f"SELECT * FROM posts {where} ORDER BY published_at DESC, created_at DESC LIMIT ?",
-            (*params, limit),
+            f"SELECT * FROM posts {where} ORDER BY published_at DESC, created_at DESC{limit_sql}",
+            params,
         ).fetchall()
         return [self._row_to_post(row) for row in rows]
 

@@ -1072,6 +1072,27 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["trends"][0]["id"], trend.id)
             self.assertIn("analytics_hints", payload)
 
+    def test_web_dashboard_returns_all_posts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            for index in range(101):
+                ingest_x_post(
+                    store,
+                    text=f"Stored dashboard post {index}",
+                    url=f"https://x.com/gavin/status/allposts{index}",
+                    date=f"2026-01-{(index % 28) + 1:02d}T12:00:00+00:00",
+                    author="Gavin",
+                    topic="Leadpoet",
+                    post_type="founder_insight",
+                )
+            store.close()
+
+            status, payload = handle_api_request("GET", "/api/dashboard", db_path=db_path)
+
+            self.assertEqual(status, 200)
+            self.assertEqual(len(payload["recent_posts"]), 101)
+
     def test_web_sync_x_user_endpoint_can_auto_categorize(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"
