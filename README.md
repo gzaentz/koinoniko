@@ -35,6 +35,7 @@ Provider requirement:
 
 - `generate-x` requires `SOCIAL_BRAIN_PROVIDER=module.path:create_provider`.
 - If no provider is configured, generation fails clearly and does not create drafts.
+- Built-in OpenRouter provider: `leadpoet_social_brain.openrouter_provider:create_provider`.
 
 ## Project Layout
 
@@ -51,6 +52,7 @@ leadpoet_social_brain/
   generation.py           Prompt assembly, provider call, draft validation
   skills.py               Tiny markdown skill loader
   providers.py            Optional provider protocol and env loader
+  openrouter_provider.py  OpenRouter provider for provider-backed generation
   analytics.py            Transparent performance summaries
   cli.py                  Command-line interface
   web/app.py              Minimal login-gated HTTP API and static UI server
@@ -93,7 +95,8 @@ Database path resolution is:
 
 1. explicit `--db`
 2. `SOCIAL_BRAIN_DB`
-3. `data/social_brain.sqlite3`
+3. `RAILWAY_VOLUME_MOUNT_PATH/social_brain.sqlite3`
+4. `data/social_brain.sqlite3`
 
 Use `--db` when you want a separate test or demo database:
 
@@ -108,6 +111,15 @@ export SOCIAL_BRAIN_DB="/app/data/social_brain.sqlite3"
 ```
 
 Use a fresh database path when you want clean demo output.
+
+For local secrets, copy the example env file, fill in your real values, then load it into your shell:
+
+```bash
+cp .env.example .env
+set -a; source .env; set +a
+```
+
+`.env` is ignored by git. Keep real X/OpenRouter tokens there locally or in Railway Variables for production.
 
 ## Web UI
 
@@ -156,10 +168,12 @@ The UI supports:
 - trend add/list workflow
 - manual X metrics sync
 
-Generation and AI editing require:
+Generation and AI editing require a provider. For OpenRouter:
 
 ```bash
-SOCIAL_BRAIN_PROVIDER="module.path:create_provider"
+OPENROUTER_API_KEY="<your OpenRouter key>"
+OPENROUTER_MODEL="<any OpenRouter model slug>"
+SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider"
 ```
 
 Posting to X requires write credentials. Read-only X import and metric sync use `X_BEARER_TOKEN`; posting needs either `X_OAUTH2_ACCESS_TOKEN` or OAuth 1.0a keys. The UI does not auto-post or auto-approve anything.
@@ -182,15 +196,16 @@ Required Railway settings:
 
 - Deploy from the `main` branch of `gzaentz/koinoniko`.
 - Add a Railway Volume and mount it at `/app/data`.
-- Set `SOCIAL_BRAIN_DB=/app/data/social_brain.sqlite3`.
+- Set `SOCIAL_BRAIN_DB=/app/data/social_brain.sqlite3`, or rely on Railway's automatic `RAILWAY_VOLUME_MOUNT_PATH=/app/data` variable.
 - Keep service replicas at `1` while using SQLite.
 - Set `X_BEARER_TOKEN` if you want X import and metric sync.
-- Set `SOCIAL_BRAIN_PROVIDER=module.path:create_provider` before using generation, planning, or AI edits.
+- Set `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, and `SOCIAL_BRAIN_PROVIDER=leadpoet_social_brain.openrouter_provider:create_provider` before using generation, planning, or AI edits.
 - Set X write credentials only if you want approved posts to be posted from Railway.
 
 SQLite notes for Railway:
 
 - The app creates the DB parent directory before opening SQLite.
+- The deploy logs print the active DB path as `Social Brain DB path: ...`; on Railway it should be `/app/data/social_brain.sqlite3`.
 - SQLite opens with WAL mode, a `5000ms` busy timeout, and foreign keys enabled.
 - Do not write or initialize the DB during build or pre-deploy steps; Railway volumes are mounted at runtime.
 - Opening the app safely runs schema creation/migrations at runtime.
@@ -230,7 +245,9 @@ python3 -m leadpoet_social_brain.cli --db /private/tmp/social_brain_demo.sqlite3
 `prompt-x` is useful for checking retrieved examples, context, skills, analytics hints, and trends. To generate drafts, configure a provider first:
 
 ```bash
-export SOCIAL_BRAIN_PROVIDER="my_provider_module:create_provider"
+export OPENROUTER_API_KEY="<your OpenRouter key>"
+export OPENROUTER_MODEL="<any OpenRouter model slug>"
+export SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider"
 
 python3 -m leadpoet_social_brain.cli --db /private/tmp/social_brain_demo.sqlite3 generate-x \
   --topic "sales LLMs" \
@@ -338,10 +355,12 @@ Add or import timely market context:
 python3 -m leadpoet_social_brain.cli ingest-trends-batch --csv data/trends.csv
 ```
 
-Configure your provider before generating:
+Configure OpenRouter before generating:
 
 ```bash
-export SOCIAL_BRAIN_PROVIDER="my_provider_module:create_provider"
+export OPENROUTER_API_KEY="<your OpenRouter key>"
+export OPENROUTER_MODEL="<any OpenRouter model slug>"
+export SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider"
 ```
 
 Generate standalone X drafts:
@@ -717,7 +736,9 @@ python3 -m leadpoet_social_brain.cli prompt-x \
 Generate drafts:
 
 ```bash
-export SOCIAL_BRAIN_PROVIDER="my_provider_module:create_provider"
+export OPENROUTER_API_KEY="<your OpenRouter key>"
+export OPENROUTER_MODEL="<any OpenRouter model slug>"
+export SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider"
 
 python3 -m leadpoet_social_brain.cli generate-x \
   --topic "sales LLMs" \
@@ -832,7 +853,36 @@ If no provider is configured, `generate-x` exits with:
 No LLM provider configured. Set SOCIAL_BRAIN_PROVIDER=module.path:create_provider to generate drafts.
 ```
 
-Provider interface:
+### OpenRouter
+
+OpenRouter support is built in. Set:
+
+```bash
+export OPENROUTER_API_KEY="<your OpenRouter key>"
+export OPENROUTER_MODEL="<any OpenRouter model slug>"
+export SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider"
+```
+
+Examples of model slugs might look like:
+
+```text
+openai/gpt-4.1-mini
+anthropic/claude-3.5-sonnet
+google/gemini-2.5-pro
+```
+
+Use whichever model is available in your OpenRouter account. Optional tuning:
+
+```bash
+export OPENROUTER_TEMPERATURE="0.8"
+export OPENROUTER_MAX_TOKENS="1200"
+export OPENROUTER_SITE_URL="https://leadpoet.com"
+export OPENROUTER_APP_NAME="Leadpoet Social Brain"
+```
+
+### Custom Provider
+
+The generic provider interface remains:
 
 ```python
 class MyProvider:
@@ -843,7 +893,7 @@ def create_provider():
     return MyProvider()
 ```
 
-Example:
+Custom provider example:
 
 ```bash
 export SOCIAL_BRAIN_PROVIDER="my_provider_module:create_provider"
@@ -1248,6 +1298,7 @@ Current tests cover:
 - `update-post-notes` field preservation and `imitate=true` workflow
 - style guide rebuild quality
 - provider-required generation behavior
+- OpenRouter provider configuration, request payloads, and response parsing
 - storage-backed web login setup and signed session cookies
 - weekly X planning into a local review queue
 - local UI API queue listing, editing, approval, AI revise, revision acceptance, and safety guards

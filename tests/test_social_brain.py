@@ -17,6 +17,7 @@ from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.core.models import ContentQueueItem, DraftRequest, EngagementMetrics, TrendItem, utc_now
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
+from leadpoet_social_brain.openrouter_provider import OpenRouterProvider, create_provider
 from leadpoet_social_brain.platforms.x_api import (
     MISSING_X_WRITE_CREDENTIALS_MESSAGE,
     XApiClient,
@@ -27,7 +28,12 @@ from leadpoet_social_brain.platforms.x_api import (
     sync_x_user_posts,
 )
 from leadpoet_social_brain.skills import generation_skills, load_skill
-from leadpoet_social_brain.storage.sqlite_store import DB_ENV_VAR, SQLiteStore, resolve_db_path
+from leadpoet_social_brain.storage.sqlite_store import (
+    DB_ENV_VAR,
+    RAILWAY_VOLUME_MOUNT_ENV_VAR,
+    SQLiteStore,
+    resolve_db_path,
+)
 from leadpoet_social_brain.web.app import (
     DEFAULT_AUTH_USERNAME,
     SESSION_COOKIE,
@@ -99,7 +105,15 @@ class SocialBrainTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             env_db = Path(tmpdir) / "volume" / "social_brain.sqlite3"
             explicit_db = Path(tmpdir) / "explicit" / "brain.sqlite3"
-            with patch.dict(os.environ, {DB_ENV_VAR: str(env_db)}, clear=False):
+            railway_volume = Path(tmpdir) / "railway-volume"
+            with patch.dict(
+                os.environ,
+                {
+                    DB_ENV_VAR: str(env_db),
+                    RAILWAY_VOLUME_MOUNT_ENV_VAR: str(railway_volume),
+                },
+                clear=False,
+            ):
                 self.assertEqual(resolve_db_path(), env_db)
                 self.assertEqual(resolve_db_path(explicit_db), explicit_db)
 
@@ -108,6 +122,16 @@ class SocialBrainTest(unittest.TestCase):
                 self.assertTrue(env_db.parent.exists())
                 self.assertEqual(store.conn.execute("PRAGMA foreign_keys").fetchone()[0], 1)
                 self.assertEqual(store.conn.execute("PRAGMA busy_timeout").fetchone()[0], 5000)
+
+            with patch.dict(
+                os.environ,
+                {RAILWAY_VOLUME_MOUNT_ENV_VAR: str(railway_volume)},
+                clear=True,
+            ):
+                self.assertEqual(
+                    resolve_db_path(),
+                    railway_volume / "social_brain.sqlite3",
+                )
                 self.assertEqual(store.conn.execute("PRAGMA journal_mode").fetchone()[0].lower(), "wal")
                 store.close()
 
@@ -176,6 +200,69 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(store.verify_web_auth_user(DEFAULT_AUTH_USERNAME, "test-password"))
             self.assertIn(DEFAULT_AUTH_USERNAME, output.getvalue())
             store.close()
+
+    def test_openrouter_provider_uses_env_and_parses_variants(self):
+        captured: dict[str, object] = {}
+
+        def fake_request(url, payload, headers):
+            captured["url"] = url
+            captured["payload"] = payload
+            captured["headers"] = headers
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "First draft about buyer timing.\n---\nSecond draft about sales context."
+                        }
+                    }
+                ]
+            }
+
+        provider = OpenRouterProvider(
+            api_key="test-key",
+            model="anthropic/claude-3.5-sonnet",
+            temperature=0.6,
+            max_tokens=700,
+            site_url="https://leadpoet.com",
+            app_name="Leadpoet Social Brain",
+            request_json=fake_request,
+        )
+
+        drafts = provider.generate("Write X posts.", variants=2)
+
+        self.assertEqual(drafts, ["First draft about buyer timing.", "Second draft about sales context."])
+        self.assertEqual(captured["url"], "https://openrouter.ai/api/v1/chat/completions")
+        payload = captured["payload"]
+        headers = captured["headers"]
+        self.assertEqual(payload["model"], "anthropic/claude-3.5-sonnet")
+        self.assertEqual(payload["temperature"], 0.6)
+        self.assertEqual(payload["max_tokens"], 700)
+        self.assertIn("Return exactly 2 variants", payload["messages"][0]["content"])
+        self.assertEqual(headers["Authorization"], "Bearer test-key")
+        self.assertEqual(headers["HTTP-Referer"], "https://leadpoet.com")
+        self.assertEqual(headers["X-Title"], "Leadpoet Social Brain")
+
+    def test_openrouter_create_provider_requires_key_and_model(self):
+        with patch.dict(
+            os.environ,
+            {
+                "OPENROUTER_API_KEY": "test-key",
+                "OPENROUTER_MODEL": "openai/gpt-4.1-mini",
+                "OPENROUTER_TEMPERATURE": "0.7",
+                "OPENROUTER_MAX_TOKENS": "900",
+            },
+            clear=False,
+        ):
+            provider = create_provider()
+
+        self.assertEqual(provider.api_key, "test-key")
+        self.assertEqual(provider.model, "openai/gpt-4.1-mini")
+        self.assertEqual(provider.temperature, 0.7)
+        self.assertEqual(provider.max_tokens, 900)
+
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "", "OPENROUTER_MODEL": ""}, clear=False):
+            with self.assertRaises(ValueError):
+                create_provider()
 
     def test_skill_files_load_correctly(self):
         skill = load_skill("global_voice.md")

@@ -65,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
         "--db",
         help=(
             "Path to SQLite database. Defaults to SOCIAL_BRAIN_DB, "
+            "then RAILWAY_VOLUME_MOUNT_PATH/social_brain.sqlite3, "
             f"then {DEFAULT_DB_PATH}."
         ),
     )
@@ -80,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
 def serve(*, db_path: Path, host: str, port: int) -> None:
     handler = make_handler(db_path)
     server = ThreadingHTTPServer((host, port), handler)
+    print(f"Social Brain DB path: {db_path}")
     print(f"Social Brain UI running at http://{host}:{port}")
     try:
         server.serve_forever()

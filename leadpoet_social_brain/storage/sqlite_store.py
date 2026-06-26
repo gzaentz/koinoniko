@@ -30,6 +30,7 @@ from leadpoet_social_brain.core.models import (
 
 DEFAULT_DB_PATH = Path("data/social_brain.sqlite3")
 DB_ENV_VAR = "SOCIAL_BRAIN_DB"
+RAILWAY_VOLUME_MOUNT_ENV_VAR = "RAILWAY_VOLUME_MOUNT_PATH"
 DEFAULT_WEB_AUTH_USERNAME = "gavinz444"
 PASSWORD_HASH_ITERATIONS = 310_000
 
@@ -40,6 +41,9 @@ def resolve_db_path(path: str | Path | None = None) -> Path:
     env_path = os.getenv(DB_ENV_VAR)
     if env_path:
         return Path(env_path)
+    railway_volume_path = os.getenv(RAILWAY_VOLUME_MOUNT_ENV_VAR)
+    if railway_volume_path:
+        return Path(railway_volume_path) / DEFAULT_DB_PATH.name
     return DEFAULT_DB_PATH
 
 
