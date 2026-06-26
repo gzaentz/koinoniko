@@ -1506,6 +1506,34 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["trend_groups"]["daily"][0]["id"], trend.id)
             self.assertIn("analytics_hints", payload)
 
+    def test_web_can_update_recent_post_topic(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            post = ingest_x_post(
+                store,
+                text="Buyer timing beats more generated emails.",
+                url="https://x.com/gavin/status/manualtopic",
+                date="2026-06-26T12:00:00+00:00",
+                author="Gavin",
+                topic="uncategorized",
+                post_type="quote_tweet",
+            )
+            store.close()
+
+            status, payload = handle_api_request(
+                "PATCH",
+                f"/api/posts/{post.id}",
+                json.dumps({"topic": "Sales"}),
+                db_path=db_path,
+            )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["post"]["topic"], "Sales")
+            dashboard_status, dashboard = handle_api_request("GET", "/api/dashboard", db_path=db_path)
+            self.assertEqual(dashboard_status, 200)
+            self.assertEqual(dashboard["recent_posts"][0]["topic"], "Sales")
+
     def test_web_trend_scout_refreshes_daily_and_weekly_groups(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)

@@ -496,6 +496,66 @@ main {
   font-weight: 700;
 }
 
+.topic-cell {
+  min-width: 150px;
+}
+
+.topic-button {
+  min-height: auto;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  padding: 0;
+  border-radius: 0;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+}
+
+.topic-button:hover,
+.topic-button:focus-visible {
+  color: var(--black);
+  text-decoration-color: currentColor;
+}
+
+.topic-button.is-uncategorized {
+  color: var(--muted);
+}
+
+.topic-editor {
+  display: grid;
+  grid-template-columns: minmax(118px, 1fr) auto auto;
+  gap: 6px;
+  align-items: center;
+  min-width: 260px;
+}
+
+.detail-item .topic-editor {
+  min-width: 0;
+}
+
+.topic-editor input {
+  min-height: 34px;
+  padding: 7px 9px;
+}
+
+.topic-editor button {
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.topic-save-button {
+  background: var(--white);
+  color: var(--black);
+  border-color: var(--line);
+}
+
+.topic-cancel-button {
+  font-size: 13px;
+}
+
 .empty-cell {
   color: var(--muted);
   text-align: center !important;

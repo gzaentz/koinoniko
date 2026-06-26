@@ -11,7 +11,7 @@ import os
 import secrets
 import time
 from http.cookies import CookieError, SimpleCookie
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -560,6 +560,8 @@ def route_api(
         if not post:
             return 404, {"error": "Post not found."}
         return 200, {"post": post_detail_payload(store, post)}
+    if method == "PATCH" and len(parts) == 3 and parts[:2] == ["api", "posts"]:
+        return update_post_payload(store, parts[2], payload)
     if method == "POST" and len(parts) == 4 and parts[:2] == ["api", "posts"] and parts[3] == "voice":
         post = store.get_post(parts[2])
         if not post:
@@ -1445,6 +1447,17 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
         "analytics_hints": analytics.hints,
         "best_examples": [post_payload(post) for post in analytics.best_examples[:5]],
     }
+
+
+def update_post_payload(store: SQLiteStore, post_id: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    post = store.get_post(post_id)
+    if not post:
+        return 404, {"error": "Post not found."}
+    topic = clean_optional(payload.get("topic"))
+    if not topic:
+        return 400, {"error": "Topic is required."}
+    saved = store.save_post(replace(post, topic=topic))
+    return 200, {"post": post_detail_payload(store, saved)}
 
 
 def status_payload(store: SQLiteStore | None = None) -> dict[str, Any]:

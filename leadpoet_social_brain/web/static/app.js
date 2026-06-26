@@ -13,8 +13,11 @@ const state = {
   draggedQueueId: "",
   queueDetail: null,
   postDetail: null,
+  editingTopicPostId: "",
   recentPostsSort: { key: "date", direction: "desc" },
 };
+
+const SUGGESTED_TOPICS = ["Leadpoet", "Sales", "Bittensor", "AI", "Founder/company"];
 
 const RECENT_POST_SORT_COLUMNS = {
   date: {
@@ -237,6 +240,7 @@ function renderDashboard() {
 function renderRecentPosts() {
   const tbody = $("recentPostsTable");
   renderRecentPostSortHeaders();
+  renderTopicOptions();
   const posts = filteredRecentPosts();
   if (!posts.length) {
     tbody.innerHTML = `
@@ -343,7 +347,7 @@ function recentPostRow(post) {
     <tr onclick='openPostDetails(${jsArg(post.id)})'>
       <td>${escapeHtml(formatDate(post.published_at))}</td>
       <td class="post-summary"><span>${escapeHtml(post.summary || summarize(post.text))}</span>${voiceBadge}</td>
-      <td>${escapeHtml(post.topic || "")}</td>
+      <td class="topic-cell">${topicControl(post, "row")}</td>
       <td>${escapeHtml(label(post.post_type))}</td>
       <td>${metric(metrics.likes)}</td>
       <td>${metric(metrics.replies)}</td>
@@ -355,6 +359,126 @@ function recentPostRow(post) {
       <td>${post.url ? `<a href="${escapeAttr(post.url)}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">Open</a>` : ""}</td>
     </tr>
   `;
+}
+
+function topicControl(post, context) {
+  const currentTopic = post.topic || "uncategorized";
+  if (state.editingTopicPostId === post.id) {
+    return `
+      <form class="topic-editor" onsubmit="savePostTopic(event, ${jsArg(post.id)})" onclick="event.stopPropagation()">
+        <input value="${escapeAttr(currentTopic)}" list="topicOptions" placeholder="Topic" aria-label="Topic" autofocus>
+        <button class="secondary topic-save-button" type="submit">Save</button>
+        <button class="quiet-button topic-cancel-button" type="button" onclick="cancelPostTopicEdit(event)">Cancel</button>
+      </form>
+    `;
+  }
+  const uncategorized = currentTopic.trim().toLowerCase() === "uncategorized";
+  return `
+    <button
+      class="topic-button${uncategorized ? " is-uncategorized" : ""}"
+      type="button"
+      title="Change topic"
+      onclick="startPostTopicEdit(event, ${jsArg(post.id)}, ${jsArg(context)})"
+    >
+      ${escapeHtml(topicLabel(currentTopic))}
+    </button>
+  `;
+}
+
+function renderTopicOptions() {
+  const list = $("topicOptions");
+  if (!list) return;
+  list.innerHTML = topicOptions().map((topic) => `<option value="${escapeAttr(topic)}"></option>`).join("");
+}
+
+function topicOptions() {
+  const seen = new Set();
+  const options = [];
+  const add = (value) => {
+    const topic = String(value || "").trim();
+    const key = topic.toLowerCase();
+    if (!topic || seen.has(key)) return;
+    seen.add(key);
+    options.push(topic);
+  };
+  SUGGESTED_TOPICS.forEach(add);
+  (state.dashboard?.recent_posts || [])
+    .map((post) => post.topic)
+    .filter(Boolean)
+    .sort((first, second) => String(first).localeCompare(String(second), undefined, { sensitivity: "base" }))
+    .forEach(add);
+  return options;
+}
+
+function topicLabel(value) {
+  const topic = String(value || "").trim();
+  if (!topic) return "";
+  if (topic.toLowerCase() === "uncategorized") return "Uncategorized";
+  return topic
+    .split("/")
+    .map((part) => label(part))
+    .join("/");
+}
+
+window.startPostTopicEdit = (event, id) => {
+  event.stopPropagation();
+  state.editingTopicPostId = id;
+  renderRecentPosts();
+  if (state.postDetail?.id === id && !$("postModal").classList.contains("hidden")) {
+    renderPostModal();
+  }
+};
+
+window.cancelPostTopicEdit = (event) => {
+  event.stopPropagation();
+  state.editingTopicPostId = "";
+  renderRecentPosts();
+  if (state.postDetail && !$("postModal").classList.contains("hidden")) {
+    renderPostModal();
+  }
+};
+
+window.savePostTopic = async (event, id) => {
+  event.preventDefault();
+  event.stopPropagation();
+  const form = event.currentTarget;
+  const input = form.querySelector("input");
+  const topic = input?.value.trim() || "";
+  if (!topic) {
+    showMessage("Topic is required.", true);
+    return;
+  }
+  form.querySelectorAll("button, input").forEach((node) => {
+    node.disabled = true;
+  });
+  try {
+    const payload = await api(`/api/posts/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ topic }),
+    });
+    updateRecentPost(payload.post);
+    if (state.postDetail?.id === id) {
+      state.postDetail = payload.post;
+    }
+    state.editingTopicPostId = "";
+    renderRecentPosts();
+    if (state.postDetail?.id === id && !$("postModal").classList.contains("hidden")) {
+      renderPostModal();
+    }
+    showMessage("Topic updated.");
+  } catch (error) {
+    showMessage(error.message, true);
+    form.querySelectorAll("button, input").forEach((node) => {
+      node.disabled = false;
+    });
+  }
+};
+
+function updateRecentPost(updatedPost) {
+  if (!updatedPost || !state.dashboard?.recent_posts) return;
+  state.dashboard.recent_posts = state.dashboard.recent_posts.map((post) =>
+    post.id === updatedPost.id ? updatedPost : post
+  );
 }
 
 window.openPostDetails = (id) => {
@@ -376,7 +500,7 @@ function renderPostModal() {
     <div class="full-text">${escapeHtml(post.text)}</div>
     <div class="detail-grid">
       ${detail("Date", formatDateTime(post.published_at))}
-      ${detail("Topic", post.topic)}
+      ${detailHtml("Topic", topicControl(post, "detail"))}
       ${detail("Post type", label(post.post_type))}
       ${detail("Likes", metric(metrics.likes))}
       ${detail("Replies", metric(metrics.replies))}
@@ -1444,6 +1568,11 @@ function openModal(id) {
 function closeModal(id) {
   $(id).classList.add("hidden");
   $(id).setAttribute("aria-hidden", "true");
+  if (id === "postModal") {
+    state.postDetail = null;
+    state.editingTopicPostId = "";
+    renderRecentPosts();
+  }
 }
 
 window.closeModal = closeModal;
@@ -1490,6 +1619,15 @@ function detail(labelText, value) {
   `;
 }
 
+function detailHtml(labelText, valueHtml) {
+  return `
+    <div class="detail-item">
+      <span>${escapeHtml(labelText)}</span>
+      ${valueHtml}
+    </div>
+  `;
+}
+
 function summarize(text, maxLength = 96) {
   const cleaned = String(text || "").replace(/\s+/g, " ").trim();
   if (!cleaned) return "Untitled post";
@@ -1499,7 +1637,7 @@ function summarize(text, maxLength = 96) {
 }
 
 function label(value) {
-  const acronyms = new Set(["ai", "api", "cta", "er", "llm", "url", "x"]);
+  const acronyms = new Set(["ai", "api", "cta", "er", "gtm", "llm", "llms", "url", "x"]);
   return String(value || "")
     .replaceAll("_", " ")
     .replaceAll("-", " ")
