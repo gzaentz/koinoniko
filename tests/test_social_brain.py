@@ -39,14 +39,19 @@ from leadpoet_social_brain.storage.sqlite_store import (
 )
 from leadpoet_social_brain.web.app import (
     DEFAULT_AUTH_USERNAME,
+    MISSING_X_READ_CREDENTIALS_MESSAGE,
     SESSION_COOKIE,
     TASK_AUTH_CONFIG_MESSAGE,
     TASK_AUTH_REQUIRED_MESSAGE,
+    TASK_SECRET_CONFIG_MESSAGE,
+    TASK_SECRET_ENV,
+    TASK_SECRET_REQUIRED_MESSAGE,
     TASK_TOKEN_ENV,
     auth_is_configured,
     create_session_cookie_value,
     handle_api_request,
     make_handler,
+    request_has_task_secret,
     request_has_task_token,
     request_is_authenticated,
     validate_session_cookie_value,
@@ -269,20 +274,40 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn("<span>Leadpoet</span>", index_html)
         self.assertNotIn("<strong>Social Brain</strong>", index_html)
         self.assertIn('data-view="dashboard">Dashboard</button>', index_html)
-        self.assertIn('data-view="reviewer">Content Reviewer</button>', index_html)
+        self.assertIn('data-view="reviewer"', index_html)
+        self.assertIn(">Content Reviewer</span>", index_html)
+        self.assertIn('id="reviewNavBadge"', index_html)
         self.assertIn('data-view="account">Account</button>', index_html)
         self.assertIn('id="accountView"', index_html)
         self.assertIn('id="accountModel"', index_html)
         self.assertIn('id="planModal"', index_html)
         self.assertIn('id="trendsModal"', index_html)
+        self.assertIn('id="postModal"', index_html)
+        self.assertIn('id="queueModal"', index_html)
+        self.assertIn('id="recentPostsTable"', index_html)
+        self.assertIn('id="syncPostsButton"', index_html)
+        self.assertIn('id="dashboardSyncLine"', index_html)
+        self.assertIn('id="accountSyncPostsButton"', index_html)
+        self.assertIn('id="accountSyncMetricsButton"', index_html)
+        self.assertIn('id="accountSyncAllButton"', index_html)
+        self.assertIn('id="accountSyncGrid"', index_html)
+        self.assertIn('id="refreshButton"', index_html)
         self.assertIn("Improve with AI", app_js)
         self.assertIn("saveAccount", app_js)
+        self.assertIn("/api/account/sync-x-posts", app_js)
+        self.assertIn("/api/account/sync-x-metrics", app_js)
+        self.assertIn("/api/account/sync-x-all", app_js)
+        self.assertIn("/api/publish-due", app_js)
+        self.assertIn("/api/plan-week", app_js)
         self.assertNotIn("Railway variables", index_html)
         self.assertNotIn("Railway variables", app_js)
         self.assertNotIn("X_BEARER_TOKEN", app_js)
         self.assertNotIn("OPENROUTER_API_KEY", app_js)
         self.assertIn("Scheduled Content", index_html)
         self.assertNotIn('id="statusBlock"', index_html)
+        self.assertNotIn('id="attentionList"', index_html)
+        self.assertNotIn('id="scheduleSnapshot"', index_html)
+        self.assertNotIn('id="analyticsDetails"', index_html)
         self.assertNotIn("AI Edit Panel", index_html)
         self.assertNotIn("Weekly Planner", index_html)
         self.assertNotIn("Content Queue", index_html)
@@ -1002,6 +1027,334 @@ class SocialBrainTest(unittest.TestCase):
             for key in ["by_post_type", "by_topic", "by_hook", "by_structure", "by_tone", "by_cta", "by_formatting", "hints"]:
                 self.assertIn(key, payload)
             self.assertEqual(payload["by_hook"][0]["key"], "specific_observation")
+
+    def test_web_dashboard_returns_recent_posts_metrics_and_trends(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            post = ingest_x_post(
+                store,
+                text="Sales AI only works when it knows why this account cares today. Generic automation misses timing.",
+                url="https://x.com/gavin/status/dashboardrecent",
+                date="2026-06-25T12:00:00+00:00",
+                author="Gavin",
+                topic="sales LLMs",
+                post_type="founder_insight",
+                metrics=EngagementMetrics(impressions=2500, likes=100, replies=8, reposts=12, quotes=3, bookmarks=15),
+                hook="specific_observation",
+                structure="claim_then_reason",
+                tone="plainspoken",
+                cta="none",
+                formatting="short_paragraphs",
+                imitate=True,
+            )
+            trend = store.save_trend_item(
+                TrendItem(
+                    title="AI sales teams move from volume to timing",
+                    source_type="AI",
+                    topic="sales LLMs",
+                    summary="More teams are evaluating sales AI by account context instead of volume.",
+                    why_it_matters="It supports the Leadpoet positioning.",
+                    leadpoet_angle="Tie buyer timing to sales LLM usefulness.",
+                    urgency="high",
+                )
+            )
+            store.close()
+
+            status, payload = handle_api_request("GET", "/api/dashboard", db_path=db_path)
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["recent_posts"][0]["id"], post.id)
+            self.assertIn("Sales AI only works", payload["recent_posts"][0]["summary"])
+            self.assertEqual(payload["recent_posts"][0]["metrics"]["likes"], 100)
+            self.assertEqual(payload["recent_posts"][0]["metrics"]["impressions"], 2500)
+            self.assertEqual(payload["trends"][0]["id"], trend.id)
+            self.assertIn("analytics_hints", payload)
+
+    def test_web_sync_x_user_endpoint_can_auto_categorize(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+            fake_client = FakeXApiClient(
+                [
+                    {
+                        "id": "webcat123",
+                        "text": "The best sales AI starts with why this buyer cares today.",
+                        "created_at": "2026-06-25T12:00:00.000Z",
+                        "public_metrics": {"like_count": 10, "reply_count": 1},
+                    }
+                ]
+            )
+            provider = FakeProvider([
+                '{"topic":"sales LLMs","post_type":"founder_insight","confidence":0.9,"reason":"Sales AI post."}'
+            ])
+
+            with patch("leadpoet_social_brain.web.app.XApiClient.from_env", return_value=fake_client):
+                with patch("leadpoet_social_brain.web.app.load_provider_from_env", return_value=provider):
+                    status, payload = handle_api_request(
+                        "POST",
+                        "/api/sync-x-user",
+                        json.dumps(
+                            {
+                                "username": "gavinzaentz",
+                                "limit": 100,
+                                "auto_categorize": True,
+                            }
+                        ),
+                        db_path=db_path,
+                    )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["result"]["imported"], 1)
+            self.assertEqual(payload["result"]["topics"]["sales LLMs"], 1)
+            store = SQLiteStore(db_path)
+            post = store.list_posts(platform="x", limit=1)[0]
+            self.assertEqual(post.topic, "sales LLMs")
+            self.assertEqual(post.post_type, "founder_insight")
+            store.close()
+
+    def test_account_status_endpoint_reports_sync_stats(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            ingest_x_post(
+                store,
+                text="A post created on X should still teach the system.",
+                url="https://x.com/gavinzaentz/status/accountstatus1",
+                date="2026-06-25T12:00:00+00:00",
+                author="gavinzaentz",
+                topic="Leadpoet",
+                post_type="founder_insight",
+            )
+            store.close()
+
+            with patch.dict(os.environ, {"X_BEARER_TOKEN": "read-token", TASK_SECRET_ENV: "task-secret"}, clear=False):
+                status, payload = handle_api_request("GET", "/api/account/status", db_path=db_path)
+
+            self.assertEqual(status, 200)
+            self.assertTrue(payload["status"]["x_read_configured"])
+            self.assertTrue(payload["status"]["daily_sync_configured"])
+            self.assertEqual(payload["stats"]["total_x_posts_stored"], 1)
+            self.assertEqual(payload["stats"]["latest_imported_x_post_date"], "2026-06-25T12:00:00+00:00")
+            self.assertEqual(payload["sync"]["x_posts_sync"]["status"], "not_run")
+
+    def test_account_sync_x_posts_endpoint_imports_defaults_and_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+            fake_client = FakeXApiClient(
+                [
+                    {
+                        "id": "accountsync1",
+                        "text": "This post was created directly on X.",
+                        "created_at": "2026-06-25T12:00:00.000Z",
+                        "public_metrics": {"like_count": 20, "reply_count": 2, "impression_count": 1000},
+                    }
+                ]
+            )
+
+            with patch.dict(os.environ, {"X_BEARER_TOKEN": "read-token"}, clear=False):
+                with patch("leadpoet_social_brain.web.app.XApiClient.from_env", return_value=fake_client):
+                    status, payload = handle_api_request(
+                        "POST",
+                        "/api/account/sync-x-posts",
+                        json.dumps({"limit": 100}),
+                        db_path=db_path,
+                    )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["result"]["imported"], 1)
+            self.assertEqual(payload["sync"]["status"], "success")
+
+            store = SQLiteStore(db_path)
+            posts = store.list_posts(platform="x", limit=10)
+            metrics = store.latest_metrics_by_post_id([posts[0].id])
+            metadata = store.get_sync_metadata("x_posts_sync")
+            self.assertEqual(posts[0].topic, "Leadpoet")
+            self.assertEqual(posts[0].post_type, "founder_insight")
+            self.assertNotIn(posts[0].id, store.notes_by_post_id([posts[0].id]))
+            self.assertEqual(metrics[posts[0].id].likes, 20)
+            self.assertEqual(metadata.status, "success")
+            store.close()
+
+    def test_account_sync_x_metrics_endpoint_appends_metrics_and_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            post = ingest_x_post(
+                store,
+                text="Metrics refresh post.",
+                url="https://x.com/gavinzaentz/status/metricrefresh1",
+                date="2026-06-25T12:00:00+00:00",
+                author="gavinzaentz",
+                topic="Leadpoet",
+                post_type="founder_insight",
+                metrics=EngagementMetrics(likes=1, replies=0, impressions=100),
+            )
+            store.close()
+            fake_client = FakeXApiClient(
+                [],
+                metrics_by_id={
+                    "metricrefresh1": {
+                        "like_count": 50,
+                        "reply_count": 4,
+                        "retweet_count": 3,
+                        "impression_count": 2000,
+                    }
+                },
+            )
+
+            with patch.dict(os.environ, {"X_BEARER_TOKEN": "read-token"}, clear=False):
+                with patch("leadpoet_social_brain.web.app.XApiClient.from_env", return_value=fake_client):
+                    status, payload = handle_api_request(
+                        "POST",
+                        "/api/account/sync-x-metrics",
+                        json.dumps({"limit": 100}),
+                        db_path=db_path,
+                    )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["result"]["updated"], 1)
+            store = SQLiteStore(db_path)
+            snapshots = store.metrics_for_post(post.id)
+            metadata = store.get_sync_metadata("x_metrics_sync")
+            self.assertEqual(len(snapshots), 2)
+            self.assertIn(50, [snapshot.likes for snapshot in snapshots])
+            self.assertEqual(metadata.summary["updated"], 1)
+            store.close()
+
+    def test_account_sync_x_all_runs_posts_then_metrics(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+            fake_client = FakeXApiClient(
+                [
+                    {
+                        "id": "syncall1",
+                        "text": "Sync all should import this direct X post.",
+                        "created_at": "2026-06-25T12:00:00.000Z",
+                        "public_metrics": {"like_count": 3, "impression_count": 90},
+                    }
+                ],
+                metrics_by_id={
+                    "syncall1": {"like_count": 9, "reply_count": 1, "impression_count": 300}
+                },
+            )
+
+            with patch.dict(os.environ, {"X_BEARER_TOKEN": "read-token"}, clear=False):
+                with patch("leadpoet_social_brain.web.app.XApiClient.from_env", return_value=fake_client):
+                    status, payload = handle_api_request(
+                        "POST",
+                        "/api/account/sync-x-all",
+                        json.dumps({"limit": 100}),
+                        db_path=db_path,
+                    )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["posts"]["imported"], 1)
+            self.assertEqual(payload["metrics"]["updated"], 1)
+            store = SQLiteStore(db_path)
+            self.assertIsNotNone(store.get_sync_metadata("x_posts_sync"))
+            self.assertIsNotNone(store.get_sync_metadata("x_metrics_sync"))
+            store.close()
+
+    def test_account_sync_missing_x_bearer_token_returns_clear_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+
+            with patch.dict(os.environ, {"X_BEARER_TOKEN": ""}, clear=False):
+                status, payload = handle_api_request(
+                    "POST",
+                    "/api/account/sync-x-posts",
+                    json.dumps({"limit": 100}),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 400)
+            self.assertEqual(payload["error"], MISSING_X_READ_CREDENTIALS_MESSAGE)
+            store = SQLiteStore(db_path)
+            self.assertEqual(store.get_sync_metadata("x_posts_sync").status, "failed")
+            store.close()
+
+    def test_daily_sync_task_requires_task_secret(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+
+            with patch.dict(os.environ, {TASK_SECRET_ENV: ""}, clear=False):
+                allowed, captured = self.handler_guard(
+                    db_path,
+                    "/tasks/sync-x-daily",
+                    guard="_require_task_secret",
+                )
+            self.assertFalse(allowed)
+            self.assertEqual(captured["status"], 503)
+            self.assertEqual(captured["payload"]["error"], TASK_SECRET_CONFIG_MESSAGE)
+
+            with patch.dict(os.environ, {TASK_SECRET_ENV: "daily-secret"}, clear=False):
+                allowed, captured = self.handler_guard(
+                    db_path,
+                    "/tasks/sync-x-daily",
+                    guard="_require_task_secret",
+                )
+            self.assertFalse(allowed)
+            self.assertEqual(captured["status"], 401)
+            self.assertEqual(captured["payload"]["error"], TASK_SECRET_REQUIRED_MESSAGE)
+
+            with patch.dict(os.environ, {TASK_SECRET_ENV: "daily-secret"}, clear=False):
+                self.assertTrue(request_has_task_secret({"Authorization": "Bearer daily-secret"}))
+
+    def test_daily_sync_imports_without_duplicates_and_updates_dashboard(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+            fake_client = FakeXApiClient(
+                [
+                    {
+                        "id": "daily1",
+                        "text": "Daily sync should pick up direct X posts.",
+                        "created_at": "2026-06-25T12:00:00.000Z",
+                        "public_metrics": {"like_count": 7, "reply_count": 1, "impression_count": 500},
+                    }
+                ],
+                metrics_by_id={
+                    "daily1": {"like_count": 8, "reply_count": 2, "impression_count": 600}
+                },
+            )
+
+            with patch.dict(os.environ, {"X_BEARER_TOKEN": "read-token", TASK_SECRET_ENV: "daily-secret"}, clear=False):
+                with patch("leadpoet_social_brain.web.app.XApiClient.from_env", return_value=fake_client):
+                    first_status, first_payload = handle_api_request(
+                        "POST",
+                        "/tasks/sync-x-daily",
+                        b"{}",
+                        db_path=db_path,
+                    )
+                    second_status, second_payload = handle_api_request(
+                        "POST",
+                        "/tasks/sync-x-daily",
+                        b"{}",
+                        db_path=db_path,
+                    )
+
+            self.assertEqual(first_status, 200)
+            self.assertEqual(first_payload["new_posts_imported"], 1)
+            self.assertEqual(first_payload["metrics_updated"], 1)
+            self.assertEqual(second_status, 200)
+            self.assertEqual(second_payload["new_posts_imported"], 0)
+            self.assertEqual(second_payload["duplicates_skipped"], 1)
+
+            store = SQLiteStore(db_path)
+            self.assertEqual(store.count_posts(platform="x"), 1)
+            self.assertEqual(store.get_sync_metadata("x_daily_sync").status, "success")
+            self.assertEqual(store.get_sync_metadata("x_posts_sync").summary["duplicates"], 1)
+            store.close()
+
+            dashboard_status, dashboard = handle_api_request("GET", "/api/dashboard", db_path=db_path)
+            self.assertEqual(dashboard_status, 200)
+            self.assertEqual(dashboard["recent_posts"][0]["url"], "https://x.com/gavinzaentz/status/daily1")
+            self.assertEqual(dashboard["recent_posts"][0]["metrics"]["likes"], 8)
 
     def test_web_account_saves_model_and_reports_x_status(self):
         with tempfile.TemporaryDirectory() as tmpdir:

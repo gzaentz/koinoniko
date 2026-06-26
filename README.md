@@ -27,7 +27,9 @@ What it does well:
 - Preserves draft-to-post linkage through `source_draft_id`.
 - Tracks the examples, context sections, patterns, skill files, analytics hints, and trends used for each draft.
 - Plans a simple weekly X content queue for review and approval.
-- Provides a minimal login-gated web UI for review, editing, weekly planning, trends, analytics, and approved-only posting.
+- Provides a minimal login-gated web UI with Dashboard, Content Reviewer, and Account settings.
+- Keeps the database synced with posts created directly on X through Account sync controls.
+- Supports a protected daily X sync endpoint for Railway Cron.
 - Lets you refresh or add metrics after publishing and analyze what is working.
 - Requires a configured LLM provider for draft generation.
 
@@ -159,15 +161,14 @@ The command prompts for the password and stores only a salted PBKDF2 hash in the
 
 The UI supports:
 
-- a focused Dashboard for attention, schedule, and performance signals
+- a focused Dashboard for recent posts, current trends, and performance signals
 - a Content Reviewer board for review, edit, approve, skip, schedule, and approved-only post-now
-- an Account page for connection status and model selection
+- an Account page for connection status, model selection, and X account sync
 - inline AI revisions for queued posts through the configured provider
 - accepting a revision without auto-approval
 - weekly queue planning from a modal
-- analytics details behind a Dashboard disclosure
 - trend add/list workflow from a modal
-- manual X metrics sync
+- manual X post import and X metrics sync
 
 Generation and AI editing require a provider. For OpenRouter:
 
@@ -179,6 +180,42 @@ SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider
 Set the model in the web UI under `Account -> OpenRouter model`. You can still set `OPENROUTER_MODEL` as an environment fallback, but the Account setting wins when saved.
 
 Posting to X requires write credentials. Read-only X import and metric sync use `X_BEARER_TOKEN`; posting needs either `X_OAUTH2_ACCESS_TOKEN` or OAuth 1.0a keys. The UI does not auto-post or auto-approve anything.
+
+## Account Sync
+
+Koinoniko can stay in sync with posts created directly on X.
+
+In the web UI, open `Account` and use:
+
+- `Sync X Posts` to import authored posts from `gavinzaentz` that are missing from SQLite.
+- `Sync X Metrics` to append fresh public metric snapshots for stored X posts.
+- `Sync All X Data` to run post sync first, then metrics sync.
+
+Defaults:
+
+- username: `gavinzaentz`
+- default topic: `Leadpoet`
+- default post type: `founder_insight`
+- exclude replies: `true`
+- exclude retweets: `true`
+- `imitate=false`
+
+The account sync does not guess `worked_reason`, hook, structure, tone, CTA, formatting, or pattern labels. Add those manually only for posts you want the system to learn from.
+
+The Account page shows X read/write status, provider status, last post sync, last metrics sync, daily sync status, total stored X posts, latest imported X post date, and latest sync error. The Dashboard shows a quiet `Last X sync` line above recent posts.
+
+Sync metadata is stored in SQLite under simple keys:
+
+- `x_posts_sync`
+- `x_metrics_sync`
+- `x_daily_sync`
+
+Only timestamps, status, JSON summaries, and error messages are stored. Tokens are never stored in SQLite.
+
+Requirements:
+
+- `X_BEARER_TOKEN` for post import and public metrics.
+- Private X analytics such as URL clicks and profile clicks are not included yet.
 
 ## Railway Deployment
 
@@ -204,6 +241,7 @@ Required Railway settings:
 - Set `OPENROUTER_API_KEY` and `SOCIAL_BRAIN_PROVIDER=leadpoet_social_brain.openrouter_provider:create_provider` before using generation, planning, or AI edits.
 - Set the OpenRouter model from the hosted app's Account page. `OPENROUTER_MODEL` remains available as an environment fallback.
 - Set X write credentials only if you want approved posts to be posted from Railway.
+- Set `TASK_SECRET` if you want Railway Cron to run the daily X sync endpoint.
 - Optional: set `SOCIAL_BRAIN_TASK_TOKEN` if you want an external cron service to trigger hosted task endpoints.
 
 SQLite notes for Railway:
@@ -230,7 +268,7 @@ For a new hosted database:
 4. Run `python -m leadpoet_social_brain.cli init` against that DB if seed context is needed.
 5. Run `python -m leadpoet_social_brain.cli set-web-login --username gavinz444`.
 6. Set `X_BEARER_TOKEN`.
-7. Run `sync-x-user --auto-categorize` or import posts another way.
+7. Open Account and run `Sync X Posts`, or run `sync-x-user` from the CLI.
 8. Use `update-post-notes` to mark strongest examples with `imitate=true`.
 9. Run `rebuild-style-guide`.
 10. Set `OPENROUTER_API_KEY` and `SOCIAL_BRAIN_PROVIDER`.
@@ -238,7 +276,8 @@ For a new hosted database:
 12. Add trends if you want timely planning context.
 13. Plan the week, review/edit, then approve only posts you are ready to publish.
 14. Set X write auth before posting from the hosted app.
-15. Set `SOCIAL_BRAIN_TASK_TOKEN` only if an external scheduler will call task endpoints.
+15. Set `TASK_SECRET` if Railway Cron will call the daily X sync endpoint.
+16. Set `SOCIAL_BRAIN_TASK_TOKEN` only if an external scheduler will call the older `/api/tasks/*` endpoints.
 
 ## Hosted Task Triggers
 
@@ -247,11 +286,27 @@ Social Brain does not run a scheduler or background worker. On Railway, approved
 You can trigger the same core jobs through protected HTTP task endpoints:
 
 ```text
+POST /tasks/sync-x-daily
 POST /api/tasks/sync-x-user
 POST /api/tasks/publish-due-x
 POST /api/tasks/sync-x-metrics
 POST /api/tasks/weekly-report-x
 ```
+
+Daily X sync uses `TASK_SECRET`:
+
+```bash
+TASK_SECRET="<long random secret>"
+```
+
+Railway Cron example:
+
+```text
+POST https://<app-domain>/tasks/sync-x-daily
+Authorization: Bearer <TASK_SECRET>
+```
+
+Daily sync imports recent authored posts from X, skips duplicates by X post ID/canonical URL, refreshes public metrics for recent stored posts, and stores a summary under Account. Recommended frequency is daily for post import. Metrics can be refreshed every few hours if desired.
 
 Set a task token in Railway Variables:
 
@@ -285,6 +340,8 @@ curl -X POST "$SOCIAL_BRAIN_URL/api/tasks/weekly-report-x" \
 
 If `SOCIAL_BRAIN_TASK_TOKEN` is missing, task endpoints fail closed. UI endpoints still require the normal web login session.
 
+If `TASK_SECRET` is missing, `/tasks/sync-x-daily` fails closed. The endpoint also requires `X_BEARER_TOKEN`.
+
 ## Hosted Security
 
 The hosted UI is intentionally simple but should stay locked down:
@@ -292,7 +349,7 @@ The hosted UI is intentionally simple but should stay locked down:
 - The app fails closed until a SQLite-backed web login is created.
 - Session cookies are signed, `HttpOnly`, `SameSite=Strict`, and `Secure` on Railway by default.
 - UI mutation endpoints require login and use POST/PATCH.
-- External task endpoints require `SOCIAL_BRAIN_TASK_TOKEN`.
+- Daily X sync requires `TASK_SECRET`; older `/api/tasks/*` endpoints require `SOCIAL_BRAIN_TASK_TOKEN`.
 - API tokens are read from environment variables and are not displayed in the UI or stored in SQLite.
 
 ## Quick Sample Flow
@@ -366,7 +423,7 @@ python3 -m leadpoet_social_brain.cli --db /private/tmp/social_brain_demo.sqlite3
 
 The normal v0.2 loop is:
 
-1. `sync-x-user --auto-categorize` to import posts with provider-backed topic/post-type labels.
+1. Open Account and run `Sync All X Data`, or use `sync-x-user`/`sync-x-metrics` from the CLI.
 2. `list-posts` to review them.
 3. `update-post-notes` to mark the strongest posts with `imitate=true` and `worked_reason`.
 4. `rebuild-style-guide`.
@@ -377,7 +434,7 @@ The normal v0.2 loop is:
 9. `sync-x-metrics` after posting.
 10. Review analytics or `weekly-report-x`.
 
-You can do steps 6 through 10 in the local UI after importing posts, annotating winners, and configuring a provider.
+You can do most of this in the web UI after importing posts, annotating winners, and configuring a provider. Account sync keeps posts created directly on X available to the Dashboard and analytics.
 
 Initialize the real local database:
 
@@ -392,7 +449,7 @@ export X_BEARER_TOKEN="<your bearer token>"
 
 python3 -m leadpoet_social_brain.cli sync-x-user \
   --username gavinzaentz \
-  --limit 100 \
+  --limit 3200 \
   --exclude-replies \
   --exclude-retweets \
   --default-topic "Leadpoet" \
@@ -619,21 +676,14 @@ quote_tweet
 
 ## X API Import
 
-Use `sync-x-user` when you want to pull your own X posts directly from the X API instead of building a CSV by hand.
+Use Account `Sync X Posts` for the normal web workflow. It imports authored posts from `gavinzaentz` with safe defaults and no LLM labeling.
+
+Use CLI `sync-x-user` when you want more control, a dry run, a time window, or optional LLM topic/post-type categorization instead of building a CSV by hand.
 
 Set a bearer token in your shell:
 
 ```bash
 export X_BEARER_TOKEN="<your bearer token>"
-```
-
-For LLM categorization, also configure your generation provider. With OpenRouter:
-
-```bash
-export OPENROUTER_API_KEY="<your OpenRouter key>"
-export SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider"
-# Optional CLI fallback if no model is saved in Account:
-# export OPENROUTER_MODEL="<any OpenRouter model slug>"
 ```
 
 Run a dry run first:
@@ -644,11 +694,33 @@ python3 -m leadpoet_social_brain.cli sync-x-user \
   --limit 25 \
   --exclude-replies \
   --exclude-retweets \
-  --auto-categorize \
+  --default-topic "Leadpoet" \
+  --default-post-type founder_insight \
   --dry-run
 ```
 
-Import posts:
+Import posts with safe defaults:
+
+```bash
+python3 -m leadpoet_social_brain.cli sync-x-user \
+  --username gavinzaentz \
+  --limit 3200 \
+  --exclude-replies \
+  --exclude-retweets \
+  --default-topic "Leadpoet" \
+  --default-post-type founder_insight
+```
+
+For optional CLI LLM categorization, also configure your generation provider. With OpenRouter:
+
+```bash
+export OPENROUTER_API_KEY="<your OpenRouter key>"
+export SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider"
+# Optional CLI fallback if no model is saved in Account:
+# export OPENROUTER_MODEL="<any OpenRouter model slug>"
+```
+
+Then add `--auto-categorize`:
 
 ```bash
 python3 -m leadpoet_social_brain.cli sync-x-user \

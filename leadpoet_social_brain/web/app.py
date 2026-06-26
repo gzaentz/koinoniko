@@ -32,6 +32,7 @@ from leadpoet_social_brain.content_queue import (
 from leadpoet_social_brain.core.models import (
     ContentQueueItem,
     QueuedPostVersion,
+    SyncMetadata,
     TrendItem,
     new_id,
     utc_now,
@@ -59,14 +60,24 @@ STATIC_DIR = Path(__file__).with_name("static")
 JSON_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
 AUTH_COOKIE_SECURE_ENV = "SOCIAL_BRAIN_AUTH_COOKIE_SECURE"
 TASK_TOKEN_ENV = "SOCIAL_BRAIN_TASK_TOKEN"
+TASK_SECRET_ENV = "TASK_SECRET"
 LLM_MODEL_SETTING = "llm_model"
 DEFAULT_AUTH_USERNAME = DEFAULT_WEB_AUTH_USERNAME
+DEFAULT_X_SYNC_USERNAME = "gavinzaentz"
+DEFAULT_X_POST_SYNC_LIMIT = 3200
+DAILY_X_POST_SYNC_LIMIT = 100
+X_POSTS_SYNC_KEY = "x_posts_sync"
+X_METRICS_SYNC_KEY = "x_metrics_sync"
+X_DAILY_SYNC_KEY = "x_daily_sync"
 SESSION_COOKIE = "social_brain_session"
 SESSION_TTL_SECONDS = 60 * 60 * 12
 AUTH_REQUIRED_MESSAGE = "Authentication required."
 AUTH_CONFIG_MESSAGE = "Social Brain login is not configured. Run set-web-login once."
 TASK_AUTH_CONFIG_MESSAGE = "Social Brain task token is not configured. Set SOCIAL_BRAIN_TASK_TOKEN."
 TASK_AUTH_REQUIRED_MESSAGE = "Task authentication required."
+TASK_SECRET_CONFIG_MESSAGE = "Task secret is not configured. Set TASK_SECRET."
+TASK_SECRET_REQUIRED_MESSAGE = "Task authentication required."
+MISSING_X_READ_CREDENTIALS_MESSAGE = "X read credentials missing. Set X_BEARER_TOKEN."
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -133,6 +144,11 @@ def make_handler(db_path: Path):
             if self.path.startswith("/logout"):
                 self._redirect("/login", extra_headers=[expired_session_cookie_header()])
                 return
+            if self.path.startswith("/tasks/"):
+                if not self._require_task_secret():
+                    return
+                self._serve_api("POST")
+                return
             if self.path.startswith("/api/tasks/"):
                 if not self._require_task_auth():
                     return
@@ -173,6 +189,15 @@ def make_handler(db_path: Path):
             if request_has_task_token(self.headers):
                 return True
             self._serve_json(401, {"error": TASK_AUTH_REQUIRED_MESSAGE})
+            return False
+
+        def _require_task_secret(self) -> bool:
+            if not os.getenv(TASK_SECRET_ENV):
+                self._serve_json(503, {"error": TASK_SECRET_CONFIG_MESSAGE})
+                return False
+            if request_has_task_secret(self.headers):
+                return True
+            self._serve_json(401, {"error": TASK_SECRET_REQUIRED_MESSAGE})
             return False
 
         def _serve_api(self, method: str) -> None:
@@ -303,6 +328,14 @@ def request_is_authenticated(headers: Mapping[str, str], store: SQLiteStore) -> 
 
 def request_has_task_token(headers: Mapping[str, str]) -> bool:
     expected = os.getenv(TASK_TOKEN_ENV, "")
+    if not expected:
+        return False
+    candidate = task_token_from_headers(headers)
+    return bool(candidate) and hmac.compare_digest(candidate, expected)
+
+
+def request_has_task_secret(headers: Mapping[str, str]) -> bool:
+    expected = os.getenv(TASK_SECRET_ENV, "")
     if not expected:
         return False
     candidate = task_token_from_headers(headers)
@@ -461,6 +494,8 @@ def route_api(
     payload: dict[str, Any],
 ) -> tuple[int, dict[str, Any]]:
     parts = [part for part in path.split("/") if part]
+    if method == "POST" and parts == ["tasks", "sync-x-daily"]:
+        return 200, sync_x_daily_payload(store, payload)
     if not parts or parts[0] != "api":
         return 404, {"error": "Not found."}
 
@@ -468,6 +503,8 @@ def route_api(
         return 200, status_payload(store)
     if method == "GET" and parts == ["api", "account"]:
         return 200, account_payload(store)
+    if method == "GET" and parts == ["api", "account", "status"]:
+        return 200, account_status_payload(store)
     if method == "PATCH" and parts == ["api", "account"]:
         store.save_app_setting(LLM_MODEL_SETTING, clean_optional(payload.get("llm_model")))
         return 200, account_payload(store)
@@ -542,6 +579,14 @@ def route_api(
         return 200, analytics_payload(store)
     if method == "POST" and parts == ["api", "sync-metrics"]:
         return 200, sync_metrics_payload(store, payload)
+    if method == "POST" and parts == ["api", "sync-x-user"]:
+        return 200, sync_x_user_payload(store, payload)
+    if method == "POST" and parts == ["api", "account", "sync-x-posts"]:
+        return 200, sync_x_posts_account_payload(store, payload)
+    if method == "POST" and parts == ["api", "account", "sync-x-metrics"]:
+        return 200, sync_x_metrics_account_payload(store, payload)
+    if method == "POST" and parts == ["api", "account", "sync-x-all"]:
+        return 200, sync_x_all_account_payload(store, payload)
     if method == "POST" and parts == ["api", "tasks", "publish-due-x"]:
         return 200, publish_due_payload(store, payload)
     if method == "POST" and parts == ["api", "tasks", "sync-x-metrics"]:
@@ -594,6 +639,218 @@ def sync_metrics_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[st
         dry_run=bool(payload.get("dry_run", False)),
     )
     return {"result": asdict(result)}
+
+
+def sync_x_posts_account_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    result, metadata = run_x_posts_sync(
+        store,
+        payload,
+        limit=int(payload.get("limit") or DEFAULT_X_POST_SYNC_LIMIT),
+    )
+    return {
+        "result": result,
+        "sync": sync_metadata_payload(metadata),
+        "account": account_status_payload(store),
+    }
+
+
+def sync_x_metrics_account_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    result, metadata = run_x_metrics_sync(
+        store,
+        payload,
+        limit=int(payload.get("limit") or DEFAULT_X_POST_SYNC_LIMIT),
+    )
+    return {
+        "result": result,
+        "sync": sync_metadata_payload(metadata),
+        "account": account_status_payload(store),
+    }
+
+
+def sync_x_all_account_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    posts_result, posts_sync = run_x_posts_sync(
+        store,
+        payload,
+        limit=int(payload.get("post_limit") or payload.get("limit") or DEFAULT_X_POST_SYNC_LIMIT),
+    )
+    metrics_result, metrics_sync = run_x_metrics_sync(
+        store,
+        payload,
+        limit=int(payload.get("metrics_limit") or payload.get("limit") or DEFAULT_X_POST_SYNC_LIMIT),
+    )
+    return {
+        "posts": posts_result,
+        "metrics": metrics_result,
+        "sync": {
+            X_POSTS_SYNC_KEY: sync_metadata_payload(posts_sync),
+            X_METRICS_SYNC_KEY: sync_metadata_payload(metrics_sync),
+        },
+        "account": account_status_payload(store),
+    }
+
+
+def sync_x_daily_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    started_at = utc_now()
+    try:
+        posts_result, _ = run_x_posts_sync(
+            store,
+            payload,
+            limit=int(payload.get("post_limit") or DAILY_X_POST_SYNC_LIMIT),
+        )
+        metrics_result, _ = run_x_metrics_sync(
+            store,
+            payload,
+            limit=int(payload.get("metrics_limit") or DAILY_X_POST_SYNC_LIMIT),
+            since_days=optional_int(payload.get("since_days")) or 30,
+        )
+        completed_at = utc_now()
+        errors = [
+            *posts_result.get("errors", []),
+            *metrics_result.get("errors", []),
+        ]
+        summary = {
+            "posts_fetched": posts_result.get("fetched", 0),
+            "new_posts_imported": posts_result.get("imported", 0),
+            "duplicates_skipped": posts_result.get("duplicates", 0),
+            "metrics_updated": metrics_result.get("updated", 0),
+            "errors": errors,
+            "completed_at": completed_at,
+        }
+        metadata = store.save_sync_metadata(
+            SyncMetadata(
+                key=X_DAILY_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=completed_at,
+                status="partial" if errors else "success",
+                summary=summary,
+                error_message="\n".join(errors[:5]) if errors else None,
+            )
+        )
+        return {
+            **summary,
+            "sync": sync_metadata_payload(metadata),
+        }
+    except Exception as exc:  # noqa: BLE001 - task should persist failure summary.
+        completed_at = utc_now()
+        summary = {
+            "posts_fetched": 0,
+            "new_posts_imported": 0,
+            "duplicates_skipped": 0,
+            "metrics_updated": 0,
+            "errors": [str(exc)],
+            "completed_at": completed_at,
+        }
+        store.save_sync_metadata(
+            SyncMetadata(
+                key=X_DAILY_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=completed_at,
+                status="failed",
+                summary=summary,
+                error_message=str(exc),
+            )
+        )
+        raise
+
+
+def run_x_posts_sync(
+    store: SQLiteStore,
+    payload: dict[str, Any],
+    *,
+    limit: int,
+) -> tuple[dict[str, Any], SyncMetadata]:
+    started_at = utc_now()
+    try:
+        require_x_read_credentials()
+        result = sync_x_user_posts(
+            store,
+            XApiClient.from_env(),
+            username=clean_optional(payload.get("username")) or DEFAULT_X_SYNC_USERNAME,
+            limit=limit,
+            default_topic=clean_optional(payload.get("default_topic")) or DEFAULT_IMPORT_TOPIC,
+            default_post_type=clean_optional(payload.get("default_post_type")) or DEFAULT_IMPORT_POST_TYPE,
+            start_time=clean_optional(payload.get("start_time")),
+            end_time=clean_optional(payload.get("end_time")),
+            exclude_replies=bool_from_payload(payload, "exclude_replies", True),
+            exclude_retweets=bool_from_payload(payload, "exclude_retweets", True),
+            dry_run=bool_from_payload(payload, "dry_run", False),
+            imitate=bool_from_payload(payload, "imitate", False),
+            categorizer=None,
+        )
+        summary = sync_x_user_result_payload(result)
+        metadata = store.save_sync_metadata(
+            SyncMetadata(
+                key=X_POSTS_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=utc_now(),
+                status="partial" if summary["errors"] else "success",
+                summary=summary,
+                error_message="\n".join(summary["errors"][:5]) if summary["errors"] else None,
+            )
+        )
+        return summary, metadata
+    except Exception as exc:  # noqa: BLE001 - store sync failure for account display.
+        metadata = store.save_sync_metadata(
+            SyncMetadata(
+                key=X_POSTS_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=utc_now(),
+                status="failed",
+                summary={},
+                error_message=str(exc),
+            )
+        )
+        raise ValueError(str(exc)) from exc
+
+
+def run_x_metrics_sync(
+    store: SQLiteStore,
+    payload: dict[str, Any],
+    *,
+    limit: int,
+    since_days: int | None = None,
+) -> tuple[dict[str, Any], SyncMetadata]:
+    started_at = utc_now()
+    try:
+        require_x_read_credentials()
+        result = sync_x_metrics(
+            store,
+            XApiClient.from_env(),
+            post_id=clean_optional(payload.get("post_id")),
+            x_post_id=clean_optional(payload.get("x_post_id")),
+            since_days=since_days if since_days is not None else optional_int(payload.get("since_days")),
+            limit=limit,
+            dry_run=bool_from_payload(payload, "dry_run", False),
+        )
+        summary = asdict(result)
+        metadata = store.save_sync_metadata(
+            SyncMetadata(
+                key=X_METRICS_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=utc_now(),
+                status="partial" if summary["errors"] else "success",
+                summary=summary,
+                error_message="\n".join(summary["errors"][:5]) if summary["errors"] else None,
+            )
+        )
+        return summary, metadata
+    except Exception as exc:  # noqa: BLE001 - store sync failure for account display.
+        metadata = store.save_sync_metadata(
+            SyncMetadata(
+                key=X_METRICS_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=utc_now(),
+                status="failed",
+                summary={},
+                error_message=str(exc),
+            )
+        )
+        raise ValueError(str(exc)) from exc
+
+
+def require_x_read_credentials() -> None:
+    if not os.getenv("X_BEARER_TOKEN"):
+        raise ValueError(MISSING_X_READ_CREDENTIALS_MESSAGE)
 
 
 def sync_x_user_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
@@ -726,11 +983,20 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
         if item.status == "approved" and parse_dt(item.scheduled_at) <= datetime.now(timezone.utc)
     ][:10]
     analytics = build_analytics_summary(store)
+    recent_posts = store.list_posts(platform="x", limit=100)
+    latest_metrics = store.latest_metrics_by_post_id([post.id for post in recent_posts])
+    trends = store.list_trends(status="unused", limit=10)
     return {
         "status": status_payload(store),
         "queue_counts": counts,
         "due": [queue_item_payload(store, item) for item in due],
         "recent_queue": [queue_item_payload(store, item) for item in queue[:10]],
+        "recent_posts": [
+            recent_post_payload(post, latest_metrics.get(post.id))
+            for post in recent_posts
+        ],
+        "trends": [trend_payload(trend) for trend in trends],
+        "sync": account_sync_payload(store),
         "analytics_hints": analytics.hints,
         "best_examples": [post_payload(post) for post in analytics.best_examples[:5]],
     }
@@ -756,16 +1022,63 @@ def status_payload(store: SQLiteStore | None = None) -> dict[str, Any]:
         "x_read_configured": bool(os.getenv("X_BEARER_TOKEN")),
         "x_write_configured": has_x_write_credentials(),
         "task_trigger_configured": bool(os.getenv(TASK_TOKEN_ENV)),
+        "daily_sync_configured": bool(os.getenv(TASK_SECRET_ENV)),
     }
 
 
 def account_payload(store: SQLiteStore) -> dict[str, Any]:
     return {
         "status": status_payload(store),
+        "sync": account_sync_payload(store),
+        "stats": x_account_stats_payload(store),
         "settings": {
             "llm_model": store.get_app_setting(LLM_MODEL_SETTING) or "",
             "effective_llm_model": configured_llm_model(store) or "",
         },
+    }
+
+
+def account_status_payload(store: SQLiteStore) -> dict[str, Any]:
+    return {
+        "status": status_payload(store),
+        "sync": account_sync_payload(store),
+        "stats": x_account_stats_payload(store),
+    }
+
+
+def account_sync_payload(store: SQLiteStore) -> dict[str, Any]:
+    metadata = store.sync_metadata_by_key()
+    return {
+        X_POSTS_SYNC_KEY: sync_metadata_payload(metadata.get(X_POSTS_SYNC_KEY)),
+        X_METRICS_SYNC_KEY: sync_metadata_payload(metadata.get(X_METRICS_SYNC_KEY)),
+        X_DAILY_SYNC_KEY: sync_metadata_payload(metadata.get(X_DAILY_SYNC_KEY)),
+    }
+
+
+def x_account_stats_payload(store: SQLiteStore) -> dict[str, Any]:
+    latest_posts = store.list_posts(platform="x", limit=1)
+    latest = latest_posts[0] if latest_posts else None
+    return {
+        "total_x_posts_stored": store.count_posts(platform="x"),
+        "latest_imported_x_post_date": latest.published_at if latest else None,
+    }
+
+
+def sync_metadata_payload(metadata: SyncMetadata | None) -> dict[str, Any]:
+    if not metadata:
+        return {
+            "last_started_at": None,
+            "last_completed_at": None,
+            "status": "not_run",
+            "summary": {},
+            "error_message": None,
+        }
+    return {
+        "last_started_at": metadata.last_started_at,
+        "last_completed_at": metadata.last_completed_at,
+        "status": metadata.status,
+        "summary": metadata.summary,
+        "error_message": metadata.error_message,
     }
 
 
@@ -884,6 +1197,7 @@ def post_payload(post) -> dict[str, Any]:
     return {
         "id": post.id,
         "text": post.text,
+        "summary": post_summary(post.text),
         "url": post.url,
         "published_at": post.published_at,
         "author": post.author,
@@ -891,6 +1205,47 @@ def post_payload(post) -> dict[str, Any]:
         "post_type": post.post_type,
         "status": post.status,
     }
+
+
+def recent_post_payload(post, metrics: Any | None) -> dict[str, Any]:
+    payload = post_payload(post)
+    payload["metrics"] = metrics_payload(metrics)
+    return payload
+
+
+def metrics_payload(metrics: Any | None) -> dict[str, Any]:
+    if not metrics:
+        return {
+            "impressions": None,
+            "likes": None,
+            "replies": None,
+            "reposts": None,
+            "quotes": None,
+            "bookmarks": None,
+            "engagement_rate": None,
+            "measured_at": None,
+        }
+    return {
+        "impressions": metrics.impressions,
+        "likes": metrics.likes,
+        "replies": metrics.replies,
+        "reposts": metrics.reposts,
+        "quotes": metrics.quotes,
+        "bookmarks": metrics.bookmarks,
+        "engagement_rate": metrics.engagement_rate,
+        "measured_at": metrics.measured_at,
+    }
+
+
+def post_summary(text: str, *, max_length: int = 96) -> str:
+    cleaned = " ".join(text.split())
+    if not cleaned:
+        return "Untitled post"
+    first_sentence = cleaned.split(". ", 1)[0].strip()
+    summary = first_sentence if len(first_sentence) >= 18 else cleaned
+    if len(summary) <= max_length:
+        return summary
+    return f"{summary[: max_length - 1].rstrip()}..."
 
 
 def performance_payload(row) -> dict[str, Any]:
@@ -980,6 +1335,17 @@ def clean_optional(value: object) -> str | None:
 
 def optional_int(value: object) -> int | None:
     return int(value) if value not in {None, ""} else None
+
+
+def bool_from_payload(payload: dict[str, Any], key: str, default: bool) -> bool:
+    if key not in payload:
+        return default
+    value = payload.get(key)
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def value_or_current(payload: dict[str, Any], key: str, current):

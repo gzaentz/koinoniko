@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Koinoniko</title>
     <link rel="icon" type="image/svg+xml" href="/static/koinoniko-favicon.svg">
-    <link rel="stylesheet" href="/static/styles.css?v=20260626-account2">
+    <link rel="stylesheet" href="/static/styles.css?v=20260626-marketing-brain">
   </head>
   <body>
     <aside class="sidebar">
@@ -15,7 +15,10 @@
       </div>
       <nav>
         <button class="nav-button active" data-view="dashboard">Dashboard</button>
-        <button class="nav-button" data-view="reviewer">Content Reviewer</button>
+        <button class="nav-button nav-with-badge" data-view="reviewer">
+          <span>Content Reviewer</span>
+          <span id="reviewNavBadge" class="nav-badge">0</span>
+        </button>
       </nav>
       <div class="sidebar-footer">
         <button class="nav-button" data-view="account">Account</button>
@@ -32,7 +35,9 @@
           <p id="viewMeta">What needs attention, what is scheduled, and what is working.</p>
         </div>
         <div class="actions">
+          <button class="secondary" id="refreshButton">Refresh</button>
           <button id="createPlanButton">Create Weekly Plan</button>
+          <button class="secondary" id="syncPostsButton">Sync X Posts</button>
           <button class="secondary" id="syncMetricsButton">Sync Metrics</button>
           <button class="secondary hidden" id="publishDueButton">Post Due</button>
         </div>
@@ -41,40 +46,62 @@
       <section id="message" class="message hidden"></section>
 
       <section class="view active" id="dashboardView">
-        <div class="summary-grid" id="dashboardCards"></div>
+        <section class="panel recent-posts-panel">
+          <div class="panel-header">
+            <div>
+              <span class="eyebrow">Recent X Posts</span>
+              <h2>What has been posted</h2>
+            </div>
+            <div class="table-tools">
+              <input id="postSearch" placeholder="Search posts">
+              <input id="postDateFrom" type="date" aria-label="Start date">
+              <input id="postDateTo" type="date" aria-label="End date">
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="posts-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Post</th>
+                  <th>Topic</th>
+                  <th>Type</th>
+                  <th>Likes</th>
+                  <th>Replies</th>
+                  <th>Reposts</th>
+                  <th>Quotes</th>
+                  <th>Bookmarks</th>
+                  <th>Impressions</th>
+                  <th>ER</th>
+                  <th>Link</th>
+                </tr>
+              </thead>
+              <tbody id="recentPostsTable"></tbody>
+            </table>
+          </div>
+          <p class="sync-line" id="dashboardSyncLine">Last X sync: never</p>
+        </section>
 
         <div class="dashboard-grid">
-          <section class="panel attention-panel">
+          <section class="panel trends-panel">
             <div class="panel-header">
               <div>
-                <span class="eyebrow">Attention</span>
-                <h2>Needs Review</h2>
+                <span class="eyebrow">Current Trends</span>
+                <h2>Worth considering</h2>
               </div>
+              <button class="secondary" id="openTrendsDashboardButton">Add Trend</button>
             </div>
-            <div id="attentionList" class="stack"></div>
-          </section>
-
-          <section class="panel schedule-panel">
-            <div class="panel-header">
-              <div>
-                <span class="eyebrow">Schedule</span>
-                <h2>Next Up</h2>
-              </div>
-            </div>
-            <div id="scheduleSnapshot" class="stack"></div>
+            <div id="dashboardTrendList" class="trend-list"></div>
           </section>
 
           <section class="panel signal-panel">
             <div class="panel-header">
               <div>
-                <span class="eyebrow">Performance</span>
-                <h2>What Is Working</h2>
+                <span class="eyebrow">Performance Signals</span>
+                <h2>What is working</h2>
               </div>
-              <button class="quiet-button" id="toggleAnalyticsButton">View details</button>
             </div>
             <div id="signalList" class="signal-list"></div>
-            <div id="bestPost" class="best-post"></div>
-            <div id="analyticsDetails" class="details-panel hidden"></div>
           </section>
         </div>
       </section>
@@ -88,6 +115,7 @@
           <div class="actions">
             <button id="createPlanReviewerButton">Create Weekly Plan</button>
             <button class="secondary" id="openTrendsButton">Trends</button>
+            <button class="secondary hidden" id="publishDueReviewerButton">Post Due</button>
           </div>
         </div>
 
@@ -100,7 +128,7 @@
             <div id="reviewList" class="card-list"></div>
           </section>
 
-          <section class="board-column">
+          <section class="board-column" id="scheduledColumn">
             <div class="board-header">
               <h2>Scheduled Content</h2>
               <span id="scheduledCount" class="count-pill">0</span>
@@ -125,6 +153,21 @@
           <section class="panel">
             <div class="panel-header">
               <div>
+                <span class="eyebrow">X Sync</span>
+                <h2>Account Data</h2>
+              </div>
+            </div>
+            <div class="sync-actions">
+              <button id="accountSyncPostsButton">Sync X Posts</button>
+              <button class="secondary" id="accountSyncMetricsButton">Sync X Metrics</button>
+              <button class="secondary" id="accountSyncAllButton">Sync All X Data</button>
+            </div>
+            <div class="account-grid" id="accountSyncGrid"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
                 <span class="eyebrow">Model</span>
                 <h2>Generation Model</h2>
               </div>
@@ -143,6 +186,34 @@
         </div>
       </section>
     </main>
+
+    <section class="modal hidden" id="postModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="postModal"></div>
+      <div class="modal-card wide">
+        <div class="modal-header">
+          <div>
+            <span class="eyebrow">Posted X Post</span>
+            <h2 id="postModalTitle">Post details</h2>
+          </div>
+          <button class="icon-button" data-close-modal="postModal" aria-label="Close">x</button>
+        </div>
+        <div id="postModalBody" class="detail-stack"></div>
+      </div>
+    </section>
+
+    <section class="modal hidden" id="queueModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="queueModal"></div>
+      <div class="modal-card wide">
+        <div class="modal-header">
+          <div>
+            <span class="eyebrow">Content Reviewer</span>
+            <h2 id="queueModalTitle">Review post</h2>
+          </div>
+          <button class="icon-button" data-close-modal="queueModal" aria-label="Close">x</button>
+        </div>
+        <div id="queueModalBody" class="detail-stack"></div>
+      </div>
+    </section>
 
     <section class="modal hidden" id="planModal" aria-hidden="true">
       <div class="modal-backdrop" data-close-modal="planModal"></div>
@@ -222,6 +293,6 @@
       </div>
     </section>
 
-    <script src="/static/app.js?v=20260626-account2"></script>
+    <script src="/static/app.js?v=20260626-marketing-brain"></script>
   </body>
 </html>

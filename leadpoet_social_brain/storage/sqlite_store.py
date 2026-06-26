@@ -21,6 +21,7 @@ from leadpoet_social_brain.core.models import (
     PostNote,
     QueuedPostVersion,
     SocialPost,
+    SyncMetadata,
     TrendItem,
     WebAuthUser,
     new_id,
@@ -239,6 +240,15 @@ class SQLiteStore:
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS sync_metadata (
+                key TEXT PRIMARY KEY,
+                last_started_at TEXT,
+                last_completed_at TEXT,
+                status TEXT NOT NULL,
+                summary_json TEXT NOT NULL DEFAULT '{}',
+                error_message TEXT
             );
             """
         )
@@ -520,6 +530,68 @@ class SQLiteStore:
                 (clean_key, clean_value, utc_now()),
             )
         self.conn.commit()
+
+    def save_sync_metadata(self, metadata: SyncMetadata) -> SyncMetadata:
+        clean_key = metadata.key.strip()
+        if not clean_key:
+            raise ValueError("Sync metadata key is required.")
+        saved = SyncMetadata(
+            key=clean_key,
+            last_started_at=metadata.last_started_at,
+            last_completed_at=metadata.last_completed_at,
+            status=metadata.status,
+            summary=metadata.summary,
+            error_message=metadata.error_message,
+        )
+        self.conn.execute(
+            """
+            INSERT INTO sync_metadata (
+                key, last_started_at, last_completed_at, status,
+                summary_json, error_message
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                last_started_at = excluded.last_started_at,
+                last_completed_at = excluded.last_completed_at,
+                status = excluded.status,
+                summary_json = excluded.summary_json,
+                error_message = excluded.error_message
+            """,
+            (
+                saved.key,
+                saved.last_started_at,
+                saved.last_completed_at,
+                saved.status,
+                json.dumps(saved.summary),
+                saved.error_message,
+            ),
+        )
+        self.conn.commit()
+        return saved
+
+    def get_sync_metadata(self, key: str) -> SyncMetadata | None:
+        row = self.conn.execute(
+            "SELECT * FROM sync_metadata WHERE key = ?",
+            (key.strip(),),
+        ).fetchone()
+        return self._row_to_sync_metadata(row) if row else None
+
+    def sync_metadata_by_key(self) -> dict[str, SyncMetadata]:
+        rows = self.conn.execute("SELECT * FROM sync_metadata").fetchall()
+        return {row["key"]: self._row_to_sync_metadata(row) for row in rows}
+
+    def count_posts(self, *, platform: str | None = None, status: str | None = None) -> int:
+        clauses: list[str] = []
+        params: list[object] = []
+        if platform:
+            clauses.append("platform = ?")
+            params.append(platform)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        row = self.conn.execute(f"SELECT COUNT(*) AS count FROM posts {where}", params).fetchone()
+        return int(row["count"] or 0)
 
     def _ensure_column(self, table: str, column: str, ddl: str) -> None:
         rows = self.conn.execute(f"PRAGMA table_info({table})").fetchall()
@@ -1333,6 +1405,16 @@ class SQLiteStore:
             iterations=row["iterations"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+        )
+
+    def _row_to_sync_metadata(self, row: sqlite3.Row) -> SyncMetadata:
+        return SyncMetadata(
+            key=row["key"],
+            last_started_at=row["last_started_at"],
+            last_completed_at=row["last_completed_at"],
+            status=row["status"],
+            summary=json.loads(row["summary_json"] or "{}"),
+            error_message=row["error_message"],
         )
 
     def _sync_note_influences(self, note: PostNote) -> None:

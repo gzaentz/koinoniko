@@ -185,6 +185,16 @@ class WebAuthUser:
 
 
 @dataclass(frozen=True)
+class SyncMetadata:
+    key: str
+    last_started_at: str | None = None
+    last_completed_at: str | None = None
+    status: str = "success"
+    summary: "JsonDict" = field(default_factory=dict)
+    error_message: str | None = None
+
+
+@dataclass(frozen=True)
 class DraftRequest:
     platform: str
     topic: str

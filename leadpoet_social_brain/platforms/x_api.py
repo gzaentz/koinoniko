@@ -437,7 +437,7 @@ def sync_x_metrics(
             skipped += len(batch)
             errors.append(f"batch {','.join(ids)}: {exc}")
             continue
-        collected_at = utc_now()
+        collected_at = datetime.now(timezone.utc).isoformat()
         for post, tweet_id in batch:
             tweet = tweets_by_id.get(tweet_id)
             if not tweet:
