@@ -569,6 +569,7 @@ main {
 
 .board-header {
   margin-bottom: 16px;
+  min-height: 34px;
 }
 
 .board-header-actions {
