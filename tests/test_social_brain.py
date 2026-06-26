@@ -28,7 +28,19 @@ from leadpoet_social_brain.platforms.x_api import (
 )
 from leadpoet_social_brain.skills import generation_skills, load_skill
 from leadpoet_social_brain.storage.sqlite_store import DB_ENV_VAR, SQLiteStore, resolve_db_path
-from leadpoet_social_brain.web.app import handle_api_request
+from leadpoet_social_brain.web.app import (
+    AUTH_PASSWORD_ENV,
+    AUTH_SECRET_ENV,
+    AUTH_USERNAME_ENV,
+    DEFAULT_AUTH_USERNAME,
+    SESSION_COOKIE,
+    auth_is_configured,
+    create_session_cookie_value,
+    handle_api_request,
+    request_is_authenticated,
+    validate_session_cookie_value,
+    verify_credentials,
+)
 
 
 class FakeProvider:
@@ -117,6 +129,40 @@ class SocialBrainTest(unittest.TestCase):
 
             self.assertTrue(db_path.exists())
             self.assertIn(str(db_path), output.getvalue())
+
+    def test_web_auth_uses_env_password_and_signed_session_cookie(self):
+        with patch.dict(
+            os.environ,
+            {
+                AUTH_USERNAME_ENV: DEFAULT_AUTH_USERNAME,
+                AUTH_PASSWORD_ENV: "test-password",
+                AUTH_SECRET_ENV: "test-session-secret",
+            },
+            clear=False,
+        ):
+            self.assertTrue(auth_is_configured())
+            self.assertTrue(verify_credentials(DEFAULT_AUTH_USERNAME, "test-password"))
+            self.assertFalse(verify_credentials(DEFAULT_AUTH_USERNAME, "wrong-password"))
+            self.assertFalse(verify_credentials("other-user", "test-password"))
+
+            token = create_session_cookie_value(DEFAULT_AUTH_USERNAME)
+            self.assertTrue(validate_session_cookie_value(token))
+            self.assertTrue(request_is_authenticated({"Cookie": f"{SESSION_COOKIE}={token}"}))
+            self.assertFalse(request_is_authenticated({"Cookie": f"{SESSION_COOKIE}=tampered"}))
+
+    def test_web_auth_fails_closed_without_password_env(self):
+        with patch.dict(
+            os.environ,
+            {
+                AUTH_USERNAME_ENV: DEFAULT_AUTH_USERNAME,
+                AUTH_PASSWORD_ENV: "",
+                AUTH_SECRET_ENV: "",
+            },
+            clear=False,
+        ):
+            self.assertFalse(auth_is_configured())
+            self.assertFalse(verify_credentials(DEFAULT_AUTH_USERNAME, "anything"))
+            self.assertFalse(request_is_authenticated({"Cookie": ""}))
 
     def test_skill_files_load_correctly(self):
         skill = load_skill("global_voice.md")

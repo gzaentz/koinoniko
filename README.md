@@ -137,6 +137,16 @@ python3 -m leadpoet_social_brain.web.app \
 
 The UI loads `.env` by default if present. It only reads environment variables into the local process; it does not display token values.
 
+The UI requires login. Set the password in environment variables before exposing the service:
+
+```bash
+export SOCIAL_BRAIN_AUTH_USERNAME="gavinz444"
+export SOCIAL_BRAIN_AUTH_PASSWORD="<set this in Railway Variables>"
+export SOCIAL_BRAIN_AUTH_SECRET="<long random session signing secret>"
+```
+
+`SOCIAL_BRAIN_AUTH_USERNAME` defaults to `gavinz444` if omitted. `SOCIAL_BRAIN_AUTH_PASSWORD` is required; if it is missing, the app fails closed and shows a configuration-required login page. Do not commit the password to the repo or store it in SQLite.
+
 The UI supports:
 
 - dashboard status, queue counts, due posts, and analytics hints
@@ -173,6 +183,9 @@ The app reads Railway's `PORT` environment variable automatically. Locally it st
 Required Railway settings:
 
 - Deploy from the `main` branch of `gzaentz/koinonikos`.
+- Set `SOCIAL_BRAIN_AUTH_USERNAME=gavinz444`.
+- Set `SOCIAL_BRAIN_AUTH_PASSWORD` in Railway Variables.
+- Set `SOCIAL_BRAIN_AUTH_SECRET` to a long random value for session signing.
 - Add a Railway Volume and mount it at `/app/data`.
 - Set `SOCIAL_BRAIN_DB=/app/data/social_brain.sqlite3`.
 - Keep service replicas at `1` while using SQLite.

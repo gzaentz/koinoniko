@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
+import hmac
+import html
 import json
 import mimetypes
 import os
+import secrets
+import time
+from http.cookies import CookieError, SimpleCookie
 from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
 from leadpoet_social_brain.analytics import build_analytics_summary
@@ -39,6 +46,15 @@ from leadpoet_social_brain.storage.sqlite_store import DEFAULT_DB_PATH, SQLiteSt
 
 STATIC_DIR = Path(__file__).with_name("static")
 JSON_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
+AUTH_USERNAME_ENV = "SOCIAL_BRAIN_AUTH_USERNAME"
+AUTH_PASSWORD_ENV = "SOCIAL_BRAIN_AUTH_PASSWORD"
+AUTH_SECRET_ENV = "SOCIAL_BRAIN_AUTH_SECRET"
+AUTH_COOKIE_SECURE_ENV = "SOCIAL_BRAIN_AUTH_COOKIE_SECURE"
+DEFAULT_AUTH_USERNAME = "gavinz444"
+SESSION_COOKIE = "social_brain_session"
+SESSION_TTL_SECONDS = 60 * 60 * 12
+AUTH_REQUIRED_MESSAGE = "Authentication required."
+AUTH_CONFIG_MESSAGE = "Social Brain login is not configured. Set SOCIAL_BRAIN_AUTH_PASSWORD."
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -74,16 +90,49 @@ def serve(*, db_path: Path, host: str, port: int) -> None:
 def make_handler(db_path: Path):
     class SocialBrainHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802 - stdlib hook.
+            if self.path.startswith("/login"):
+                if request_is_authenticated(self.headers):
+                    self._redirect("/")
+                else:
+                    self._serve_login()
+                return
+            if not self._require_auth():
+                return
             if self.path == "/" or self.path.startswith("/static/"):
                 self._serve_static()
                 return
             self._serve_api("GET")
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib hook.
+            if self.path.startswith("/login"):
+                self._handle_login()
+                return
+            if self.path.startswith("/logout"):
+                self._redirect("/login", extra_headers=[expired_session_cookie_header()])
+                return
+            if not self._require_auth():
+                return
             self._serve_api("POST")
 
         def do_PATCH(self) -> None:  # noqa: N802 - stdlib hook.
+            if not self._require_auth():
+                return
             self._serve_api("PATCH")
+
+        def _require_auth(self) -> bool:
+            if not auth_is_configured():
+                if self.path.startswith("/api/"):
+                    self._serve_json(503, {"error": AUTH_CONFIG_MESSAGE})
+                else:
+                    self._redirect("/login")
+                return False
+            if request_is_authenticated(self.headers):
+                return True
+            if self.path.startswith("/api/"):
+                self._serve_json(401, {"error": AUTH_REQUIRED_MESSAGE})
+            else:
+                self._redirect("/login")
+            return False
 
         def _serve_api(self, method: str) -> None:
             body = self.rfile.read(int(self.headers.get("Content-Length", "0") or 0))
@@ -91,6 +140,9 @@ def make_handler(db_path: Path):
                 status, payload = handle_api_request(method, self.path, body, db_path=db_path)
             except Exception as exc:  # noqa: BLE001 - local UI should return readable JSON errors.
                 status, payload = 500, {"error": str(exc)}
+            self._serve_json(status, payload)
+
+        def _serve_json(self, status: int, payload: dict[str, Any]) -> None:
             self.send_response(status)
             for key, value in JSON_HEADERS.items():
                 self.send_header(key, value)
@@ -109,10 +161,224 @@ def make_handler(db_path: Path):
             self.end_headers()
             self.wfile.write(path.read_bytes())
 
+        def _handle_login(self) -> None:
+            body = self.rfile.read(int(self.headers.get("Content-Length", "0") or 0)).decode("utf-8")
+            fields = parse_qs(body)
+            username = (fields.get("username") or [""])[0]
+            password = (fields.get("password") or [""])[0]
+            if verify_credentials(username, password):
+                token = create_session_cookie_value(auth_username())
+                self._redirect("/", extra_headers=[session_cookie_header(token)])
+                return
+            self._serve_login(error="Invalid username or password.")
+
+        def _serve_login(self, error: str | None = None) -> None:
+            content = login_page(error=error).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(content)
+
+        def _redirect(self, location: str, *, extra_headers: list[tuple[str, str]] | None = None) -> None:
+            self.send_response(303)
+            self.send_header("Location", location)
+            self.send_header("Cache-Control", "no-store")
+            for key, value in extra_headers or []:
+                self.send_header(key, value)
+            self.end_headers()
+
         def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature.
             return
 
     return SocialBrainHandler
+
+
+def auth_username() -> str:
+    return os.getenv(AUTH_USERNAME_ENV, DEFAULT_AUTH_USERNAME)
+
+
+def auth_password() -> str | None:
+    value = os.getenv(AUTH_PASSWORD_ENV)
+    return value if value else None
+
+
+def auth_secret() -> str | None:
+    return os.getenv(AUTH_SECRET_ENV) or auth_password()
+
+
+def auth_is_configured() -> bool:
+    return bool(auth_password())
+
+
+def verify_credentials(username: str, password: str) -> bool:
+    configured_password = auth_password()
+    if not configured_password:
+        return False
+    return hmac.compare_digest(username, auth_username()) and hmac.compare_digest(password, configured_password)
+
+
+def create_session_cookie_value(username: str) -> str:
+    secret = auth_secret()
+    if not secret:
+        raise ValueError(AUTH_CONFIG_MESSAGE)
+    payload = {
+        "u": username,
+        "e": int(time.time()) + SESSION_TTL_SECONDS,
+        "n": secrets.token_urlsafe(16),
+    }
+    payload_text = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    return f"{payload_text}.{session_signature(payload_text, secret)}"
+
+
+def validate_session_cookie_value(value: str | None) -> bool:
+    if not value or "." not in value:
+        return False
+    secret = auth_secret()
+    if not secret:
+        return False
+    payload_text, signature = value.rsplit(".", 1)
+    expected = session_signature(payload_text, secret)
+    if not hmac.compare_digest(signature, expected):
+        return False
+    try:
+        padded = payload_text + ("=" * (-len(payload_text) % 4))
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except (ValueError, json.JSONDecodeError):
+        return False
+    return (
+        payload.get("u") == auth_username()
+        and isinstance(payload.get("e"), int)
+        and payload["e"] >= int(time.time())
+    )
+
+
+def request_is_authenticated(headers: Mapping[str, str]) -> bool:
+    cookie = SimpleCookie()
+    try:
+        cookie.load(headers.get("Cookie", ""))
+    except CookieError:
+        return False
+    morsel = cookie.get(SESSION_COOKIE)
+    return validate_session_cookie_value(morsel.value if morsel else None)
+
+
+def session_signature(payload_text: str, secret: str) -> str:
+    return hmac.new(secret.encode("utf-8"), payload_text.encode("ascii"), hashlib.sha256).hexdigest()
+
+
+def session_cookie_header(token: str) -> tuple[str, str]:
+    parts = [
+        f"{SESSION_COOKIE}={token}",
+        "Path=/",
+        "HttpOnly",
+        "SameSite=Strict",
+        f"Max-Age={SESSION_TTL_SECONDS}",
+    ]
+    if auth_cookie_secure():
+        parts.append("Secure")
+    return "Set-Cookie", "; ".join(parts)
+
+
+def expired_session_cookie_header() -> tuple[str, str]:
+    return "Set-Cookie", f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"
+
+
+def auth_cookie_secure() -> bool:
+    configured = os.getenv(AUTH_COOKIE_SECURE_ENV)
+    if configured is not None:
+        return configured.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID"))
+
+
+def login_page(*, error: str | None = None) -> str:
+    configured = auth_is_configured()
+    error_html = f'<p class="error">{html.escape(error)}</p>' if error else ""
+    config_html = (
+        ""
+        if configured
+        else f'<p class="error">{html.escape(AUTH_CONFIG_MESSAGE)}</p>'
+    )
+    disabled = "" if configured else "disabled"
+    return f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Social Brain Login</title>
+    <style>
+      * {{ box-sizing: border-box; }}
+      body {{
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #fff;
+        color: #111;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }}
+      main {{
+        width: min(420px, calc(100vw - 32px));
+        border: 1px solid #d9d9d9;
+        border-radius: 8px;
+        padding: 28px;
+        display: grid;
+        gap: 18px;
+      }}
+      h1 {{ margin: 0; font-size: 24px; }}
+      p {{ margin: 0; color: #666; }}
+      label {{
+        display: grid;
+        gap: 6px;
+        color: #666;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }}
+      input {{
+        width: 100%;
+        border: 1px solid #d9d9d9;
+        border-radius: 6px;
+        padding: 10px;
+        font: inherit;
+        color: #111;
+      }}
+      button {{
+        min-height: 40px;
+        border: 1px solid #111;
+        border-radius: 6px;
+        background: #111;
+        color: #fff;
+        font: inherit;
+        cursor: pointer;
+      }}
+      button:disabled {{ opacity: 0.45; cursor: not-allowed; }}
+      .error {{
+        color: #111;
+        border: 1px solid #111;
+        padding: 10px;
+        border-radius: 6px;
+      }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <div>
+        <h1>Social Brain</h1>
+        <p>Sign in to continue.</p>
+      </div>
+      {config_html}
+      {error_html}
+      <form method="post" action="/login">
+        <label>Username<input name="username" autocomplete="username" required {disabled}></label>
+        <label>Password<input name="password" type="password" autocomplete="current-password" required {disabled}></label>
+        <button type="submit" {disabled}>Sign in</button>
+      </form>
+    </main>
+  </body>
+</html>"""
 
 
 def handle_api_request(

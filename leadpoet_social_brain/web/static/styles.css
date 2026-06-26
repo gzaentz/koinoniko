@@ -115,6 +115,10 @@ nav {
   gap: 7px;
 }
 
+.logout-form {
+  margin: 0;
+}
+
 .nav-button {
   width: 100%;
   text-align: left;
@@ -391,4 +395,3 @@ h3 {
     grid-template-columns: 1fr;
   }
 }
-

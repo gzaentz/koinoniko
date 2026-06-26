@@ -24,6 +24,10 @@ async function api(path, options = {}) {
     },
   });
   const payload = await response.json();
+  if (response.status === 401 || (response.status === 503 && payload.error && payload.error.includes("login"))) {
+    window.location.href = "/login";
+    throw new Error(payload.error || "Authentication required.");
+  }
   if (!response.ok) {
     throw new Error(payload.error || `Request failed: ${response.status}`);
   }
@@ -371,4 +375,3 @@ function setup() {
 }
 
 setup();
-
