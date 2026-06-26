@@ -201,6 +201,7 @@ Required Railway settings:
 - Set `X_BEARER_TOKEN` if you want X import and metric sync.
 - Set `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, and `SOCIAL_BRAIN_PROVIDER=leadpoet_social_brain.openrouter_provider:create_provider` before using generation, planning, or AI edits.
 - Set X write credentials only if you want approved posts to be posted from Railway.
+- Optional: set `SOCIAL_BRAIN_TASK_TOKEN` if you want an external cron service to trigger hosted task endpoints.
 
 SQLite notes for Railway:
 
@@ -215,6 +216,74 @@ SQLite notes for Railway:
 - Do not store API tokens in SQLite. Keep X/API tokens in Railway environment variables.
 
 If Railway shows "Unexposed service", open the service settings and generate a public domain after the deployment succeeds. The build/start config makes the app listen on the correct host and port; the domain is still a Railway service setting.
+
+## First Run Checklist
+
+For a new hosted database:
+
+1. Add a Railway Volume mounted at `/app/data`.
+2. Set `SOCIAL_BRAIN_DB=/app/data/social_brain.sqlite3` or rely on `RAILWAY_VOLUME_MOUNT_PATH`.
+3. Deploy the app and confirm logs show `Social Brain DB path: /app/data/social_brain.sqlite3`.
+4. Run `python -m leadpoet_social_brain.cli init` against that DB if seed context is needed.
+5. Run `python -m leadpoet_social_brain.cli set-web-login --username gavinz444`.
+6. Set `X_BEARER_TOKEN`.
+7. Run `sync-x-user` or import posts another way.
+8. Use `update-post-notes` to mark strongest examples with `imitate=true`.
+9. Run `rebuild-style-guide`.
+10. Set `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, and `SOCIAL_BRAIN_PROVIDER`.
+11. Add trends if you want timely planning context.
+12. Plan the week, review/edit, then approve only posts you are ready to publish.
+13. Set X write auth before posting from the hosted app.
+14. Set `SOCIAL_BRAIN_TASK_TOKEN` only if an external scheduler will call task endpoints.
+
+## Hosted Task Triggers
+
+Social Brain does not run a scheduler or background worker. On Railway, approved scheduled posts will stay queued until something triggers publishing.
+
+You can trigger the same core jobs through protected HTTP task endpoints:
+
+```text
+POST /api/tasks/publish-due-x
+POST /api/tasks/sync-x-metrics
+POST /api/tasks/weekly-report-x
+```
+
+Set a task token in Railway Variables:
+
+```bash
+SOCIAL_BRAIN_TASK_TOKEN="<long random secret>"
+```
+
+Then call the endpoint from Railway Cron, GitHub Actions, cron-job.org, or another scheduler:
+
+```bash
+curl -X POST "$SOCIAL_BRAIN_URL/api/tasks/publish-due-x" \
+  -H "Authorization: Bearer $SOCIAL_BRAIN_TASK_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"limit":20}'
+
+curl -X POST "$SOCIAL_BRAIN_URL/api/tasks/sync-x-metrics" \
+  -H "Authorization: Bearer $SOCIAL_BRAIN_TASK_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"since_days":90,"limit":100}'
+
+curl -X POST "$SOCIAL_BRAIN_URL/api/tasks/weekly-report-x" \
+  -H "Authorization: Bearer $SOCIAL_BRAIN_TASK_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"since_days":7}'
+```
+
+If `SOCIAL_BRAIN_TASK_TOKEN` is missing, task endpoints fail closed. UI endpoints still require the normal web login session.
+
+## Hosted Security
+
+The hosted UI is intentionally simple but should stay locked down:
+
+- The app fails closed until a SQLite-backed web login is created.
+- Session cookies are signed, `HttpOnly`, `SameSite=Strict`, and `Secure` on Railway by default.
+- UI mutation endpoints require login and use POST/PATCH.
+- External task endpoints require `SOCIAL_BRAIN_TASK_TOKEN`.
+- API tokens are read from environment variables and are not displayed in the UI or stored in SQLite.
 
 ## Quick Sample Flow
 
@@ -835,7 +904,7 @@ For simple local scheduling, use cron or launchd to run:
 python3 -m leadpoet_social_brain.cli publish-due-x
 ```
 
-every 15 to 60 minutes. Social Brain does not run a background service.
+every 15 to 60 minutes. On Railway, use the protected `/api/tasks/publish-due-x` endpoint from an external scheduler. Social Brain does not run a background service.
 
 Weekly learning:
 
@@ -1300,6 +1369,7 @@ Current tests cover:
 - provider-required generation behavior
 - OpenRouter provider configuration, request payloads, and response parsing
 - storage-backed web login setup and signed session cookies
+- login-required UI mutation endpoints and token-protected hosted task endpoints
 - weekly X planning into a local review queue
 - local UI API queue listing, editing, approval, AI revise, revision acceptance, and safety guards
 - trend-required planning guard and evergreen opt-in

@@ -26,6 +26,7 @@ from leadpoet_social_brain.content_queue import (
     post_queue_item_x,
     publish_due_x,
     revise_queued_post,
+    weekly_report_text,
 )
 from leadpoet_social_brain.core.models import (
     ContentQueueItem,
@@ -52,11 +53,14 @@ from leadpoet_social_brain.storage.sqlite_store import (
 STATIC_DIR = Path(__file__).with_name("static")
 JSON_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
 AUTH_COOKIE_SECURE_ENV = "SOCIAL_BRAIN_AUTH_COOKIE_SECURE"
+TASK_TOKEN_ENV = "SOCIAL_BRAIN_TASK_TOKEN"
 DEFAULT_AUTH_USERNAME = DEFAULT_WEB_AUTH_USERNAME
 SESSION_COOKIE = "social_brain_session"
 SESSION_TTL_SECONDS = 60 * 60 * 12
 AUTH_REQUIRED_MESSAGE = "Authentication required."
 AUTH_CONFIG_MESSAGE = "Social Brain login is not configured. Run set-web-login once."
+TASK_AUTH_CONFIG_MESSAGE = "Social Brain task token is not configured. Set SOCIAL_BRAIN_TASK_TOKEN."
+TASK_AUTH_REQUIRED_MESSAGE = "Task authentication required."
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -104,6 +108,11 @@ def make_handler(db_path: Path):
                 finally:
                     store.close()
                 return
+            if self.path.startswith("/api/tasks/"):
+                if not self._require_task_auth():
+                    return
+                self._serve_api("GET")
+                return
             if not self._require_auth():
                 return
             if self.path == "/" or self.path.startswith("/static/"):
@@ -117,6 +126,11 @@ def make_handler(db_path: Path):
                 return
             if self.path.startswith("/logout"):
                 self._redirect("/login", extra_headers=[expired_session_cookie_header()])
+                return
+            if self.path.startswith("/api/tasks/"):
+                if not self._require_task_auth():
+                    return
+                self._serve_api("POST")
                 return
             if not self._require_auth():
                 return
@@ -145,6 +159,15 @@ def make_handler(db_path: Path):
                 return False
             finally:
                 store.close()
+
+        def _require_task_auth(self) -> bool:
+            if not os.getenv(TASK_TOKEN_ENV):
+                self._serve_json(503, {"error": TASK_AUTH_CONFIG_MESSAGE})
+                return False
+            if request_has_task_token(self.headers):
+                return True
+            self._serve_json(401, {"error": TASK_AUTH_REQUIRED_MESSAGE})
+            return False
 
         def _serve_api(self, method: str) -> None:
             body = self.rfile.read(int(self.headers.get("Content-Length", "0") or 0))
@@ -266,6 +289,22 @@ def request_is_authenticated(headers: Mapping[str, str], store: SQLiteStore) -> 
         return False
     morsel = cookie.get(SESSION_COOKIE)
     return validate_session_cookie_value(store, morsel.value if morsel else None)
+
+
+def request_has_task_token(headers: Mapping[str, str]) -> bool:
+    expected = os.getenv(TASK_TOKEN_ENV, "")
+    if not expected:
+        return False
+    candidate = task_token_from_headers(headers)
+    return bool(candidate) and hmac.compare_digest(candidate, expected)
+
+
+def task_token_from_headers(headers: Mapping[str, str]) -> str:
+    authorization = headers.get("Authorization", "")
+    scheme, _, value = authorization.partition(" ")
+    if scheme.lower() == "bearer" and value:
+        return value.strip()
+    return headers.get("X-Social-Brain-Task-Token", "").strip()
 
 
 def session_signature(payload_text: str, secret: str) -> str:
@@ -482,29 +521,17 @@ def route_api(
             "warnings": result.warnings,
         }
     if method == "POST" and parts == ["api", "publish-due"]:
-        client = XWriteClient.from_env()
-        results = publish_due_x(
-            store,
-            client,
-            now=clean_optional(payload.get("now")),
-            limit=int(payload.get("limit") or 20),
-            author=str(payload.get("author") or "Gavin"),
-        )
-        return 200, {"results": [publish_result_payload(result) for result in results]}
+        return 200, publish_due_payload(store, payload)
     if method == "GET" and parts == ["api", "analytics"]:
         return 200, analytics_payload(store)
     if method == "POST" and parts == ["api", "sync-metrics"]:
-        client = XApiClient.from_env()
-        result = sync_x_metrics(
-            store,
-            client,
-            post_id=clean_optional(payload.get("post_id")),
-            x_post_id=clean_optional(payload.get("x_post_id")),
-            since_days=optional_int(payload.get("since_days")),
-            limit=int(payload.get("limit") or 100),
-            dry_run=bool(payload.get("dry_run", False)),
-        )
-        return 200, {"result": asdict(result)}
+        return 200, sync_metrics_payload(store, payload)
+    if method == "POST" and parts == ["api", "tasks", "publish-due-x"]:
+        return 200, publish_due_payload(store, payload)
+    if method == "POST" and parts == ["api", "tasks", "sync-x-metrics"]:
+        return 200, sync_metrics_payload(store, payload)
+    if method == "POST" and parts == ["api", "tasks", "weekly-report-x"]:
+        return 200, weekly_report_payload(store, payload)
     if method == "GET" and parts == ["api", "trends"]:
         trends = store.list_trends(
             topic=one(query, "topic"),
@@ -523,6 +550,41 @@ def route_api(
         trend = store.save_trend_item(trend_from_payload(payload, existing=existing))
         return 200, {"item": trend_payload(trend)}
     return 404, {"error": "Not found."}
+
+
+def publish_due_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    client = XWriteClient.from_env()
+    results = publish_due_x(
+        store,
+        client,
+        now=clean_optional(payload.get("now")),
+        limit=int(payload.get("limit") or 20),
+        author=str(payload.get("author") or "Gavin"),
+    )
+    return {"results": [publish_result_payload(result) for result in results]}
+
+
+def sync_metrics_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    client = XApiClient.from_env()
+    result = sync_x_metrics(
+        store,
+        client,
+        post_id=clean_optional(payload.get("post_id")),
+        x_post_id=clean_optional(payload.get("x_post_id")),
+        since_days=optional_int(payload.get("since_days")),
+        limit=int(payload.get("limit") or 100),
+        dry_run=bool(payload.get("dry_run", False)),
+    )
+    return {"result": asdict(result)}
+
+
+def weekly_report_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "report": weekly_report_text(
+            store,
+            since_days=int(payload.get("since_days") or 7),
+        )
+    }
 
 
 def update_queue_item(store: SQLiteStore, queue_id: str, payload: dict[str, Any]) -> ContentQueueItem:
@@ -604,6 +666,7 @@ def status_payload() -> dict[str, Any]:
         "provider_configured": bool(os.getenv("SOCIAL_BRAIN_PROVIDER")),
         "x_read_configured": bool(os.getenv("X_BEARER_TOKEN")),
         "x_write_configured": has_x_write_credentials(),
+        "task_trigger_configured": bool(os.getenv(TASK_TOKEN_ENV)),
     }
 
 

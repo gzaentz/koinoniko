@@ -14,7 +14,7 @@ from leadpoet_social_brain.analytics import build_analytics_summary
 from leadpoet_social_brain.content_queue import plan_week_x, post_queue_item_x
 from leadpoet_social_brain.cli import main as cli_main
 from leadpoet_social_brain.context import ContextManager
-from leadpoet_social_brain.core.models import ContentQueueItem, DraftRequest, EngagementMetrics, TrendItem, utc_now
+from leadpoet_social_brain.core.models import ContentQueueItem, DraftRequest, EngagementMetrics, SocialPost, TrendItem, utc_now
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
 from leadpoet_social_brain.openrouter_provider import OpenRouterProvider, create_provider
@@ -37,9 +37,14 @@ from leadpoet_social_brain.storage.sqlite_store import (
 from leadpoet_social_brain.web.app import (
     DEFAULT_AUTH_USERNAME,
     SESSION_COOKIE,
+    TASK_AUTH_CONFIG_MESSAGE,
+    TASK_AUTH_REQUIRED_MESSAGE,
+    TASK_TOKEN_ENV,
     auth_is_configured,
     create_session_cookie_value,
     handle_api_request,
+    make_handler,
+    request_has_task_token,
     request_is_authenticated,
     validate_session_cookie_value,
     verify_credentials,
@@ -100,6 +105,32 @@ class FakeXWriteClient:
 class SocialBrainTest(unittest.TestCase):
     def make_store(self, tmpdir: str) -> SQLiteStore:
         return SQLiteStore(Path(tmpdir) / "brain.sqlite3")
+
+    def handler_guard(
+        self,
+        db_path: Path,
+        path: str,
+        headers: dict[str, str] | None = None,
+        guard: str = "_require_auth",
+    ) -> tuple[bool, dict[str, object]]:
+        handler_class = make_handler(db_path)
+        handler = object.__new__(handler_class)
+        handler.path = path
+        handler.headers = headers or {}
+        captured: dict[str, object] = {}
+
+        def serve_json(status: int, payload: dict[str, object]) -> None:
+            captured["status"] = status
+            captured["payload"] = payload
+
+        def redirect(location: str, *, extra_headers=None) -> None:
+            captured["status"] = 303
+            captured["location"] = location
+            captured["headers"] = extra_headers or []
+
+        handler._serve_json = serve_json
+        handler._redirect = redirect
+        return getattr(handler, guard)(), captured
 
     def test_sqlite_store_resolves_env_db_and_sets_pragmas(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -167,6 +198,18 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(request_is_authenticated({"Cookie": f"{SESSION_COOKIE}={token}"}, store))
             self.assertFalse(request_is_authenticated({"Cookie": f"{SESSION_COOKIE}=tampered"}, store))
             store.close()
+
+    def test_task_auth_uses_bearer_or_task_token_header(self):
+        with patch.dict(os.environ, {TASK_TOKEN_ENV: "secret-task-token"}, clear=False):
+            self.assertTrue(
+                request_has_task_token({"Authorization": "Bearer secret-task-token"})
+            )
+            self.assertTrue(
+                request_has_task_token({"X-Social-Brain-Task-Token": "secret-task-token"})
+            )
+            self.assertFalse(
+                request_has_task_token({"Authorization": "Bearer wrong-token"})
+            )
 
     def test_web_auth_fails_closed_without_stored_user(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -629,6 +672,105 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(saved.status, "approved")
             self.assertEqual(versions[0].text, "Draft text")
             store.close()
+
+    def test_web_mutation_endpoint_requires_login(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.save_web_auth_user(DEFAULT_AUTH_USERNAME, "test-password")
+            item = store.save_content_queue_item(
+                ContentQueueItem(
+                    text="Do not approve without a session.",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-06-30T10:00:00-04:00",
+                )
+            )
+            store.close()
+
+            allowed, captured = self.handler_guard(
+                db_path,
+                f"/api/queue/{item.id}/approve",
+            )
+
+            self.assertFalse(allowed)
+            self.assertEqual(captured["status"], 401)
+            self.assertEqual(captured["payload"]["error"], "Authentication required.")
+            store = SQLiteStore(db_path)
+            saved = store.get_content_queue_item(item.id)
+            self.assertEqual(saved.status, "needs_review")
+            store.close()
+
+    def test_task_endpoint_requires_configured_token(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+
+            with patch.dict(os.environ, {TASK_TOKEN_ENV: ""}, clear=False):
+                allowed, captured = self.handler_guard(
+                    db_path,
+                    "/api/tasks/weekly-report-x",
+                    guard="_require_task_auth",
+                )
+            self.assertFalse(allowed)
+            self.assertEqual(captured["status"], 503)
+            self.assertEqual(captured["payload"]["error"], TASK_AUTH_CONFIG_MESSAGE)
+
+            with patch.dict(os.environ, {TASK_TOKEN_ENV: "secret-task-token"}, clear=False):
+                allowed, captured = self.handler_guard(
+                    db_path,
+                    "/api/tasks/weekly-report-x",
+                    guard="_require_task_auth",
+                )
+            self.assertFalse(allowed)
+            self.assertEqual(captured["status"], 401)
+            self.assertEqual(captured["payload"]["error"], TASK_AUTH_REQUIRED_MESSAGE)
+
+    def test_task_endpoint_weekly_report_uses_token_and_post_only(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.save_post(
+                SocialPost(
+                    platform="x",
+                    text="Sales AI only works when it knows why this buyer cares today.",
+                    url="https://x.com/gavin/status/taskweekly1",
+                    published_at=utc_now(),
+                    author="Gavin",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    status="published",
+                )
+            )
+            store.close()
+
+            with patch.dict(os.environ, {TASK_TOKEN_ENV: "secret-task-token"}, clear=False):
+                allowed, captured = self.handler_guard(
+                    db_path,
+                    "/api/tasks/weekly-report-x",
+                    {"Authorization": "Bearer secret-task-token"},
+                    guard="_require_task_auth",
+                )
+                self.assertTrue(allowed)
+                self.assertEqual(captured, {})
+
+                status, payload = handle_api_request(
+                    "GET",
+                    "/api/tasks/weekly-report-x",
+                    db_path=db_path,
+                )
+                self.assertEqual(status, 404)
+
+                status, payload = handle_api_request(
+                    "POST",
+                    "/api/tasks/weekly-report-x",
+                    json.dumps({"since_days": 30}),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 200)
+            self.assertIn("Weekly X report: last 30 days", payload["report"])
+            self.assertIn("sales LLMs", payload["report"])
 
     def test_web_llm_edit_does_not_overwrite_until_accepted(self):
         with tempfile.TemporaryDirectory() as tmpdir:
