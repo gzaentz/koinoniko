@@ -388,7 +388,9 @@ function topicControl(post, context) {
 function renderTopicOptions() {
   const list = $("topicOptions");
   if (!list) return;
-  list.innerHTML = topicOptions().map((topic) => `<option value="${escapeAttr(topic)}"></option>`).join("");
+  list.innerHTML = topicOptions()
+    .map((topic) => `<option value="${escapeAttr(topic)}" label="${escapeAttr(topicLabel(topic))}"></option>`)
+    .join("");
 }
 
 function topicOptions() {
@@ -587,7 +589,7 @@ function dashboardTrendRow(item) {
   return `
     <article class="trend-row" role="button" tabindex="0" onclick='openTrendDetails(${jsArg(item.id)})' onkeydown='openTrendDetailsFromKey(event, ${jsArg(item.id)})'>
       <div class="meta-row">
-        <span>${escapeHtml(label(item.topic || ""))}</span>
+        <span>${escapeHtml(topicLabel(item.topic || ""))}</span>
         ${item.source_url ? `<a href="${escapeAttr(item.source_url)}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">Source</a>` : ""}
       </div>
       <h3>${escapeHtml(item.title)}</h3>
@@ -613,7 +615,7 @@ window.openTrendDetails = (id) => {
   $("trendModalTitle").textContent = trend.title || "Trend details";
   $("trendModalBody").innerHTML = `
     <div class="detail-grid">
-      ${detail("Topic", label(trend.topic || "Unknown"))}
+      ${detail("Topic", topicLabel(trend.topic || "Unknown"))}
       ${detail("Urgency", label(trend.urgency || "medium"))}
       ${detail("Type", label(trend.source_type || "trend"))}
       ${detail("Date", formatDateTime(trend.date))}
@@ -741,7 +743,7 @@ function queueCard(item, column) {
       <button class="card-open" onclick='openQueueDetail(${jsArg(item.id)})'>
         <div class="meta-row">
           <span class="tag">${escapeHtml(label(item.status))}</span>
-          <span>${escapeHtml(item.topic || "No topic")}</span>
+          <span>${escapeHtml(topicLabel(item.topic || "No topic"))}</span>
           <span>${escapeHtml(label(item.post_type || "post"))}</span>
           ${quality ? `<span>${escapeHtml(quality)}</span>` : ""}
           ${trend ? `<span>${escapeHtml(trend)}</span>` : ""}
@@ -1164,8 +1166,8 @@ function renderVoiceTopicOptions() {
   const current = select.value || "all";
   const topics = [...new Set((state.voice?.examples || []).map((post) => post.topic).filter(Boolean))].sort();
   select.innerHTML = [
-    `<option value="all">All topics</option>`,
-    ...topics.map((topic) => `<option value="${escapeAttr(topic)}">${escapeHtml(topic)}</option>`),
+    `<option value="all">All Topics</option>`,
+    ...topics.map((topic) => `<option value="${escapeAttr(topic)}">${escapeHtml(topicLabel(topic))}</option>`),
   ].join("");
   select.value = topics.includes(current) ? current : "all";
 }
@@ -1206,7 +1208,7 @@ function voiceExampleCard(post, { removable = false } = {}) {
       <div class="voice-card-main">
         <div class="meta-row">
           <span>${escapeHtml(formatDate(post.published_at))}</span>
-          <span>${escapeHtml(post.topic || "No topic")}</span>
+          <span>${escapeHtml(topicLabel(post.topic || "No topic"))}</span>
           <span>${escapeHtml(label(post.post_type || "post"))}</span>
         </div>
         <h3>${escapeHtml(post.summary || summarize(post.text, 110))}</h3>
@@ -1235,7 +1237,7 @@ function voiceSuggestionCard(post) {
       <div class="voice-card-main">
         <div class="meta-row">
           <span>${escapeHtml(post.reason || "Suggested by performance")}</span>
-          <span>${escapeHtml(post.topic || "No topic")}</span>
+          <span>${escapeHtml(topicLabel(post.topic || "No topic"))}</span>
         </div>
         <h3>${escapeHtml(post.summary || summarize(post.text, 110))}</h3>
       </div>
@@ -1325,7 +1327,7 @@ function trendCard(item) {
     <article class="trend-card" role="button" tabindex="0" onclick='openTrendDetails(${jsArg(item.id)})' onkeydown='openTrendDetailsFromKey(event, ${jsArg(item.id)})'>
       <div class="meta-row">
         <span class="tag">${escapeHtml(item.urgency || "medium")}</span>
-        <span>${escapeHtml(label(item.topic || ""))}</span>
+        <span>${escapeHtml(topicLabel(item.topic || ""))}</span>
         <span>${escapeHtml(label(item.source_type || ""))}</span>
       </div>
       <h3>${escapeHtml(item.title)}</h3>
@@ -1637,7 +1639,17 @@ function summarize(text, maxLength = 96) {
 }
 
 function label(value) {
-  const acronyms = new Set(["ai", "api", "cta", "er", "gtm", "llm", "llms", "url", "x"]);
+  const acronyms = {
+    ai: "AI",
+    api: "API",
+    cta: "CTA",
+    er: "ER",
+    gtm: "GTM",
+    llm: "LLM",
+    llms: "LLMs",
+    url: "URL",
+    x: "X",
+  };
   return String(value || "")
     .replaceAll("_", " ")
     .replaceAll("-", " ")
@@ -1645,7 +1657,7 @@ function label(value) {
     .filter(Boolean)
     .map((word) => {
       const normalized = word.toLowerCase();
-      if (acronyms.has(normalized)) return normalized.toUpperCase();
+      if (acronyms[normalized]) return acronyms[normalized];
       return `${normalized.slice(0, 1).toUpperCase()}${normalized.slice(1)}`;
     })
     .join(" ");
