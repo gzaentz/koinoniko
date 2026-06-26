@@ -528,6 +528,19 @@ main {
   gap: 7px;
 }
 
+.trend-row[role="button"],
+.trend-card[role="button"] {
+  cursor: pointer;
+}
+
+.trend-row[role="button"]:hover,
+.trend-row[role="button"]:focus-visible,
+.trend-card[role="button"]:hover,
+.trend-card[role="button"]:focus-visible {
+  background: var(--soft);
+  outline: none;
+}
+
 .trend-refresh-card {
   display: grid;
   gap: 12px;
@@ -551,6 +564,31 @@ main {
 
 .trend-row strong {
   color: var(--ink);
+}
+
+.trend-detail-section {
+  display: grid;
+  gap: 8px;
+}
+
+.bullet-list {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 8px;
+}
+
+.bullet-list.compact {
+  gap: 5px;
+}
+
+.source-text {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  color: var(--ink);
+  padding: 14px;
+  white-space: pre-wrap;
 }
 
 .signal-list p {
@@ -700,14 +738,75 @@ main {
 
 .account-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   align-items: start;
+  max-width: 1040px;
 }
 
+.account-section .panel-header p {
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.connection-list,
+.sync-table,
 .account-grid {
   display: grid;
-  gap: 12px;
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.connection-row,
+.sync-row,
+.security-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 14px 16px;
+  background: var(--white);
+  border-bottom: 1px solid var(--line);
+}
+
+.connection-row:last-child,
+.sync-row:last-child {
+  border-bottom: 0;
+}
+
+.connection-row p,
+.sync-row p,
+.account-security p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.sync-row > span {
+  color: var(--muted);
+  font-size: 13px;
+  text-align: right;
+}
+
+.status-badge {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 9px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.status-badge.connected {
+  color: var(--ink);
+  background: var(--soft);
+}
+
+.status-badge.not_connected,
+.status-badge.not_configured {
+  color: var(--muted);
 }
 
 .sync-actions {
@@ -731,6 +830,16 @@ main {
 .account-card span,
 .account-card p {
   color: var(--muted);
+}
+
+.account-security {
+  display: grid;
+  gap: 10px;
+}
+
+.account-security code {
+  font: inherit;
+  font-weight: 700;
 }
 
 .settings-form,

@@ -62,7 +62,7 @@ from leadpoet_social_brain.storage.sqlite_store import (
     SQLiteStore,
     resolve_db_path,
 )
-from leadpoet_social_brain.trend_scout import refresh_web_trends, web_trend_groups
+from leadpoet_social_brain.trend_scout import refresh_web_trends, scrapingdog_configured, web_trend_groups
 
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -1178,7 +1178,7 @@ def status_payload(store: SQLiteStore | None = None) -> dict[str, Any]:
         model_source = "OPENROUTER_MODEL"
     else:
         model_source = "missing"
-    return {
+    payload = {
         "provider_configured": bool(os.getenv("SOCIAL_BRAIN_PROVIDER")),
         "provider_path": os.getenv("SOCIAL_BRAIN_PROVIDER") or "",
         "openrouter_api_key_configured": bool(os.getenv("OPENROUTER_API_KEY")),
@@ -1187,16 +1187,24 @@ def status_payload(store: SQLiteStore | None = None) -> dict[str, Any]:
         "model_routing": resolve_model_routing(store).as_dict() if store else {},
         "x_read_configured": bool(os.getenv("X_BEARER_TOKEN")),
         "x_write_configured": has_x_write_credentials(),
+        "scrapingdog_configured": scrapingdog_configured(),
         "task_trigger_configured": bool(os.getenv(TASK_TOKEN_ENV)),
         "daily_sync_configured": bool(os.getenv(TASK_SECRET_ENV)),
     }
+    payload["connections"] = account_connections_payload(payload)
+    return payload
 
 
 def account_payload(store: SQLiteStore) -> dict[str, Any]:
     routing = resolve_model_routing(store)
+    status = status_payload(store)
+    sync = account_sync_payload(store)
     return {
-        "status": status_payload(store),
-        "sync": account_sync_payload(store),
+        "status": status,
+        "connections": account_connections_payload(status),
+        "sync": sync,
+        "sync_status": account_sync_status_payload(sync),
+        "security": account_security_payload(store),
         "stats": x_account_stats_payload(store),
         "settings": {
             "llm_model": account_model_settings(store)["default"],
@@ -1209,10 +1217,58 @@ def account_payload(store: SQLiteStore) -> dict[str, Any]:
 
 
 def account_status_payload(store: SQLiteStore) -> dict[str, Any]:
+    status = status_payload(store)
+    sync = account_sync_payload(store)
     return {
-        "status": status_payload(store),
-        "sync": account_sync_payload(store),
+        "status": status,
+        "connections": account_connections_payload(status),
+        "sync": sync,
+        "sync_status": account_sync_status_payload(sync),
+        "security": account_security_payload(store),
         "stats": x_account_stats_payload(store),
+    }
+
+
+def account_connections_payload(status: dict[str, Any]) -> dict[str, dict[str, str]]:
+    return {
+        "provider": connection_payload(
+            "connected" if status.get("provider_configured") else "not_connected",
+            "LLM Provider",
+            "Used for post generation and AI rewrites.",
+        ),
+        "openrouter": connection_payload(
+            "connected" if status.get("openrouter_api_key_configured") else "not_connected",
+            "OpenRouter",
+            "Routes model calls for Standard and Best Version generation.",
+        ),
+        "x_read": connection_payload(
+            "connected" if status.get("x_read_configured") else "not_connected",
+            "X Read",
+            "Imports posts and refreshes public metrics.",
+        ),
+        "x_write": connection_payload(
+            "connected" if status.get("x_write_configured") else "not_connected",
+            "X Write",
+            "Publishes approved scheduled posts.",
+        ),
+        "scrapingdog": connection_payload(
+            "connected" if status.get("scrapingdog_configured") else "not_connected",
+            "ScrapingDog",
+            "Trend source used to refresh AI, sales, and lead gen trends.",
+        ),
+        "daily_sync": connection_payload(
+            "connected" if status.get("daily_sync_configured") else "not_configured",
+            "Daily Sync",
+            "Checks X for new posts and metrics through protected cron.",
+        ),
+    }
+
+
+def connection_payload(status: str, label: str, description: str) -> dict[str, str]:
+    return {
+        "status": status,
+        "label": label,
+        "description": description,
     }
 
 
@@ -1224,6 +1280,37 @@ def account_sync_payload(store: SQLiteStore) -> dict[str, Any]:
         X_DAILY_SYNC_KEY: sync_metadata_payload(metadata.get(X_DAILY_SYNC_KEY)),
         TRENDS_SYNC_KEY: sync_metadata_payload(metadata.get(TRENDS_SYNC_KEY)),
     }
+
+
+def account_sync_status_payload(sync: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "last_x_post_sync": sync[X_POSTS_SYNC_KEY]["last_completed_at"],
+        "last_x_metrics_sync": sync[X_METRICS_SYNC_KEY]["last_completed_at"],
+        "last_trend_refresh": sync[TRENDS_SYNC_KEY]["last_completed_at"],
+        "latest_error": latest_sync_error(sync),
+    }
+
+
+def latest_sync_error(sync: dict[str, Any]) -> str | None:
+    for key in [TRENDS_SYNC_KEY, X_DAILY_SYNC_KEY, X_POSTS_SYNC_KEY, X_METRICS_SYNC_KEY]:
+        item = sync.get(key) or {}
+        if item.get("error_message"):
+            return str(item["error_message"])
+    return None
+
+
+def account_security_payload(store: SQLiteStore) -> dict[str, Any]:
+    return {
+        "username": first_web_auth_username(store) or DEFAULT_AUTH_USERNAME,
+        "login_configured": store.has_web_auth_user(),
+    }
+
+
+def first_web_auth_username(store: SQLiteStore) -> str | None:
+    row = store.conn.execute(
+        "SELECT username FROM web_auth_users ORDER BY updated_at DESC LIMIT 1"
+    ).fetchone()
+    return str(row["username"]) if row else None
 
 
 def x_account_stats_payload(store: SQLiteStore) -> dict[str, Any]:

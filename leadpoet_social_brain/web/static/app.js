@@ -8,6 +8,7 @@ const state = {
   account: null,
   reviewItems: [],
   scheduledItems: [],
+  savedTrends: [],
   draggedQueueId: "",
   queueDetail: null,
   recentPostsSort: { key: "date", direction: "desc" },
@@ -384,15 +385,130 @@ function renderTrendList(targetId, trends, emptyText) {
 
 function dashboardTrendRow(item) {
   return `
-    <article class="trend-row">
+    <article class="trend-row" role="button" tabindex="0" onclick='openTrendDetails(${jsArg(item.id)})' onkeydown='openTrendDetailsFromKey(event, ${jsArg(item.id)})'>
       <div class="meta-row">
         <span>${escapeHtml(item.topic || "")}</span>
-        ${item.source_url ? `<a href="${escapeAttr(item.source_url)}" target="_blank" rel="noreferrer">Source</a>` : ""}
+        ${item.source_url ? `<a href="${escapeAttr(item.source_url)}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">Source</a>` : ""}
       </div>
       <h3>${escapeHtml(item.title)}</h3>
       <p>${escapeHtml(item.summary || "")}</p>
     </article>
   `;
+}
+
+window.openTrendDetailsFromKey = (event, id) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  window.openTrendDetails(id);
+};
+
+window.openTrendDetails = (id) => {
+  const trend = findTrendItem(id);
+  if (!trend) return;
+  const raw = parseTrendRawData(trend.raw_text);
+  const bullets = trendDetailBullets(trend);
+  const metadata = trendSourceMetadata(trend, raw);
+  const sourceText = trendSourceText(raw);
+
+  $("trendModalTitle").textContent = trend.title || "Trend details";
+  $("trendModalBody").innerHTML = `
+    <div class="detail-grid">
+      ${detail("Topic", trend.topic || "Unknown")}
+      ${detail("Urgency", label(trend.urgency || "medium"))}
+      ${detail("Type", label(trend.source_type || "trend"))}
+      ${detail("Date", formatDateTime(trend.date))}
+      ${detail("Source", trend.source_author || sourceValue(raw, ["sourceCommonName", "domain", "source"]) || "Unknown")}
+    </div>
+    ${bullets.length ? `<section class="trend-detail-section"><h3>Details</h3><ul class="bullet-list">${bullets.map(trendBullet).join("")}</ul></section>` : ""}
+    ${sourceText ? `<section class="trend-detail-section"><h3>Stored Source Detail</h3><div class="source-text">${escapeHtml(sourceText)}</div></section>` : ""}
+    ${metadata.length ? `<section class="trend-detail-section"><h3>Source Metadata</h3><ul class="bullet-list compact">${metadata.map(trendBullet).join("")}</ul></section>` : ""}
+    <div class="actions left">
+      ${trend.source_url ? `<a class="button-link" href="${escapeAttr(trend.source_url)}" target="_blank" rel="noreferrer">Open Source</a>` : ""}
+    </div>
+  `;
+  openModal("trendModal");
+};
+
+function findTrendItem(id) {
+  const groups = state.dashboard?.trend_groups || {};
+  return [
+    ...(groups.daily || []),
+    ...(groups.weekly || []),
+    ...(state.dashboard?.trends || []),
+    ...(state.savedTrends || []),
+  ].find((item) => item.id === id);
+}
+
+function trendDetailBullets(trend) {
+  return [
+    ["Summary", trend.summary],
+    ["Why it matters", trend.why_it_matters],
+    ["Leadpoet angle", trend.leadpoet_angle],
+    ["Suggested hook", trend.suggested_hooks],
+    ["Notes", trend.engagement_notes],
+  ].filter(([, value]) => cleanString(value));
+}
+
+function trendSourceMetadata(trend, raw) {
+  const breakdown = sourceValue(raw, ["trend_breakdown_text"]) || sourceListValue(raw?.trend_breakdown);
+  return [
+    ["Provider", providerLabel(sourceValue(raw, ["provider"]))],
+    ["Source URL", trend.source_url],
+    ["Source author", trend.source_author],
+    ["Search volume", sourceValue(raw, ["search_volume"])],
+    ["Increase", sourceValue(raw, ["increase_percentage"])],
+    ["Trend breakdown", breakdown],
+    ["Provider date", sourceValue(raw, ["date", "seendate", "start_timestamp", "start_date"])],
+  ].filter(([, value]) => cleanString(value));
+}
+
+function trendSourceText(raw) {
+  return sourceValue(raw, ["snippet", "description", "summary", "trend_breakdown_text"]);
+}
+
+function trendBullet([labelText, value]) {
+  return `<li><strong>${escapeHtml(labelText)}:</strong> ${escapeHtml(cleanString(value))}</li>`;
+}
+
+function parseTrendRawData(value) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function sourceValue(raw, keys) {
+  if (!raw) return "";
+  for (const key of keys) {
+    const value = raw[key];
+    if (typeof value === "number") return String(value);
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const nested = cleanString(value.name || value.title || value.domain);
+      if (nested) return nested;
+    }
+    const cleaned = cleanString(value);
+    if (cleaned) return cleaned;
+  }
+  return "";
+}
+
+function sourceListValue(value) {
+  return Array.isArray(value) ? value.map(cleanString).filter(Boolean).join(", ") : "";
+}
+
+function providerLabel(value) {
+  const provider = cleanString(value);
+  if (provider === "scrapingdog_trending_now") return "Scrapingdog Google Trends";
+  if (provider === "scrapingdog_google_news") return "Scrapingdog Google News";
+  if (provider === "gdelt") return "GDELT";
+  return provider;
+}
+
+function cleanString(value) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
 function renderDashboardSyncLine() {
@@ -744,7 +860,7 @@ async function syncPosts() {
   });
   const result = payload.result || {};
   showMessage(`X posts synced. Imported ${result.imported || 0}. Duplicates: ${result.duplicates || 0}.`);
-  await refresh();
+  await refreshAfterAccountAction();
 }
 
 async function syncMetrics() {
@@ -754,7 +870,7 @@ async function syncMetrics() {
   });
   const result = payload.result || {};
   showMessage(`Metrics updated: ${result.updated || 0}. Skipped: ${result.skipped || 0}.`);
-  await refresh();
+  await refreshAfterAccountAction();
 }
 
 async function syncAllXData() {
@@ -774,7 +890,25 @@ async function syncAllXData() {
   const posts = payload.posts || {};
   const metrics = payload.metrics || {};
   showMessage(`X data synced. Imported ${posts.imported || 0}; metrics updated ${metrics.updated || 0}.`);
+  await refreshAfterAccountAction();
+}
+
+async function refreshTrendsFromAccount() {
+  const payload = await api("/api/trends/refresh", {
+    method: "POST",
+    body: JSON.stringify({ limit: 5 }),
+  });
+  const daily = payload.trend_groups?.daily?.length || 0;
+  const weekly = payload.trend_groups?.weekly?.length || 0;
+  showMessage(`Trends refreshed. Daily ${daily}; weekly ${weekly}.`);
+  await refreshAfterAccountAction();
+}
+
+async function refreshAfterAccountAction() {
   await refresh();
+  if (state.view === "account") {
+    await loadAccount();
+  }
 }
 
 async function refreshTopbar() {
@@ -802,14 +936,15 @@ async function publishDue() {
 
 async function loadTrends() {
   const payload = await api("/api/trends?limit=100&status=unused");
-  $("trendList").innerHTML = payload.items.length
-    ? payload.items.map(trendCard).join("")
+  state.savedTrends = payload.items || [];
+  $("trendList").innerHTML = state.savedTrends.length
+    ? state.savedTrends.map(trendCard).join("")
     : `<p class="muted">No saved trends yet. The scheduled trend refresh will add current items.</p>`;
 }
 
 function trendCard(item) {
   return `
-    <article class="trend-card">
+    <article class="trend-card" role="button" tabindex="0" onclick='openTrendDetails(${jsArg(item.id)})' onkeydown='openTrendDetailsFromKey(event, ${jsArg(item.id)})'>
       <div class="meta-row">
         <span class="tag">${escapeHtml(item.urgency || "medium")}</span>
         <span>${escapeHtml(item.topic || "")}</span>
@@ -821,12 +956,14 @@ function trendCard(item) {
       <div class="actions left">
         <button class="secondary" onclick='markTrend(event, ${jsArg(item.id)}, "used")'>Mark used</button>
         <button class="quiet-button" onclick='markTrend(event, ${jsArg(item.id)}, "skipped")'>Ignore</button>
+        ${item.source_url ? `<a href="${escapeAttr(item.source_url)}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">Source</a>` : ""}
       </div>
     </article>
   `;
 }
 
 window.markTrend = (event, id, status) => {
+  event.stopPropagation();
   runButton(event.currentTarget, "Saving...", async () => {
     await api(`/api/trends/${encodeURIComponent(id)}`, {
       method: "PATCH",
@@ -848,23 +985,24 @@ function renderAccount() {
   const status = account.status || state.status || {};
   const settings = account.settings || {};
   const sync = account.sync || {};
+  const syncStatus = account.sync_status || {};
   const stats = account.stats || {};
+  const connections = account.connections || status.connections || fallbackConnections(status);
   $("accountStatusGrid").innerHTML = [
-    statusCard("Provider", status.provider_configured, status.provider_configured ? "Connected" : "Not connected"),
-    statusCard("OpenRouter key", status.openrouter_api_key_configured, status.openrouter_api_key_configured ? "Connected" : "Not connected"),
-    statusCard("Model", Boolean(status.llm_model), status.llm_model ? `${status.llm_model} (${status.llm_model_source})` : "No model selected"),
-    statusCard("X read", status.x_read_configured, status.x_read_configured ? "Imports and metrics are available" : "Imports and metrics are not connected"),
-    statusCard("X write", status.x_write_configured, status.x_write_configured ? "Posting is available" : "Posting is not connected"),
-    statusCard("Daily sync", status.daily_sync_configured, status.daily_sync_configured ? "Enabled for protected cron calls" : "Not configured"),
+    connectionRow("provider", connections.provider),
+    connectionRow("openrouter", connections.openrouter),
+    connectionRow("x_read", connections.x_read),
+    connectionRow("x_write", connections.x_write),
+    connectionRow("scrapingdog", connections.scrapingdog),
+    connectionRow("daily_sync", connections.daily_sync),
   ].join("");
   $("accountSyncGrid").innerHTML = [
-    syncInfoCard("Last X post sync", sync.x_posts_sync),
-    syncInfoCard("Last X metrics sync", sync.x_metrics_sync),
-    syncInfoCard("Last daily sync", sync.x_daily_sync),
-    syncInfoCard("Last trend refresh", sync.trends_sync),
-    statusCard("Total X posts stored", true, String(stats.total_x_posts_stored || 0)),
-    statusCard("Latest imported X post", Boolean(stats.latest_imported_x_post_date), stats.latest_imported_x_post_date ? formatDateTime(stats.latest_imported_x_post_date) : "No X posts stored yet"),
-    statusCard("Latest sync error", !(latestSyncError(sync)), latestSyncError(sync) || "None"),
+    syncRow("Last X post sync", sync.x_posts_sync, "New posts imported from X"),
+    syncRow("Last X metrics sync", sync.x_metrics_sync, "Fresh public metric snapshots"),
+    syncRow("Last trend refresh", sync.trends_sync, "Daily and weekly trend context"),
+    syncPlainRow("Total X posts stored", String(stats.total_x_posts_stored || 0), "Stored authored X posts"),
+    syncPlainRow("Latest imported X post", stats.latest_imported_x_post_date ? formatDateTime(stats.latest_imported_x_post_date) : "None yet", "Newest stored X post"),
+    syncPlainRow("Latest sync error", syncStatus.latest_error || latestSyncError(sync) || "None", "Most recent sync issue"),
   ].join("");
   const models = settings.models || {};
   const effectiveModels = settings.effective_models || {};
@@ -878,21 +1016,86 @@ function renderAccount() {
     `Writer: ${effectiveModels.natural_writer || effectiveModels.default || "provider default"}`,
     `Evaluator: ${effectiveModels.evaluator || effectiveModels.default || "provider default"}`,
   ].join(" · ");
+  const security = account.security || {};
+  $("accountSecurityBlock").innerHTML = `
+    <div class="security-row">
+      <div>
+        <span>Signed in as</span>
+        <strong>${escapeHtml(security.username || "Configured user")}</strong>
+      </div>
+      <form method="post" action="/logout">
+        <button class="secondary" type="submit">Log Out</button>
+      </form>
+    </div>
+    <p class="muted">Change password from the CLI with <code>set-web-login</code>.</p>
+  `;
+  const trendsButton = $("accountRefreshTrendsButton");
+  const scrapingdogStatus = connectionStatus(connections.scrapingdog);
+  trendsButton.disabled = scrapingdogStatus !== "connected";
+  trendsButton.title = trendsButton.disabled ? "Connect ScrapingDog to refresh live trend context." : "Refresh live trend context.";
 }
 
-function statusCard(title, configured, detail) {
+function fallbackConnections(status) {
+  return {
+    provider: {
+      status: status.provider_configured ? "connected" : "not_connected",
+      label: "LLM Provider",
+      description: "Used for post generation and AI rewrites.",
+    },
+    openrouter: {
+      status: status.openrouter_api_key_configured ? "connected" : "not_connected",
+      label: "OpenRouter",
+      description: "Routes model calls for Standard and Best Version generation.",
+    },
+    x_read: {
+      status: status.x_read_configured ? "connected" : "not_connected",
+      label: "X Read",
+      description: "Imports posts and refreshes public metrics.",
+    },
+    x_write: {
+      status: status.x_write_configured ? "connected" : "not_connected",
+      label: "X Write",
+      description: "Publishes approved scheduled posts.",
+    },
+    scrapingdog: {
+      status: status.scrapingdog_configured ? "connected" : "not_connected",
+      label: "ScrapingDog",
+      description: "Trend source used to refresh AI, sales, and lead gen trends.",
+    },
+    daily_sync: {
+      status: status.daily_sync_configured ? "connected" : "not_configured",
+      label: "Daily Sync",
+      description: "Checks X for new posts and metrics through protected cron.",
+    },
+  };
+}
+
+function connectionRow(key, connection) {
+  const item = connection || {};
+  const status = connectionStatus(item);
   return `
-    <article class="account-card">
+    <article class="connection-row">
       <div>
-        <span>${escapeHtml(title)}</span>
-        <strong>${configured ? "set" : "missing"}</strong>
+        <strong>${escapeHtml(item.label || label(key))}</strong>
+        <p>${escapeHtml(item.description || "")}</p>
       </div>
-      <p>${escapeHtml(detail)}</p>
+      <span class="status-badge ${escapeAttr(status)}">${escapeHtml(statusText(status))}</span>
     </article>
   `;
 }
 
-function syncInfoCard(title, sync) {
+function connectionStatus(connection) {
+  return String(connection?.status || "not_connected");
+}
+
+function statusText(status) {
+  if (status === "connected") return "Connected";
+  if (status === "not_configured") return "Not configured";
+  if (status === "needs_setup") return "Needs setup";
+  return "Not connected";
+}
+
+function syncRow(title, sync, description = "") {
   const item = sync || {};
   const summary = item.summary || {};
   const pieces = [];
@@ -904,16 +1107,28 @@ function syncInfoCard(title, sync) {
   if (summary.daily_trends !== undefined) pieces.push(`daily ${summary.daily_trends}`);
   if (summary.weekly_trends !== undefined) pieces.push(`weekly ${summary.weekly_trends}`);
   const detail = [
-    item.last_completed_at ? formatDateTime(item.last_completed_at) : "Never",
+    item.last_completed_at ? `Last synced ${formatDateTime(item.last_completed_at)}` : "Never synced",
     pieces.join(", "),
   ].filter(Boolean).join(" · ");
   return `
-    <article class="account-card">
+    <article class="sync-row">
       <div>
-        <span>${escapeHtml(title)}</span>
-        <strong>${escapeHtml(label(item.status || "not_run"))}</strong>
+        <strong>${escapeHtml(title)}</strong>
+        <p>${escapeHtml(description)}</p>
       </div>
-      <p>${escapeHtml(detail)}</p>
+      <span>${escapeHtml(detail)}</span>
+    </article>
+  `;
+}
+
+function syncPlainRow(title, value, description = "") {
+  return `
+    <article class="sync-row">
+      <div>
+        <strong>${escapeHtml(title)}</strong>
+        <p>${escapeHtml(description)}</p>
+      </div>
+      <span>${escapeHtml(value)}</span>
     </article>
   `;
 }
@@ -1119,6 +1334,7 @@ function setup() {
   $("accountSyncPostsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncPosts));
   $("accountSyncMetricsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncMetrics));
   $("accountSyncAllButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncAllXData));
+  $("accountRefreshTrendsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Refreshing...", refreshTrendsFromAccount));
 
   $("reviewList").addEventListener("dragover", (event) => event.preventDefault());
   $("reviewList").addEventListener("drop", (event) => {

@@ -344,6 +344,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn('id="openTrendsButton"', index_html)
         self.assertNotIn('id="manageTrendsFromPlanButton"', index_html)
         self.assertIn('id="trendsModal"', index_html)
+        self.assertIn('id="trendModal"', index_html)
+        self.assertIn('id="trendModalBody"', index_html)
         self.assertIn('id="postModal"', index_html)
         self.assertIn('id="queueModal"', index_html)
         self.assertIn('id="recentPostsTable"', index_html)
@@ -356,13 +358,14 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn('id="refreshTrendsButton"', index_html)
         self.assertNotIn("Performance Signals", index_html)
         self.assertNotIn("What is working", index_html)
-        self.assertNotIn("Refresh Trends", index_html)
+        self.assertIn("Refresh Trends", index_html)
         self.assertNotIn('id="syncPostsButton"', index_html)
         self.assertNotIn('id="syncMetricsButton"', index_html)
         self.assertIn('id="dashboardSyncLine"', index_html)
         self.assertIn('id="accountSyncPostsButton"', index_html)
         self.assertIn('id="accountSyncMetricsButton"', index_html)
         self.assertIn('id="accountSyncAllButton"', index_html)
+        self.assertIn('id="accountRefreshTrendsButton"', index_html)
         self.assertIn('id="accountSyncGrid"', index_html)
         self.assertIn('id="refreshButton"', index_html)
         self.assertIn('id="accountStrategistModel"', index_html)
@@ -380,7 +383,11 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("/api/account/sync-x-posts", app_js)
         self.assertIn("/api/account/sync-x-metrics", app_js)
         self.assertIn("/api/account/sync-x-all", app_js)
-        self.assertNotIn("/api/trends/refresh", app_js)
+        self.assertIn("/api/trends/refresh", app_js)
+        self.assertIn("connectionRow", app_js)
+        self.assertIn("status-badge", app_js)
+        self.assertIn("openTrendDetails", app_js)
+        self.assertIn("Stored Source Detail", app_js)
         self.assertNotIn('id="addTrendButton"', index_html)
         self.assertIn("/api/publish-due", app_js)
         self.assertIn("/api/plan-week", app_js)
@@ -1625,6 +1632,40 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["stats"]["total_x_posts_stored"], 1)
             self.assertEqual(payload["stats"]["latest_imported_x_post_date"], "2026-06-25T12:00:00+00:00")
             self.assertEqual(payload["sync"]["x_posts_sync"]["status"], "not_run")
+
+    def test_account_status_reports_scrapingdog_connected_without_secret(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+
+            with patch.dict(os.environ, {"SCRAPINGDOG_API_KEY": "secret-scrapingdog-key"}, clear=False):
+                status, payload = handle_api_request("GET", "/api/account/status", db_path=db_path)
+
+            serialized = json.dumps(payload)
+            self.assertEqual(status, 200)
+            self.assertTrue(payload["status"]["scrapingdog_configured"])
+            self.assertEqual(payload["connections"]["scrapingdog"]["status"], "connected")
+            self.assertIn("Trend source", payload["connections"]["scrapingdog"]["description"])
+            self.assertNotIn("secret-scrapingdog-key", serialized)
+            self.assertNotIn("SCRAPINGDOG_API_KEY", serialized)
+
+    def test_account_status_reports_scrapingdog_missing_and_supports_alias(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+
+            with patch.dict(os.environ, {"SCRAPINGDOG_API_KEY": "", "SCRAPING_DOG_API_KEY": ""}, clear=False):
+                status, missing = handle_api_request("GET", "/api/account/status", db_path=db_path)
+            self.assertEqual(status, 200)
+            self.assertFalse(missing["status"]["scrapingdog_configured"])
+            self.assertEqual(missing["connections"]["scrapingdog"]["status"], "not_connected")
+
+            with patch.dict(os.environ, {"SCRAPINGDOG_API_KEY": "", "SCRAPING_DOG_API_KEY": "alias-key"}, clear=False):
+                status, connected = handle_api_request("GET", "/api/account/status", db_path=db_path)
+            self.assertEqual(status, 200)
+            self.assertTrue(connected["status"]["scrapingdog_configured"])
+            self.assertEqual(connected["connections"]["scrapingdog"]["status"], "connected")
+            self.assertNotIn("alias-key", json.dumps(connected))
 
     def test_account_sync_x_posts_endpoint_imports_defaults_and_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -17,6 +17,7 @@ from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 
 GDELT_DOC_API_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 SCRAPINGDOG_API_KEY_ENV = "SCRAPINGDOG_API_KEY"
+SCRAPINGDOG_API_KEY_ALT_ENV = "SCRAPING_DOG_API_KEY"
 SCRAPINGDOG_TRENDS_URL = "https://api.scrapingdog.com/google_trends/trending_now"
 SCRAPINGDOG_NEWS_URL = "https://api.scrapingdog.com/google_news"
 SCRAPINGDOG_TIMEOUT_SECONDS = 45
@@ -74,7 +75,7 @@ def refresh_web_trends(
 
     errors: list[str] = []
     sources: list[str] = []
-    api_key = clean_text(os.getenv(SCRAPINGDOG_API_KEY_ENV))
+    api_key = scrapingdog_api_key()
     daily = refresh_web_trends_for_period(
         store,
         period="daily",
@@ -98,6 +99,14 @@ def refresh_web_trends(
         sources=sources,
     )
     return WebTrendGroups(daily=daily, weekly=weekly, errors=errors, sources=unique_texts(sources))
+
+
+def scrapingdog_api_key() -> str:
+    return clean_text(os.getenv(SCRAPINGDOG_API_KEY_ENV)) or clean_text(os.getenv(SCRAPINGDOG_API_KEY_ALT_ENV))
+
+
+def scrapingdog_configured() -> bool:
+    return bool(scrapingdog_api_key())
 
 
 def refresh_gdelt_web_trends(

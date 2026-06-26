@@ -128,36 +128,40 @@
 
       <section class="view" id="accountView">
         <div class="account-layout">
-          <section class="panel">
+          <section class="panel account-section">
             <div class="panel-header">
               <div>
-                <span class="eyebrow">Account</span>
-                <h2>Settings</h2>
+                <span class="eyebrow">Settings</span>
+                <h2>Connections</h2>
+                <p>Services Koinoniko uses to generate, sync, publish, and refresh context.</p>
               </div>
             </div>
-            <div class="account-grid" id="accountStatusGrid"></div>
+            <div class="connection-list" id="accountStatusGrid"></div>
           </section>
 
-          <section class="panel">
+          <section class="panel account-section">
             <div class="panel-header">
               <div>
-                <span class="eyebrow">X Sync</span>
-                <h2>Account Data</h2>
+                <span class="eyebrow">Data</span>
+                <h2>Sync</h2>
+                <p>Pull posts created on X, refresh public metrics, and update trend context.</p>
               </div>
             </div>
             <div class="sync-actions">
               <button id="accountSyncPostsButton">Sync X Posts</button>
               <button class="secondary" id="accountSyncMetricsButton">Sync X Metrics</button>
               <button class="secondary" id="accountSyncAllButton">Sync All X Data</button>
+              <button class="secondary" id="accountRefreshTrendsButton">Refresh Trends</button>
             </div>
-            <div class="account-grid" id="accountSyncGrid"></div>
+            <div class="sync-table" id="accountSyncGrid"></div>
           </section>
 
-          <section class="panel">
+          <section class="panel account-section account-model-section">
             <div class="panel-header">
               <div>
-                <span class="eyebrow">Model routing</span>
-                <h2>Advanced Model Settings</h2>
+                <span class="eyebrow">Advanced</span>
+                <h2>Model Routing</h2>
+                <p>Choose which models power Standard and Best Version generation.</p>
               </div>
             </div>
             <div class="settings-form">
@@ -184,6 +188,17 @@
                 <button class="secondary" id="testProviderButton">Test Provider</button>
               </div>
             </div>
+          </section>
+
+          <section class="panel account-section account-security-section">
+            <div class="panel-header">
+              <div>
+                <span class="eyebrow">Security</span>
+                <h2>Account</h2>
+                <p>Single-user access for the hosted Koinoniko workspace.</p>
+              </div>
+            </div>
+            <div class="account-security" id="accountSecurityBlock"></div>
           </section>
         </div>
       </section>
@@ -214,6 +229,20 @@
           <button class="icon-button" data-close-modal="queueModal" aria-label="Close">x</button>
         </div>
         <div id="queueModalBody" class="detail-stack"></div>
+      </div>
+    </section>
+
+    <section class="modal hidden" id="trendModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="trendModal"></div>
+      <div class="modal-card wide">
+        <div class="modal-header">
+          <div>
+            <span class="eyebrow">Trend</span>
+            <h2 id="trendModalTitle">Trend details</h2>
+          </div>
+          <button class="icon-button" data-close-modal="trendModal" aria-label="Close">x</button>
+        </div>
+        <div id="trendModalBody" class="detail-stack"></div>
       </div>
     </section>
 
