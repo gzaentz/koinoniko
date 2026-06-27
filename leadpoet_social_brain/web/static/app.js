@@ -1985,11 +1985,47 @@ function renderVoiceRules() {
           </div>
           <span>${metric((group.items || []).length)}</span>
         </div>
-        <ul>${(group.items || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        <textarea
+          id="${escapeAttr(voiceRuleFieldId(group.key || group.title || "rules"))}"
+          rows="${escapeAttr(Math.max(4, Math.min(9, (group.items || []).length + 1)))}"
+          ${group.editable === false ? "disabled" : ""}
+        >${escapeHtml((group.items || []).join("\n"))}</textarea>
       </section>
     `).join("")
     : `<p class="empty-copy compact">No active rules loaded yet.</p>`;
   renderAvoidPhrases();
+}
+
+function voiceRuleFieldId(key) {
+  return `voice-rule-field-${String(key).replace(/[^a-z0-9_-]/gi, "-")}`;
+}
+
+function readRulesField(key) {
+  const field = $(voiceRuleFieldId(key));
+  if (!field) return [];
+  return field.value.split(/\n+/).map((item) => item.trim()).filter(Boolean);
+}
+
+async function saveVoiceRules() {
+  const payload = await api("/api/voice/rules", {
+    method: "PATCH",
+    body: JSON.stringify({
+      positioning_rules: readRulesField("positioning_rules"),
+      voice_rules: readRulesField("voice_rules"),
+      review_rules: readRulesField("review_rules"),
+    }),
+  });
+  state.voice.rules = payload;
+  state.voiceAvoidDraft = [...(payload.avoid_phrases || state.voiceAvoidDraft || [])];
+  renderVoiceRules();
+  setVoiceRulesSaveStatus("Saved");
+  showMessage(payload.message || "Active Writing Rules saved.");
+}
+
+function setVoiceRulesSaveStatus(text, isError = false) {
+  const status = $("voiceRulesSaveStatus");
+  status.textContent = text || "";
+  status.classList.toggle("error", isError);
 }
 
 function renderAvoidPhrases() {
@@ -3131,6 +3167,7 @@ function setup() {
   });
   $("voiceContextButton").addEventListener("click", () => openModal("voiceContextModal"));
   $("voiceRulesButton").addEventListener("click", () => openModal("voiceRulesModal"));
+  $("voiceRulesSaveButton").addEventListener("click", (event) => runButton(event.currentTarget, "Saving...", saveVoiceRules));
   $("voiceAvoidAddButton").addEventListener("click", addAvoidPhrase);
   $("voiceAvoidSaveButton").addEventListener("click", (event) => runButton(event.currentTarget, "Saving...", saveAvoidPhrases));
   $("voiceAvoidPhraseInput").addEventListener("keydown", (event) => {

@@ -1531,18 +1531,23 @@ main {
   font-size: 12px;
 }
 
-.voice-rule-group ul {
-  margin: 0;
-  padding-left: 18px;
+.voice-rule-group textarea {
+  min-height: 112px;
+  resize: vertical;
   color: var(--muted);
-  display: grid;
-  gap: 7px;
   font-size: 14px;
-  line-height: 1.4;
+  line-height: 1.45;
+  background: var(--soft);
 }
 
 .voice-rule-editor {
   margin-top: 12px;
+}
+
+.voice-rules-actions {
+  justify-content: flex-start;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
 }
 
 .phrase-chip-list {

@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-active-writing-rules">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-editable-writing-rules">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -362,6 +362,10 @@
           <button class="icon-button" data-close-modal="voiceRulesModal" aria-label="Close">x</button>
         </div>
         <div id="voiceRulesList" class="voice-rules-list"></div>
+        <div class="modal-actions voice-rules-actions">
+          <button id="voiceRulesSaveButton" type="button">Save Rules</button>
+          <span id="voiceRulesSaveStatus" class="inline-save-status" aria-live="polite"></span>
+        </div>
         <section class="voice-rule-group voice-rule-editor" aria-labelledby="voiceAvoidTitle">
           <div class="voice-rule-group-heading">
             <div>
@@ -602,6 +606,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260627-active-writing-rules"></script>
+    <script src="/static/app.js?v=20260627-editable-writing-rules"></script>
   </body>
 </html>

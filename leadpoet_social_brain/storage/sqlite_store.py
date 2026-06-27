@@ -1856,7 +1856,6 @@ def default_context_sections() -> list[ContextSection]:
             ),
             weight=1.4,
         ),
-        *required_context_sections(),
         ContextSection(
             kind="bittensor",
             name="bittensor_subnet_context_v0",

@@ -374,6 +374,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("Active Writing Rules", index_html)
         self.assertIn("Writing Guardrails", index_html)
         self.assertIn("View Rules", index_html)
+        self.assertIn("Save Rules", index_html)
         self.assertIn('id="voiceCoverageGrid"', index_html)
         self.assertIn('id="voiceRulesButton"', index_html)
         self.assertIn('id="voiceRulesModal"', index_html)
@@ -578,6 +579,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("Suggest why this worked", app_js)
         self.assertIn("renderVoiceCoverage", app_js)
         self.assertIn("renderAvoidPhrases", app_js)
+        self.assertIn("saveVoiceRules", app_js)
         self.assertIn("/api/taxonomy/topics", app_js)
         self.assertIn("/api/taxonomy/post-types", app_js)
         self.assertIn("/api/posts/", app_js)
@@ -1648,6 +1650,50 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(unchanged.text, "Original queued post.")
             self.assertEqual(store.list_queued_post_versions(item.id)[0].text, payload["versions"][0]["text"])
             store.close()
+
+    def test_web_revision_repairs_overlong_output_instead_of_truncating(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.seed_defaults()
+            item = store.save_content_queue_item(
+                ContentQueueItem(
+                    text="Original queued post.",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-06-30T10:00:00-04:00",
+                )
+            )
+            store.close()
+
+            overlong = (
+                "The AI agent that booked 614 meetings for SaaStr proved one thing:\n\n"
+                "Outbound only works when you know the buyer is actually moving.\n\n"
+                "Real-time CRM lookups. Routing logic. Months of training on their own data. "
+                "That's what it took to find timing.\n\n"
+                "Most teams don't have that. So they build outreach around volume, generic timing, "
+                "and a workflow that still depends on someone manually noticing when the buyer is ready to listen."
+            )
+            repaired = (
+                "The SaaStr AI agent proved the real point: outbound only works when buyer timing is real. "
+                "Most teams still automate around volume instead."
+            )
+            provider = SequentialProvider([overlong, repaired])
+
+            with patch("leadpoet_social_brain.web.app.load_provider_from_env", return_value=provider):
+                status, payload = handle_api_request(
+                    "POST",
+                    f"/api/queue/{item.id}/revise",
+                    json.dumps({"instruction": "Make it sharper.", "variants": 1}),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["versions"][0]["text"], repaired)
+            self.assertLessEqual(len(payload["versions"][0]["text"]), 280)
+            self.assertIn("Character limit: 280", provider.prompts[0])
+            self.assertIn("Shorten this queued X revision to 280 characters or fewer.", provider.prompts[1])
+            self.assertNotIn("Most teams don't have that. So they build outreach around volume", payload["versions"][0]["text"])
 
     def test_web_accept_revision_updates_queue_post(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2787,6 +2833,47 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(
                 any("owning Leadpoet's core intent advantage" in item for item in groups["Review Filters"]["items"])
             )
+
+            status, saved = handle_api_request(
+                "PATCH",
+                "/api/voice/rules",
+                json.dumps(
+                    {
+                        "positioning_rules": [
+                            "Leadpoet owns buyer timing and proprietary account intent.",
+                            "Competitor stories are proof points, not the product wedge.",
+                        ],
+                        "voice_rules": [
+                            "Write like Gavin saw the problem himself.",
+                            "Use one concrete mechanism before the conclusion.",
+                        ],
+                        "review_rules": [
+                            "Reject drafts that make another tool sound like Leadpoet.",
+                            "Remove smooth filler before saving.",
+                        ],
+                    }
+                ),
+                db_path=db_path,
+            )
+            self.assertEqual(status, 200)
+            saved_groups = {group["key"]: group["items"] for group in saved["groups"]}
+            self.assertIn("Leadpoet owns buyer timing", saved_groups["positioning_rules"][0])
+            self.assertIn("Write like Gavin saw", saved_groups["voice_rules"][0])
+            self.assertIn("Reject drafts", saved_groups["review_rules"][0])
+
+            store = SQLiteStore(db_path)
+            context = [
+                section for section in store.list_context_sections(kinds={"positioning"})
+                if section.name == "leadpoet_intent_layer_v0"
+            ][0]
+            self.assertIn("Leadpoet owns buyer timing", context.content)
+            prompt = SocialBrainGenerator(store).build_prompt(
+                DraftRequest(platform="x", topic="sales LLMs", post_type="founder_insight")
+            )
+            self.assertIn("Leadpoet owns buyer timing and proprietary account intent.", prompt)
+            self.assertIn("Write like Gavin saw the problem himself.", prompt)
+            self.assertIn("Reject drafts that make another tool sound like Leadpoet.", prompt)
+            store.close()
 
     def test_voice_avoid_phrases_can_load_save_and_appear_in_prompts(self):
         with tempfile.TemporaryDirectory() as tmpdir:

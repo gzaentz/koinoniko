@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 
@@ -10,7 +11,15 @@ from leadpoet_social_brain.platforms.x import get_x_adapter
 from leadpoet_social_brain.providers import DraftProvider, ModelRouting, generate_with_provider, resolve_model_routing
 from leadpoet_social_brain.skills import SkillAsset, generation_skills
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
-from leadpoet_social_brain.voice import avoid_phrases_prompt_section, load_avoid_phrases
+from leadpoet_social_brain.voice import (
+    active_rules_prompt_section,
+    avoid_phrases_prompt_section,
+    load_avoid_phrases,
+    load_positioning_rules,
+    load_review_rules,
+    load_voice_rules_override,
+    review_filter_skill_content,
+)
 
 
 MISSING_PROVIDER_MESSAGE = (
@@ -45,6 +54,8 @@ class SocialBrainGenerator:
         patterns = self._patterns_for(request)
         avoid_phrases = load_avoid_phrases(self.store)
         skills = generation_skills(platform=request.platform, post_type=request.post_type)
+        active_rules = active_writing_rules_for_prompt(self.store, skills)
+        skills = skills_with_review_rules(skills, active_rules["review_rules"])
         if not self.provider:
             raise ValueError(MISSING_PROVIDER_MESSAGE)
         provider_name = provider_name_for(self.provider)
@@ -57,6 +68,7 @@ class SocialBrainGenerator:
                 trends=trends,
                 patterns=patterns,
                 avoid_phrases=avoid_phrases,
+                active_rules=active_rules,
                 max_chars=max_chars,
                 provider_name=provider_name,
                 model_routing=model_routing,
@@ -70,6 +82,7 @@ class SocialBrainGenerator:
             trends=trends,
             patterns=patterns,
             avoid_phrases=avoid_phrases,
+            active_rules=active_rules,
             max_chars=max_chars,
         )
         raw_texts = generate_with_provider(
@@ -80,7 +93,13 @@ class SocialBrainGenerator:
         )
         drafts: list[GeneratedDraft] = []
         for raw_text in raw_texts:
-            text = clean_generated_text(raw_text, max_chars=max_chars)
+            text = fit_generated_text_to_limit(
+                self.provider,
+                raw_text,
+                max_chars=max_chars,
+                model=model_routing.default,
+                repair_context="generated X draft",
+            )
             adapter.validate_text(text, max_chars=max_chars)
             quality_notes = build_quality_notes(
                 request,
@@ -99,6 +118,7 @@ class SocialBrainGenerator:
                     trends=trends,
                     patterns=patterns,
                     avoid_phrases=avoid_phrases,
+                    active_rules=active_rules,
                     quality_notes=quality_notes,
                     provider_name=provider_name,
                     quality_mode="standard",
@@ -120,6 +140,7 @@ class SocialBrainGenerator:
         trends: list[TrendItem],
         patterns: list[ViralPattern],
         avoid_phrases: list[str],
+        active_rules: dict[str, list[str]],
         max_chars: int,
         provider_name: str,
         model_routing: ModelRouting,
@@ -127,7 +148,14 @@ class SocialBrainGenerator:
     ) -> list[GeneratedDraft]:
         assert self.provider is not None
         adapter = self._adapter_for(request.platform)
-        strategy_prompt = build_strategy_prompt(request, bundle, trends=trends, patterns=patterns, avoid_phrases=avoid_phrases)
+        strategy_prompt = build_strategy_prompt(
+            request,
+            bundle,
+            trends=trends,
+            patterns=patterns,
+            avoid_phrases=avoid_phrases,
+            active_rules=active_rules,
+        )
         strategy_raw = generate_with_provider(
             self.provider,
             strategy_prompt,
@@ -142,6 +170,7 @@ class SocialBrainGenerator:
             trends=trends,
             patterns=patterns,
             avoid_phrases=avoid_phrases,
+            active_rules=active_rules,
             strategy_summary=strategy_summary,
             max_chars=max_chars,
         )
@@ -151,8 +180,20 @@ class SocialBrainGenerator:
             variants=3,
             model=model_routing.natural_writer,
         )
-        cleaned_options = [clean_generated_text(raw, max_chars=max_chars) for raw in draft_options]
-        cleaned_options = [text for text in cleaned_options if text]
+        cleaned_options: list[str] = []
+        for raw in draft_options:
+            try:
+                text = fit_generated_text_to_limit(
+                    self.provider,
+                    raw,
+                    max_chars=max_chars,
+                    model=model_routing.natural_writer,
+                    repair_context="Best Version X draft option",
+                )
+            except ValueError:
+                continue
+            if text:
+                cleaned_options.append(text)
         if not cleaned_options:
             raise ValueError("Provider did not return usable draft text.")
         evaluation_prompt = build_evaluation_prompt(
@@ -161,6 +202,8 @@ class SocialBrainGenerator:
             strategy_summary=strategy_summary,
             draft_options=cleaned_options,
             avoid_phrases=avoid_phrases,
+            active_rules=active_rules,
+            max_chars=max_chars,
         )
         evaluation_raw = generate_with_provider(
             self.provider,
@@ -169,7 +212,13 @@ class SocialBrainGenerator:
             model=model_routing.evaluator,
         )[0]
         final_text, quality_notes, evaluation = parse_evaluation_result(evaluation_raw, cleaned_options)
-        text = clean_generated_text(final_text, max_chars=max_chars)
+        text = fit_generated_text_to_limit(
+            self.provider,
+            final_text,
+            max_chars=max_chars,
+            model=model_routing.natural_writer,
+            repair_context="Best Version final X post",
+        )
         adapter.validate_text(text, max_chars=max_chars)
         notes = quality_notes or build_quality_notes(request, bundle, trends=trends)
         draft = GeneratedDraft(
@@ -184,6 +233,7 @@ class SocialBrainGenerator:
                 trends=trends,
                 patterns=patterns,
                 avoid_phrases=avoid_phrases,
+                active_rules=active_rules,
                 quality_notes=notes,
                 provider_name=provider_name,
                 quality_mode="best_version",
@@ -214,6 +264,8 @@ class SocialBrainGenerator:
         patterns = self._patterns_for(request)
         avoid_phrases = load_avoid_phrases(self.store)
         skills = generation_skills(platform=request.platform, post_type=request.post_type)
+        active_rules = active_writing_rules_for_prompt(self.store, skills)
+        skills = skills_with_review_rules(skills, active_rules["review_rules"])
         return build_generation_prompt(
             request,
             bundle,
@@ -221,6 +273,7 @@ class SocialBrainGenerator:
             trends=trends,
             patterns=patterns,
             avoid_phrases=avoid_phrases,
+            active_rules=active_rules,
             max_chars=max_chars,
         )
 
@@ -250,6 +303,38 @@ class SocialBrainGenerator:
         )
 
 
+def active_writing_rules_for_prompt(store: SQLiteStore, skills: list[SkillAsset]) -> dict[str, list[str]]:
+    return {
+        "positioning_rules": load_positioning_rules(store),
+        "voice_rules": load_voice_rules_override(store) or [],
+        "review_rules": load_review_rules(store, default_review_rules_from_skills(skills)),
+    }
+
+
+def default_review_rules_from_skills(skills: list[SkillAsset]) -> list[str]:
+    for skill in skills:
+        if skill.path == "skills/review_filter.md":
+            return [line[2:].strip() for line in skill.content.splitlines() if line.startswith("- ")]
+    return []
+
+
+def skills_with_review_rules(skills: list[SkillAsset], review_rules: list[str]) -> list[SkillAsset]:
+    content = review_filter_skill_content(review_rules)
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    replacement = SkillAsset(path="skills/review_filter.md", content=content, sha256=digest)
+    updated: list[SkillAsset] = []
+    replaced = False
+    for skill in skills:
+        if skill.path == "skills/review_filter.md":
+            updated.append(replacement)
+            replaced = True
+        else:
+            updated.append(skill)
+    if not replaced:
+        updated.append(replacement)
+    return updated
+
+
 def build_generation_prompt(
     request: DraftRequest,
     bundle: ContextBundle,
@@ -257,8 +342,9 @@ def build_generation_prompt(
     skills: list[SkillAsset],
     trends: list[TrendItem],
     patterns: list[ViralPattern],
-    avoid_phrases: list[str] | None = None,
     max_chars: int,
+    avoid_phrases: list[str] | None = None,
+    active_rules: dict[str, list[str]] | None = None,
 ) -> str:
     skill_text = "\n\n".join(
         f"## {skill.path}\n{skill.content}"
@@ -280,6 +366,10 @@ def build_generation_prompt(
     trend_section = f"\n\nTimely market context:\n{trends_text}" if trends_text else ""
     pattern_section = f"\n\nPattern mechanics to adapt:\n{patterns_text}" if patterns_text else ""
     avoid_section = avoid_phrases_prompt_section(avoid_phrases or [])
+    active_rules_section = active_rules_prompt_section(
+        positioning_rules=(active_rules or {}).get("positioning_rules", []),
+        voice_rules=(active_rules or {}).get("voice_rules", []),
+    )
     return f"""Write {request.platform.upper()} posts for Leadpoet.
 
 Study these Gavin/Leadpoet examples first:
@@ -290,6 +380,8 @@ Leadpoet context:
 
 Koinoniko Voice:
 {voice or "- No Koinoniko Voice profile yet."}
+
+{active_rules_section}
 {trend_section}
 {pattern_section}
 {analytics_section}
@@ -312,6 +404,7 @@ Writing and review instructions:
 Priority order: Koinoniko Voice, Leadpoet context, current trend/topic, Pattern mechanics, then platform rules.
 Pattern safety: Use the structure, not the wording. Do not copy source post wording, claims, examples, or framing directly. If a Pattern conflicts with Voice, Voice wins.
 
+Each variant must be {max_chars} characters or fewer and end as a complete thought.
 Return only draft post text variants, no commentary. Do not write a bland news summary. Make the post timely, specific, and founder-led."""
 
 
@@ -322,6 +415,7 @@ def build_strategy_prompt(
     trends: list[TrendItem],
     patterns: list[ViralPattern],
     avoid_phrases: list[str] | None = None,
+    active_rules: dict[str, list[str]] | None = None,
 ) -> str:
     context = "\n".join(f"- {section.kind}/{section.name}: {section.content}" for section in bundle.positioning_sections)
     examples_text = "\n\n".join(_format_example(post, bundle) for post in bundle.examples)
@@ -329,6 +423,10 @@ def build_strategy_prompt(
     patterns_text = "\n\n".join(_format_viral_pattern(pattern) for pattern in patterns)
     analytics = "\n".join(f"- {hint}" for hint in bundle.analytics_hints)
     avoid_section = avoid_phrases_prompt_section(avoid_phrases or [])
+    active_rules_section = active_rules_prompt_section(
+        positioning_rules=(active_rules or {}).get("positioning_rules", []),
+        voice_rules=(active_rules or {}).get("voice_rules", []),
+    )
     return f"""You are helping Gavin decide the strongest X post angle for Leadpoet.
 
 Do not write the post yet. Decide what the post should accomplish.
@@ -342,6 +440,8 @@ Request:
 
 Leadpoet context:
 {context or "- No positioning context yet."}
+
+{active_rules_section}
 
 Gavin examples and worked-reason notes:
 {examples_text or "No examples selected."}
@@ -368,9 +468,10 @@ def build_best_writer_prompt(
     skills: list[SkillAsset],
     trends: list[TrendItem],
     patterns: list[ViralPattern],
-    avoid_phrases: list[str] | None = None,
     strategy_summary: dict[str, object],
     max_chars: int,
+    avoid_phrases: list[str] | None = None,
+    active_rules: dict[str, list[str]] | None = None,
 ) -> str:
     skill_text = "\n\n".join(f"## {skill.path}\n{skill.content}" for skill in skills)
     examples_text = "\n\n".join(_format_example(post, bundle) for post in bundle.examples)
@@ -379,6 +480,10 @@ def build_best_writer_prompt(
     patterns_text = "\n\n".join(_format_viral_pattern(pattern) for pattern in patterns)
     analytics = "\n".join(f"- {hint}" for hint in bundle.analytics_hints)
     avoid_section = avoid_phrases_prompt_section(avoid_phrases or [])
+    active_rules_section = active_rules_prompt_section(
+        positioning_rules=(active_rules or {}).get("positioning_rules", []),
+        voice_rules=(active_rules or {}).get("voice_rules", []),
+    )
     return f"""Write 3 X draft options for Gavin.
 
 Prioritize exact Gavin examples, worked-reason notes, and the writing skills below over generic marketing instincts.
@@ -400,6 +505,8 @@ Exact Gavin/Leadpoet examples:
 Leadpoet context:
 {context or "- No positioning context yet."}
 
+{active_rules_section}
+
 Trend context:
 {trends_text or "No timely trends selected."}
 
@@ -417,6 +524,7 @@ Writing and review instructions:
 Avoid corporate thought leadership, generic hype, fake profundity, em dashes, overly symmetrical phrasing, LinkedIn-style moral lessons, and "not just X, but Y" framing.
 Use Pattern mechanics only as structure. Do not copy source post wording or make the post feel derivative. Make it specific to Gavin/Leadpoet.
 
+Each option must be {max_chars} characters or fewer and end as a complete thought.
 Return only draft post text variants. Separate variants with a line containing only ---."""
 
 
@@ -426,11 +534,17 @@ def build_evaluation_prompt(
     skills: list[SkillAsset],
     strategy_summary: dict[str, object],
     draft_options: list[str],
+    max_chars: int,
     avoid_phrases: list[str] | None = None,
+    active_rules: dict[str, list[str]] | None = None,
 ) -> str:
     skill_text = "\n\n".join(f"## {skill.path}\n{skill.content}" for skill in skills)
     options = "\n\n".join(f"Draft {index}:\n{text}" for index, text in enumerate(draft_options, start=1))
     avoid_section = avoid_phrases_prompt_section(avoid_phrases or [])
+    active_rules_section = active_rules_prompt_section(
+        positioning_rules=(active_rules or {}).get("positioning_rules", []),
+        voice_rules=(active_rules or {}).get("voice_rules", []),
+    )
     return f"""Choose the best X post for Gavin and clean it up lightly.
 
 Original request:
@@ -444,6 +558,8 @@ Success criteria:
 
 Voice and review rules:
 {skill_text}
+
+{active_rules_section}
 
 {avoid_section}
 
@@ -460,7 +576,7 @@ Best Version evaluator should check:
 - no corporate launch tone
 
 If a draft uses an Avoid Phrase, revise away from it in suggested_final_version.
-The suggested_final_version must be natural, specific, founder-led, concise, non-corporate, and free of em dashes."""
+The suggested_final_version must be natural, specific, founder-led, concise, non-corporate, free of em dashes, {max_chars} characters or fewer, and complete."""
 
 
 def build_context_snapshot(
@@ -471,6 +587,7 @@ def build_context_snapshot(
     trends: list[TrendItem],
     patterns: list[ViralPattern],
     avoid_phrases: list[str] | None,
+    active_rules: dict[str, list[str]] | None,
     quality_notes: str,
     provider_name: str,
     quality_mode: str,
@@ -515,6 +632,7 @@ def build_context_snapshot(
         "evaluation": evaluation,
         "quality_notes": quality_notes,
         "avoid_phrases": avoid_phrases or [],
+        "active_writing_rules": active_rules or {},
         "skills": [
             {
                 "path": skill.path,
@@ -670,17 +788,52 @@ def _selected_pattern_refs(bundle: ContextBundle) -> list[dict[str, object]]:
     return refs
 
 
+def fit_generated_text_to_limit(
+    provider: DraftProvider,
+    text: str,
+    *,
+    max_chars: int,
+    model: str | None = None,
+    repair_context: str = "generated X post",
+) -> str:
+    cleaned = clean_generated_text(text, max_chars=max_chars)
+    if not cleaned:
+        return ""
+    if len(cleaned) <= max_chars:
+        return cleaned
+    repair_prompt = build_length_repair_prompt(cleaned, max_chars=max_chars, repair_context=repair_context)
+    repaired_options = generate_with_provider(provider, repair_prompt, variants=1, model=model)
+    repaired = clean_generated_text(repaired_options[0] if repaired_options else "", max_chars=max_chars)
+    if not repaired:
+        raise ValueError("Provider returned an empty shortened post.")
+    if len(repaired) > max_chars:
+        raise ValueError(
+            f"Provider returned a {len(repaired)} character post after shortening, over the {max_chars} character limit. "
+            "Try a shorter instruction or ask for a tighter post."
+        )
+    return repaired
+
+
+def build_length_repair_prompt(text: str, *, max_chars: int, repair_context: str) -> str:
+    return f"""Shorten this {repair_context} to {max_chars} characters or fewer.
+
+Rules:
+- Preserve the core point.
+- Keep Gavin's plain, sharp voice.
+- End as a complete thought.
+- Do not end mid-sentence, mid-phrase, or with a dangling setup.
+- Return only the revised post text. No commentary.
+
+Original ({len(text)} characters):
+{text}"""
+
+
 def clean_generated_text(text: str, *, max_chars: int) -> str:
+    _ = max_chars
     cleaned = text.replace("—", "-").replace("–", "-")
     cleaned = re.sub(r"\b(game-changing|revolutionary|unlock|delve into|in today's world)\b", "", cleaned, flags=re.I)
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
-    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    if len(cleaned) <= max_chars:
-        return cleaned
-    trimmed = cleaned[: max_chars - 1].rstrip()
-    if " " in trimmed:
-        trimmed = trimmed.rsplit(" ", 1)[0].rstrip()
-    return f"{trimmed}."
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
 def explain_influence(bundle: ContextBundle, *, trends: list[TrendItem], patterns: list[ViralPattern]) -> str:

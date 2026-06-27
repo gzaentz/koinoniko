@@ -88,9 +88,14 @@ from leadpoet_social_brain.trend_scout import refresh_web_trends, scrapingdog_co
 from leadpoet_social_brain.voice import (
     DEFAULT_AVOID_PHRASES,
     DEFAULT_VOICE_RULES,
-    POSITIONING_RULES,
     load_avoid_phrases,
+    load_positioning_rules,
+    load_review_rules,
+    load_voice_rules_override,
     save_avoid_phrases,
+    save_positioning_rules,
+    save_review_rules,
+    save_voice_rules_override,
 )
 
 
@@ -609,6 +614,8 @@ def route_api(
         return 200, voice_coverage_payload(store)
     if method == "GET" and parts == ["api", "voice", "rules"]:
         return 200, voice_rules_payload(store)
+    if method == "PATCH" and parts == ["api", "voice", "rules"]:
+        return 200, save_voice_rules_payload(store, payload)
     if method == "GET" and parts == ["api", "voice", "avoid-phrases"]:
         return 200, {"items": load_avoid_phrases(store), "defaults": DEFAULT_AVOID_PHRASES}
     if method == "POST" and parts == ["api", "voice", "avoid-phrases"]:
@@ -1692,21 +1699,28 @@ def coverage_rows(counts: Counter[str], defaults: list[str]) -> list[dict[str, A
 
 def voice_rules_payload(store: SQLiteStore) -> dict[str, Any]:
     avoid_phrases = load_avoid_phrases(store)
+    review_rules = review_filter_rules(store)
     groups = [
         {
+            "key": "positioning_rules",
             "title": "Positioning Rules",
             "description": "How Koinoniko should frame Leadpoet in every post.",
-            "items": POSITIONING_RULES,
+            "items": load_positioning_rules(store),
+            "editable": True,
         },
         {
+            "key": "voice_rules",
             "title": "Voice Rules",
             "description": "How Gavin's writing should feel.",
             "items": current_voice_rules(store),
+            "editable": True,
         },
         {
+            "key": "review_rules",
             "title": "Review Filters",
             "description": "Final checks before a draft is saved.",
-            "items": review_filter_rules(),
+            "items": review_rules,
+            "editable": True,
         },
     ]
     rules_count = sum(len(group["items"]) for group in groups) + len(avoid_phrases)
@@ -1718,7 +1732,24 @@ def voice_rules_payload(store: SQLiteStore) -> dict[str, Any]:
     }
 
 
+def save_voice_rules_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    if "positioning_rules" in payload:
+        save_positioning_rules(store, string_list_payload(payload.get("positioning_rules")))
+    if "voice_rules" in payload:
+        save_voice_rules_override(store, string_list_payload(payload.get("voice_rules")))
+    if "review_rules" in payload:
+        save_review_rules(store, string_list_payload(payload.get("review_rules")))
+    if "avoid_phrases" in payload:
+        save_avoid_phrases(store, string_list_payload(payload.get("avoid_phrases")))
+    response = voice_rules_payload(store)
+    response["message"] = "Active Writing Rules saved."
+    return response
+
+
 def current_voice_rules(store: SQLiteStore) -> list[str]:
+    override = load_voice_rules_override(store)
+    if override is not None:
+        return override
     current = current_voice_section(store)
     if not current:
         return list(DEFAULT_VOICE_RULES)
@@ -1729,13 +1760,17 @@ def current_voice_rules(store: SQLiteStore) -> list[str]:
     return rules[:8] or list(DEFAULT_VOICE_RULES)
 
 
-def review_filter_rules() -> list[str]:
+def review_filter_rules(store: SQLiteStore | None = None) -> list[str]:
     try:
         content = load_skill("review_filter.md").content
     except FileNotFoundError:
-        return []
-    rules = [line[2:].strip() for line in content.splitlines() if line.startswith("- ")]
-    return [rule for rule in rules if rule]
+        default_rules: list[str] = []
+    else:
+        default_rules = [line[2:].strip() for line in content.splitlines() if line.startswith("- ")]
+        default_rules = [rule for rule in default_rules if rule]
+    if store:
+        return load_review_rules(store, default_rules)
+    return default_rules
 
 
 def voice_coverage_recommendation(topic_counts: Counter[str], type_counts: Counter[str], examples_count: int) -> str:

@@ -18,19 +18,21 @@ from leadpoet_social_brain.core.models import (
 from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.generation import (
     SocialBrainGenerator,
+    active_writing_rules_for_prompt,
     build_best_writer_prompt,
     build_evaluation_prompt,
     build_strategy_prompt,
-    clean_generated_text,
+    fit_generated_text_to_limit,
     parse_evaluation_result,
     parse_strategy_summary,
+    skills_with_review_rules,
 )
 from leadpoet_social_brain.platforms.x import get_x_adapter
 from leadpoet_social_brain.platforms.x_api import XPostedTweet, XWriteClient
 from leadpoet_social_brain.providers import DraftProvider, generate_with_provider, resolve_model_routing
 from leadpoet_social_brain.skills import generation_skills
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
-from leadpoet_social_brain.voice import avoid_phrases_prompt_section, load_avoid_phrases
+from leadpoet_social_brain.voice import active_rules_prompt_section, avoid_phrases_prompt_section, load_avoid_phrases
 
 
 LOCAL_TZ = ZoneInfo("America/New_York")
@@ -244,6 +246,8 @@ def revise_queued_post(
         max_examples=4,
     )
     skills = generation_skills(platform=item.platform, post_type=item.post_type)
+    active_rules = active_writing_rules_for_prompt(store, skills)
+    skills = skills_with_review_rules(skills, active_rules["review_rules"])
     avoid_phrases = load_avoid_phrases(store)
     examples = "\n\n".join(post.text for post in bundle.examples) or "No examples selected."
     context = "\n".join(
@@ -252,6 +256,10 @@ def revise_queued_post(
     )
     skill_text = "\n\n".join(f"## {skill.path}\n{skill.content}" for skill in skills)
     analytics = "\n".join(f"- {hint}" for hint in bundle.analytics_hints)
+    active_rules_text = active_rules_prompt_section(
+        positioning_rules=active_rules["positioning_rules"],
+        voice_rules=active_rules["voice_rules"],
+    )
     prompt = f"""Revise this queued X post for Leadpoet.
 
 Original post:
@@ -263,12 +271,15 @@ User edit instruction:
 Topic: {item.topic}
 Post type: {item.post_type}
 Angle: {item.angle or "none"}
+Character limit: {adapter.rules.default_max_chars}
 
 Relevant Gavin/Leadpoet examples:
 {examples}
 
 Relevant context:
 {context or "- No context available."}
+
+{active_rules_text}
 
 Useful performance guidance:
 {analytics or "- No analytics hints available."}
@@ -278,6 +289,7 @@ Writing and review instructions:
 
 {avoid_phrases_prompt_section(avoid_phrases)}
 
+Each variant must be {adapter.rules.default_max_chars} characters or fewer and end as a complete thought.
 Return only revised post text variants. Do not explain. Do not approve or post anything."""
     model_routing = resolve_model_routing(store, provider)
     if best_version:
@@ -298,7 +310,14 @@ Return only revised post text variants. Do not explain. Do not approve or post a
         ]
         strategy_raw = generate_with_provider(
             provider,
-            build_strategy_prompt(request, bundle, trends=trends, patterns=[], avoid_phrases=avoid_phrases),
+            build_strategy_prompt(
+                request,
+                bundle,
+                trends=trends,
+                patterns=[],
+                avoid_phrases=avoid_phrases,
+                active_rules=active_rules,
+            ),
             variants=1,
             model=model_routing.strategist,
         )[0]
@@ -312,16 +331,27 @@ Return only revised post text variants. Do not explain. Do not approve or post a
                 trends=trends,
                 patterns=[],
                 avoid_phrases=avoid_phrases,
+                active_rules=active_rules,
                 strategy_summary=strategy_summary,
                 max_chars=adapter.rules.default_max_chars,
             ),
             variants=3,
             model=model_routing.natural_writer,
         )
-        options = [
-            text for raw in raw_options
-            if (text := clean_generated_text(raw, max_chars=adapter.rules.default_max_chars))
-        ]
+        options: list[str] = []
+        for raw in raw_options:
+            try:
+                text = fit_generated_text_to_limit(
+                    provider,
+                    raw,
+                    max_chars=adapter.rules.default_max_chars,
+                    model=model_routing.natural_writer,
+                    repair_context="Best Version queued X revision option",
+                )
+            except ValueError:
+                continue
+            if text:
+                options.append(text)
         if not options:
             raise ValueError("Provider did not return usable revision text.")
         evaluation_raw = generate_with_provider(
@@ -332,6 +362,8 @@ Return only revised post text variants. Do not explain. Do not approve or post a
                 strategy_summary=strategy_summary,
                 draft_options=options,
                 avoid_phrases=avoid_phrases,
+                active_rules=active_rules,
+                max_chars=adapter.rules.default_max_chars,
             ),
             variants=1,
             model=model_routing.evaluator,
@@ -347,7 +379,13 @@ Return only revised post text variants. Do not explain. Do not approve or post a
         )
     saved: list[QueuedPostVersion] = []
     for raw in raw_versions:
-        text = clean_generated_text(raw, max_chars=adapter.rules.default_max_chars)
+        text = fit_generated_text_to_limit(
+            provider,
+            raw,
+            max_chars=adapter.rules.default_max_chars,
+            model=model_routing.natural_writer if best_version else model_routing.default,
+            repair_context="queued X revision",
+        )
         adapter.validate_text(text)
         saved.append(
             store.save_queued_post_version(

@@ -237,11 +237,11 @@ The Voice page shows:
 
 - current Koinoniko Voice summary in clean sections
 - compact Voice Coverage by topic and post type
-- Active Writing Rules grouped by positioning, Voice, review filters, and Writing Guardrails
+- editable Active Writing Rules grouped by positioning, Voice, review filters, and Writing Guardrails
 - selected Voice Examples with one simple performance signal
 - suggested Voice Examples behind `Show suggested examples`
 
-Positioning rules include the core Leadpoet framing: Leadpoet is the intent layer for proprietary buyer context, timing signals, and account-level intent. Other tools, agents, or case studies should be treated as market proof that intent matters, then brought back to Leadpoet's wedge.
+Positioning rules include the core Leadpoet framing: Leadpoet is the intent layer for proprietary buyer context, timing signals, and account-level intent. Other tools, agents, or case studies should be treated as market proof that intent matters, then brought back to Leadpoet's wedge. Editing these rules in the Voice modal updates the active generation/review prompts; positioning edits also update the reusable Leadpoet context section.
 
 Each Voice Example can use `Suggest why this worked` to draft a concise note from the post text, metrics, topic, post type, and current Voice. The suggestion is only placed into the field for review; it is not saved until you click Save.
 
