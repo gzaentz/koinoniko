@@ -565,7 +565,7 @@ def route_api(
     if method == "POST" and parts == ["tasks", "refresh-patterns"]:
         return 200, refresh_patterns_task_payload(store, payload)
     if method == "POST" and parts == ["tasks", "refresh-patterns-weekly"]:
-        return 200, refresh_patterns_task_payload(store, {**payload, "window": "weekly"})
+        return 200, refresh_pattern_windows_task_payload(store, payload, windows=["weekly", "monthly"])
     if not parts or parts[0] != "api":
         return 404, {"error": "Not found."}
 
@@ -1169,6 +1169,78 @@ def refresh_patterns_task_payload(store: SQLiteStore, payload: dict[str, Any]) -
         raise
 
 
+def refresh_pattern_windows_task_payload(store: SQLiteStore, payload: dict[str, Any], *, windows: list[str]) -> dict[str, Any]:
+    started_at = utc_now()
+    try:
+        provider = load_configured_provider(store)
+        if not provider:
+            raise ValueError(PATTERN_REFRESH_MISSING_PROVIDER)
+        limit = int(payload.get("limit") or 5)
+        window_summaries: dict[str, Any] = {}
+        all_patterns: list[dict[str, Any]] = []
+        errors: list[str] = []
+        fetched = 0
+        stored = 0
+        skipped = 0
+        for window in windows:
+            result = refresh_patterns(store, provider, limit=limit, window=window)
+            fetched += result.fetched
+            stored += result.stored
+            skipped += result.skipped
+            errors.extend(result.errors)
+            all_patterns.extend(pattern_payload(pattern) for pattern in result.patterns)
+            window_summaries[window] = {
+                "fetched": result.fetched,
+                "stored": result.stored,
+                "skipped": result.skipped,
+                "errors": result.errors,
+            }
+        completed_at = utc_now()
+        summary = {
+            "fetched": fetched,
+            "stored": stored,
+            "skipped": skipped,
+            "errors": errors,
+            "completed_at": completed_at,
+            "windows": window_summaries,
+        }
+        metadata = store.save_sync_metadata(
+            SyncMetadata(
+                key=PATTERNS_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=completed_at,
+                status="partial" if errors else "success",
+                summary=summary,
+                error_message="\n".join(errors[:5]) if errors else None,
+            )
+        )
+        return {
+            **summary,
+            "patterns": all_patterns,
+            "sync": sync_metadata_payload(metadata),
+        }
+    except Exception as exc:  # noqa: BLE001 - task should persist failure summary.
+        completed_at = utc_now()
+        summary = {
+            "fetched": 0,
+            "stored": 0,
+            "skipped": 0,
+            "errors": [str(exc)],
+            "completed_at": completed_at,
+        }
+        store.save_sync_metadata(
+            SyncMetadata(
+                key=PATTERNS_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=completed_at,
+                status="failed",
+                summary=summary,
+                error_message=str(exc),
+            )
+        )
+        raise
+
+
 def run_x_posts_sync(
     store: SQLiteStore,
     payload: dict[str, Any],
@@ -1672,6 +1744,10 @@ def add_pattern_from_payload(store: SQLiteStore, payload: dict[str, Any]) -> Vir
 
 def refresh_patterns_api_response(store: SQLiteStore, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     try:
+        if isinstance(payload.get("windows"), list):
+            windows = [str(window) for window in payload.get("windows", []) if str(window) in {"weekly", "monthly"}]
+            if windows:
+                return 200, refresh_pattern_windows_task_payload(store, payload, windows=windows)
         return 200, refresh_patterns_task_payload(store, payload)
     except ValueError as exc:
         return 400, {"error": str(exc)}

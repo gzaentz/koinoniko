@@ -1852,6 +1852,16 @@ class SocialBrainTest(unittest.TestCase):
                 window="weekly",
             )
             store.mark_viral_pattern_status(pattern.id, "saved")
+            monthly_pattern = add_pattern_example(
+                store,
+                source_url="https://x.com/operator/status/monthlypattern",
+                source_text="A monthly pattern should capture a larger repeated market mechanic.",
+                topic="gtm",
+                category="gtm",
+                pattern_name="Monthly market mechanic",
+                structure="big market signal, repeated behavior, reusable rule",
+                window="monthly",
+            )
             store.close()
 
             status, payload = handle_api_request("GET", "/api/dashboard", db_path=db_path)
@@ -1864,7 +1874,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["trends"][0]["id"], trend.id)
             self.assertEqual(payload["trend_groups"]["daily"][0]["id"], trend.id)
             self.assertEqual(payload["pattern_groups"]["weekly"][0]["id"], pattern.id)
-            self.assertEqual(payload["pattern_groups"]["monthly"][0]["id"], pattern.id)
+            self.assertEqual(payload["pattern_groups"]["monthly"][0]["id"], monthly_pattern.id)
             self.assertNotIn("daily", payload["pattern_groups"])
             self.assertEqual(payload["saved_patterns"][0]["id"], pattern.id)
             self.assertIn("analytics_hints", payload)
@@ -2198,6 +2208,48 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Extract the mechanic only", provider.prompts[0])
             store.close()
 
+    def test_pattern_refresh_keeps_weekly_and_monthly_sources_separate(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            provider = SequentialProvider([
+                json.dumps(
+                    {
+                        "pattern_name": "Weekly teardown",
+                        "source_summary": "Weekly version.",
+                        "structure": "weekly structure",
+                        "why_it_worked": "fresh signal",
+                        "adaptation_rule": "Use the structure, not the wording.",
+                        "category": "sales",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "pattern_name": "Monthly teardown",
+                        "source_summary": "Monthly version.",
+                        "structure": "monthly structure",
+                        "why_it_worked": "recurring signal",
+                        "adaptation_rule": "Use the structure, not the wording.",
+                        "category": "sales",
+                    }
+                ),
+            ])
+            candidate = {
+                "source_url": "https://x.com/operator/status/same-source",
+                "source_text": "The same source can be analyzed into different cadence windows.",
+            }
+
+            refresh_patterns(store, provider, limit=1, window="weekly", fetch_candidates=lambda limit: [candidate])
+            refresh_patterns(store, provider, limit=1, window="monthly", fetch_candidates=lambda limit: [candidate])
+
+            weekly = store.list_viral_patterns(status="active", window="weekly")
+            monthly = store.list_viral_patterns(status="active", window="monthly")
+            self.assertEqual(len(weekly), 1)
+            self.assertEqual(len(monthly), 1)
+            self.assertNotEqual(weekly[0].id, monthly[0].id)
+            self.assertEqual(weekly[0].pattern_name, "Weekly teardown")
+            self.assertEqual(monthly[0].pattern_name, "Monthly teardown")
+            store.close()
+
     def test_pattern_refresh_skips_x_profile_titles_without_post_text(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -2256,11 +2308,22 @@ class SocialBrainTest(unittest.TestCase):
                 collected_at="2026-06-20T12:00:00+00:00",
                 window="weekly",
             )
+            monthly = add_pattern_example(
+                store,
+                source_url="https://x.com/operator/status/pattern4",
+                source_author="Operator",
+                source_text="A market pattern repeats when buyers quote a category shift with evidence.",
+                pattern_name="Monthly category shift",
+                structure="category shift, evidence, reusable takeaway",
+                why_it_worked="It connects a repeated market signal to a clear lesson.",
+                collected_at="2026-06-21T12:00:00+00:00",
+                window="monthly",
+            )
 
             groups = pattern_groups(store)
 
             self.assertEqual([pattern.id for pattern in groups["weekly"]], [specific.id])
-            self.assertEqual([pattern.id for pattern in groups["monthly"]], [specific.id])
+            self.assertEqual([pattern.id for pattern in groups["monthly"]], [monthly.id])
             store.close()
 
     def test_refresh_trends_task_saves_daily_and_weekly_metadata(self):
@@ -3008,7 +3071,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(TASK_DEFAULTS["sync-x-metrics"]["limit"], 250)
         self.assertEqual(TASK_DEFAULTS["refresh-trends"], {"limit": 5})
         self.assertEqual(TASK_DEFAULTS["refresh-patterns"], {"limit": 5, "window": "weekly"})
-        self.assertEqual(TASK_DEFAULTS["refresh-patterns-weekly"], {"limit": 5, "window": "weekly"})
+        self.assertEqual(TASK_DEFAULTS["refresh-patterns-weekly"], {"limit": 5, "windows": ["weekly", "monthly"]})
         with patch(
             "leadpoet_social_brain.web.task_client.post_task",
             return_value={"ok": True, "errors": []},
@@ -3046,7 +3109,7 @@ class SocialBrainTest(unittest.TestCase):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             parser.parse_args(["refresh-patterns", "--window", "daily"])
 
-    def test_weekly_pattern_refresh_task_forces_weekly_window(self):
+    def test_weekly_pattern_refresh_task_updates_weekly_and_monthly_windows(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"
             SQLiteStore(db_path).close()
@@ -3063,10 +3126,12 @@ class SocialBrainTest(unittest.TestCase):
                 )
 
             self.assertEqual(status, 200)
-            self.assertEqual(payload["fetched"], 1)
-            refresh.assert_called_once()
-            self.assertEqual(refresh.call_args.kwargs["limit"], 7)
-            self.assertEqual(refresh.call_args.kwargs["window"], "weekly")
+            self.assertEqual(payload["fetched"], 2)
+            self.assertEqual(payload["windows"]["weekly"]["fetched"], 1)
+            self.assertEqual(payload["windows"]["monthly"]["fetched"], 1)
+            self.assertEqual(refresh.call_count, 2)
+            self.assertEqual([call.kwargs["window"] for call in refresh.call_args_list], ["weekly", "monthly"])
+            self.assertTrue(all(call.kwargs["limit"] == 7 for call in refresh.call_args_list))
 
     def test_web_account_saves_resets_and_tests_model_settings(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -489,7 +489,7 @@ python -m leadpoet_social_brain.web.task_client refresh-trends
 python -m leadpoet_social_brain.web.task_client refresh-patterns-weekly
 ```
 
-`sync-x-posts` is incremental by default: after the first import, it asks X only for posts newer than the latest stored X post. The default cron payloads also keep post and metric limits modest to avoid repeated backfills.
+`sync-x-posts` is incremental by default: after the first import, it asks X only for posts newer than the latest stored X post. The `refresh-patterns-weekly` task refreshes both weekly and monthly Pattern Scout windows, 5 examples each by default. The default cron payloads also keep post and metric limits modest to avoid repeated backfills.
 
 Set these variables on each Cron service:
 
@@ -924,7 +924,7 @@ The rule is:
 Use the structure, not the wording.
 ```
 
-The Dashboard shows weekly and monthly Pattern cards next to Trends. The monthly view rolls up monthly-specific patterns plus recent weekly Pattern Scout results, so the weekly refresh keeps both views useful. Pattern cards stay compact and use sensible placeholders when a field is missing. Clicking a Pattern opens its source text, structure, why it worked, adaptation rule, source link, and Archive/Ignore actions. `Use Pattern` opens Create Post with that pattern selected; generated output still goes to Queue as `needs_review`.
+The Dashboard shows weekly and monthly Pattern cards next to Trends. The scheduled Pattern Scout refresh stores separate weekly and monthly examples so the two views can diverge. Pattern cards stay compact and use sensible placeholders when a field is missing. Clicking a Pattern opens its source text, structure, why it worked, adaptation rule, source link, and Archive/Ignore actions. `Use Pattern` opens Create Post with that pattern selected; generated output still goes to Queue as `needs_review`.
 
 Manual add:
 

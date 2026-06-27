@@ -183,7 +183,7 @@ def refresh_patterns(
     candidates = (
         fetch_candidates(limit=limit)
         if fetch_candidates
-        else fetch_scrapingdog_pattern_candidates(limit=limit)
+        else fetch_scrapingdog_pattern_candidates(limit=limit, window=window)
     )
     stored: list[ViralPattern] = []
     errors: list[str] = []
@@ -197,15 +197,20 @@ def refresh_patterns(
             if not is_actionable_pattern_analysis(analysis):
                 skipped += 1
                 continue
+            source_url = clean_optional(candidate.get("source_url") or candidate.get("url") or candidate.get("link"))
+            source_text = clean_optional(candidate.get("source_text") or candidate.get("text") or candidate.get("snippet") or candidate.get("description") or candidate.get("title"))
+            source_summary = clean_optional(analysis.get("source_summary") or candidate.get("summary") or candidate.get("title"))
+            pattern_name = clean_optional(analysis.get("pattern_name"))
+            pattern_identity = source_url or f"{pattern_name}:{source_text}:{source_summary}"
             pattern = add_pattern_example(
                 store,
-                source_url=clean_optional(candidate.get("source_url") or candidate.get("url") or candidate.get("link")),
+                source_url=source_url,
                 source_author=clean_optional(candidate.get("source_author") or candidate.get("author") or candidate.get("source")),
-                source_text=clean_optional(candidate.get("source_text") or candidate.get("text") or candidate.get("snippet") or candidate.get("description") or candidate.get("title")),
-                source_summary=clean_optional(analysis.get("source_summary") or candidate.get("summary") or candidate.get("title")),
+                source_text=source_text,
+                source_summary=source_summary,
                 topic=clean_optional(analysis.get("topic") or candidate.get("topic")),
                 category=clean_optional(analysis.get("category")),
-                pattern_name=clean_optional(analysis.get("pattern_name")),
+                pattern_name=pattern_name,
                 hook_style=clean_optional(analysis.get("hook_style")),
                 structure=clean_optional(analysis.get("structure")),
                 pacing=clean_optional(analysis.get("pacing")),
@@ -223,6 +228,7 @@ def refresh_patterns(
                 window=window,
                 status="active",
                 raw_text=json.dumps({"candidate": candidate, "analysis": analysis}, sort_keys=True),
+                pattern_id=stable_pattern_id(f"{window}:{pattern_identity}"),
             )
         except Exception as exc:  # noqa: BLE001 - one candidate should not fail the refresh.
             skipped += 1
@@ -256,7 +262,7 @@ def select_relevant_patterns(
     return ranked[:limit]
 
 
-def fetch_scrapingdog_pattern_candidates(*, limit: int = 5) -> list[dict[str, object]]:
+def fetch_scrapingdog_pattern_candidates(*, limit: int = 5, window: str = "weekly") -> list[dict[str, object]]:
     api_key = scrapingdog_api_key()
     if not api_key:
         raise ValueError(PATTERN_REFRESH_MISSING_SCRAPINGDOG)
@@ -268,7 +274,7 @@ def fetch_scrapingdog_pattern_candidates(*, limit: int = 5) -> list[dict[str, ob
             "results": str(max(limit, 5)),
             "country": "us",
             "language": "en",
-            "tbs": "qdr:d",
+            "tbs": {"daily": "qdr:d", "weekly": "qdr:w", "monthly": "qdr:m"}.get(window, "qdr:w"),
         },
         timeout=SCRAPINGDOG_TIMEOUT_SECONDS,
     )
@@ -369,7 +375,7 @@ def pattern_groups(store: SQLiteStore, *, limit: int = 5) -> dict[str, list[Vira
 
     return {
         "weekly": visible(["weekly"]),
-        "monthly": visible(["monthly", "weekly"]),
+        "monthly": visible(["monthly"]),
     }
 
 

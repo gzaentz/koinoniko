@@ -1851,9 +1851,11 @@ async function refreshTrendsFromAccount() {
 async function refreshPatternsFromAccount() {
   const payload = await api("/api/patterns/refresh", {
     method: "POST",
-    body: JSON.stringify({ limit: 5, window: "weekly" }),
+    body: JSON.stringify({ limit: 5, windows: ["weekly", "monthly"] }),
   });
-  showMessage(`Patterns refreshed. Stored ${payload.stored || 0}; skipped ${payload.skipped || 0}.`);
+  const weekly = payload.windows?.weekly?.stored || 0;
+  const monthly = payload.windows?.monthly?.stored || 0;
+  showMessage(`Patterns refreshed. Weekly ${weekly}; monthly ${monthly}; skipped ${payload.skipped || 0}.`);
   await refreshAfterAccountAction();
 }
 
