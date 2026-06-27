@@ -137,12 +137,33 @@ async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
     headers: {
+      "Accept": "application/json",
       "Content-Type": "application/json",
       ...(options.headers || {}),
     },
   });
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
+  const contentType = response.headers.get("Content-Type") || "";
+  const isJson = contentType.includes("application/json");
+  const redirectedToLogin = response.redirected && new URL(response.url, window.location.href).pathname === "/login";
+  let payload = {};
+  if (text && isJson) {
+    try {
+      payload = JSON.parse(text);
+    } catch (_) {
+      throw new Error(`Server returned invalid JSON for ${path}.`);
+    }
+  } else if (text) {
+    if (response.status === 401 || redirectedToLogin) {
+      window.location.href = "/login";
+      throw new Error("Authentication required.");
+    }
+    const trimmed = text.trimStart().toLowerCase();
+    if (contentType.includes("text/html") || trimmed.startsWith("<!doctype") || trimmed.startsWith("<html")) {
+      throw new Error(`Server returned HTML instead of JSON for ${path}. Refresh the page and try again.`);
+    }
+    throw new Error(`Server returned a non-JSON response for ${path}.`);
+  }
   if (response.status === 401 || (response.status === 503 && payload.error && payload.error.includes("login"))) {
     window.location.href = "/login";
     throw new Error(payload.error || "Authentication required.");

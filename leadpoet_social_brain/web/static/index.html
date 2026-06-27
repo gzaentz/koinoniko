@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-source-selectors-schedule">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-account-sync-footer">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -322,9 +322,10 @@
         </section>
 
         <section class="account-detail-panel" id="accountSyncPanel" data-account-panel="sync">
+          <div class="sync-table" id="accountSyncGrid"></div>
           <div class="account-detail-actions">
             <div class="add-menu-wrap sync-menu-wrap">
-              <button id="accountSyncMenuButton" type="button" aria-haspopup="true" aria-expanded="false">Sync now</button>
+              <button id="accountSyncMenuButton" type="button" aria-haspopup="true" aria-expanded="false">Sync</button>
               <div class="action-menu sync-menu hidden" id="accountSyncMenu">
                 <button id="accountSyncAllButton" type="button">Sync All</button>
                 <button class="secondary" id="accountSyncPostsButton" type="button">Sync Posts</button>
@@ -334,7 +335,6 @@
               </div>
             </div>
           </div>
-          <div class="sync-table" id="accountSyncGrid"></div>
         </section>
 
         <section class="account-detail-panel" id="accountProfilePanel" data-account-panel="profile">
@@ -548,6 +548,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260627-source-selectors"></script>
+    <script src="/static/app.js?v=20260627-sync-json-guard"></script>
   </body>
 </html>

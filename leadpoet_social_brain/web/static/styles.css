@@ -1250,7 +1250,7 @@ main {
 .account-detail-actions {
   display: flex;
   justify-content: flex-end;
-  margin-bottom: 16px;
+  margin-top: 16px;
 }
 
 .account-detail-actions .sync-menu-wrap {
