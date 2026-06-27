@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from http import HTTPStatus
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 from pathlib import Path
 
@@ -20,7 +20,7 @@ from leadpoet_social_brain.assistant_context import (
 )
 from leadpoet_social_brain.categorization import XPostLLMCategorizer, parse_x_category_response
 from leadpoet_social_brain.content_queue import create_post_x, plan_week_x, post_queue_item_x
-from leadpoet_social_brain.cli import main as cli_main
+from leadpoet_social_brain.cli import build_parser as build_cli_parser, main as cli_main
 from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.core.models import ContentQueueItem, DraftRequest, EngagementMetrics, PostNote, SocialPost, SyncMetadata, TrendItem, utc_now
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
@@ -3033,6 +3033,17 @@ class SocialBrainTest(unittest.TestCase):
             "task-secret",
             {"limit": 50},
         )
+
+    def test_pattern_refresh_cli_defaults_to_weekly_and_supports_monthly(self):
+        parser = build_cli_parser()
+
+        default_args = parser.parse_args(["refresh-patterns"])
+        monthly_args = parser.parse_args(["refresh-patterns", "--window", "monthly"])
+
+        self.assertEqual(default_args.window, "weekly")
+        self.assertEqual(monthly_args.window, "monthly")
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            parser.parse_args(["refresh-patterns", "--window", "daily"])
 
     def test_weekly_pattern_refresh_task_forces_weekly_window(self):
         with tempfile.TemporaryDirectory() as tmpdir:
