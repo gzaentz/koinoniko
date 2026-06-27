@@ -510,6 +510,12 @@ main {
   justify-content: flex-end;
 }
 
+.panel-header,
+.board-header,
+.voice-panel-header {
+  align-items: flex-start;
+}
+
 .dashboard-grid,
 .dashboard-top-grid {
   display: grid;
