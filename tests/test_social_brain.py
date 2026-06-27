@@ -491,6 +491,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn('class="account-layout"', index_html)
         self.assertNotIn('id="accountConnectionsPill"', index_html + app_js)
         self.assertNotIn('account-detail-drawer', index_html + styles_css)
+        self.assertIn(".account-detail-actions .sync-menu", styles_css)
+        self.assertIn("bottom: calc(100% + 8px)", styles_css)
         self.assertLess(index_html.index('id="accountSyncPanel"'), index_html.index('id="accountSyncMenuButton"'))
         self.assertLess(index_html.index('id="accountSyncGrid"'), index_html.index('id="accountSyncMenuButton"'))
         self.assertIn("openAccountDetailDrawer", app_js)

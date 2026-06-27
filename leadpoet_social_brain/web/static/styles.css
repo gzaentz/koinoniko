@@ -1257,6 +1257,14 @@ main {
   width: 168px;
 }
 
+.account-detail-actions .sync-menu {
+  top: auto;
+  right: 0;
+  bottom: calc(100% + 8px);
+  left: auto;
+  z-index: 6;
+}
+
 .voice-layout {
   display: grid;
   gap: 18px;
