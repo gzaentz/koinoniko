@@ -985,7 +985,7 @@ async function moveToScheduled(id) {
     scheduledAt = window.prompt("Scheduled date/time", scheduledAt || nextDefaultSchedule()) || "";
   }
   if (!scheduledAt.trim()) {
-    showMessage("Schedule required before moving to Scheduled Content.", true);
+    showMessage("Schedule required before moving to Scheduled.", true);
     return;
   }
   await api(`/api/queue/${encodeURIComponent(id)}`, {
