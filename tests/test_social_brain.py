@@ -3034,6 +3034,28 @@ class SocialBrainTest(unittest.TestCase):
             {"limit": 50},
         )
 
+    def test_weekly_pattern_refresh_task_forces_weekly_window(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+            provider = FakeProvider()
+            with patch("leadpoet_social_brain.web.app.load_configured_provider", return_value=provider), patch(
+                "leadpoet_social_brain.web.app.refresh_patterns",
+                return_value=PatternRefreshResult(fetched=1, stored=0, skipped=1),
+            ) as refresh:
+                status, payload = handle_api_request(
+                    "POST",
+                    "/tasks/refresh-patterns-weekly",
+                    json.dumps({"limit": 7, "window": "monthly"}),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["fetched"], 1)
+            refresh.assert_called_once()
+            self.assertEqual(refresh.call_args.kwargs["limit"], 7)
+            self.assertEqual(refresh.call_args.kwargs["window"], "weekly")
+
     def test_web_account_saves_resets_and_tests_model_settings(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"
