@@ -160,6 +160,7 @@ a {
 }
 
 .brand-row {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -331,16 +332,31 @@ main {
 }
 
 .sidebar-collapsed .brand-row {
-  flex-direction: column;
-  justify-content: flex-start;
+  justify-content: center;
   align-items: center;
-  gap: 10px;
+  gap: 0;
 }
 
 .sidebar-collapsed .brand {
   justify-content: center;
   width: 34px;
   flex: 0 0 auto;
+}
+
+.sidebar-collapsed .sidebar-toggle {
+  position: absolute;
+  top: 3px;
+  right: -14px;
+  flex-basis: 28px;
+  width: 28px;
+  min-height: 28px;
+  color: var(--muted);
+  opacity: 0.45;
+}
+
+.sidebar-collapsed .sidebar-toggle:hover,
+.sidebar-collapsed .sidebar-toggle:focus-visible {
+  opacity: 1;
 }
 
 .sidebar-collapsed .brand strong,
