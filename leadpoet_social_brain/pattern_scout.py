@@ -30,6 +30,9 @@ PATTERN_REFRESH_QUERY = (
     'site:x.com ("AI" OR "sales" OR "lead generation" OR GTM OR "AI SDR" OR Bittensor) '
     '("likes" OR "reposted" OR "bookmarks" OR "founder")'
 )
+DEFAULT_PATTERN_NAME = "Observed pattern"
+DEFAULT_ADAPTATION_RULE = "Use the structure, not the wording."
+MIN_PATTERN_SOURCE_TEXT_LENGTH = 40
 PatternCandidateFetcher = Callable[..., list[dict[str, object]]]
 
 
@@ -93,14 +96,14 @@ def add_pattern_example(
         source_summary=clean_optional(source_summary) or summarize_source(source_text),
         topic=clean_optional(topic),
         category=normalize_category(category),
-        pattern_name=clean_optional(pattern_name) or "Observed pattern",
+        pattern_name=clean_optional(pattern_name) or DEFAULT_PATTERN_NAME,
         hook_style=clean_optional(hook_style),
         structure=clean_optional(structure),
         pacing=clean_optional(pacing),
         tone=clean_optional(tone),
         formatting=clean_optional(formatting),
         why_it_worked=clean_optional(why_it_worked),
-        adaptation_rule=clean_optional(adaptation_rule) or "Use the structure, not the wording.",
+        adaptation_rule=clean_optional(adaptation_rule) or DEFAULT_ADAPTATION_RULE,
         engagement_notes=clean_optional(engagement_notes),
         likes=likes,
         replies=replies,
@@ -187,7 +190,13 @@ def refresh_patterns(
     skipped = 0
     for candidate in candidates[:limit]:
         try:
+            if not is_meaningful_pattern_source(candidate):
+                skipped += 1
+                continue
             analysis = analyze_pattern_candidate(provider, candidate)
+            if not is_actionable_pattern_analysis(analysis):
+                skipped += 1
+                continue
             pattern = add_pattern_example(
                 store,
                 source_url=clean_optional(candidate.get("source_url") or candidate.get("url") or candidate.get("link")),
@@ -309,9 +318,9 @@ The adaptation_rule should be concise and should include: Use the structure, not
         raise ValueError("Provider did not return pattern analysis JSON.")
     parsed["category"] = normalize_category(parsed.get("category"))
     if not clean_optional(parsed.get("pattern_name")):
-        parsed["pattern_name"] = "Observed pattern"
+        parsed["pattern_name"] = DEFAULT_PATTERN_NAME
     if not clean_optional(parsed.get("adaptation_rule")):
-        parsed["adaptation_rule"] = "Use the structure, not the wording."
+        parsed["adaptation_rule"] = DEFAULT_ADAPTATION_RULE
     return parsed
 
 
@@ -346,12 +355,16 @@ def parse_json_object(raw: str) -> dict[str, object] | None:
 
 def pattern_groups(store: SQLiteStore, *, limit: int = 5) -> dict[str, list[ViralPattern]]:
     def visible(window: str) -> list[ViralPattern]:
+        query_limit = max(limit * 4, 20)
         patterns = [
-            *store.list_viral_patterns(status="active", window=window, limit=limit),
-            *store.list_viral_patterns(status="saved", window=window, limit=limit),
+            *store.list_viral_patterns(status="active", window=window, limit=query_limit),
+            *store.list_viral_patterns(status="saved", window=window, limit=query_limit),
         ]
         seen: set[str] = set()
-        return [pattern for pattern in patterns if not (pattern.id in seen or seen.add(pattern.id))][:limit]
+        return [
+            pattern for pattern in patterns
+            if not is_placeholder_pattern(pattern) and not (pattern.id in seen or seen.add(pattern.id))
+        ][:limit]
 
     return {
         "daily": visible("daily"),
@@ -369,6 +382,57 @@ def summarize_source(text: str | None, max_length: int = 140) -> str | None:
     if not cleaned:
         return None
     return cleaned if len(cleaned) <= max_length else f"{cleaned[: max_length - 3].rstrip()}..."
+
+
+def candidate_source_text(candidate: dict[str, object]) -> str:
+    return clean_text(
+        candidate.get("source_text")
+        or candidate.get("text")
+        or candidate.get("snippet")
+        or candidate.get("description")
+        or candidate.get("title")
+    )
+
+
+def is_meaningful_pattern_source(candidate: dict[str, object]) -> bool:
+    return is_meaningful_pattern_source_text(candidate_source_text(candidate))
+
+
+def is_meaningful_pattern_source_text(value: object) -> bool:
+    cleaned = clean_text(value)
+    if len(cleaned) < MIN_PATTERN_SOURCE_TEXT_LENGTH:
+        return False
+    lowered = cleaned.lower()
+    if lowered in {"unknown", "no text provided", "no source text stored"}:
+        return False
+    if re.search(r"\(@[^)]+\)\s*/\s*(posts|with replies|replies|media|likes)\s*/\s*x$", cleaned, flags=re.I):
+        return False
+    return True
+
+
+def is_actionable_pattern_analysis(analysis: dict[str, object]) -> bool:
+    return any(
+        clean_optional(analysis.get(key))
+        for key in ["structure", "hook_style", "pacing", "tone", "formatting", "why_it_worked"]
+    )
+
+
+def is_placeholder_pattern(pattern: ViralPattern) -> bool:
+    default_name = clean_text(pattern.pattern_name).lower() == DEFAULT_PATTERN_NAME.lower()
+    default_rule = clean_text(pattern.adaptation_rule).lower() in {"", DEFAULT_ADAPTATION_RULE.lower()}
+    has_analysis = any(
+        clean_optional(value)
+        for value in [
+            pattern.structure,
+            pattern.hook_style,
+            pattern.pacing,
+            pattern.tone,
+            pattern.formatting,
+            pattern.why_it_worked,
+        ]
+    )
+    has_source = any(is_meaningful_pattern_source_text(value) for value in [pattern.source_text, pattern.source_summary])
+    return default_name and default_rule and not has_analysis and not has_source
 
 
 def normalize_category(value: object) -> str:

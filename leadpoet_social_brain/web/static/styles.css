@@ -1583,9 +1583,9 @@ main {
   right: 24px;
   bottom: 24px;
   z-index: 24;
-  width: 42px;
-  min-height: 42px;
-  height: 42px;
+  width: 56px;
+  min-height: 56px;
+  height: 56px;
   padding: 0;
   border-radius: 50%;
   background: var(--black);
@@ -1603,8 +1603,8 @@ main {
 
 .assistant-launcher-icon {
   display: block;
-  width: 24px;
-  height: 24px;
+  width: 34px;
+  height: 34px;
   color: var(--white);
   fill: none;
   overflow: visible;
@@ -2288,9 +2288,9 @@ main {
   .assistant-launcher {
     right: 16px;
     bottom: 16px;
-    width: 40px;
-    min-height: 40px;
-    height: 40px;
+    width: 50px;
+    min-height: 50px;
+    height: 50px;
   }
 
   .account-detail-modal {

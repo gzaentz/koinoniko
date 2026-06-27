@@ -30,6 +30,7 @@ from leadpoet_social_brain.pattern_scout import (
     PATTERN_REFRESH_MISSING_SCRAPINGDOG,
     add_pattern_example,
     ingest_patterns_batch_csv,
+    pattern_groups,
     refresh_patterns,
 )
 from leadpoet_social_brain.platforms.x_api import (
@@ -418,6 +419,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('id="assistantLauncher"', index_html)
         self.assertIn('title="Ask Koinoniko"', index_html)
         self.assertIn('class="assistant-launcher-icon"', index_html)
+        self.assertIn("width: 56px", styles_css)
+        self.assertIn("width: 34px", styles_css)
         self.assertIn('width="24" height="24" fill="none"', index_html)
         self.assertIn('class="assistant-launcher-laurel"', index_html)
         self.assertIn('fill="currentColor"', index_html)
@@ -2178,6 +2181,70 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(patterns[0].category, "sales")
             self.assertEqual(patterns[0].replies, 18)
             self.assertIn("Extract the mechanic only", provider.prompts[0])
+            store.close()
+
+    def test_pattern_refresh_skips_x_profile_titles_without_post_text(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            provider = FakeProvider([
+                json.dumps(
+                    {
+                        "pattern_name": "Observed pattern",
+                        "adaptation_rule": "Use the structure, not the wording.",
+                        "category": "other",
+                    }
+                )
+            ])
+
+            result = refresh_patterns(
+                store,
+                provider,
+                limit=1,
+                window="daily",
+                fetch_candidates=lambda limit: [
+                    {
+                        "source_url": "https://x.com/howardlindzon",
+                        "source_author": "X",
+                        "source_text": "Howard Lindzon (@howardlindzon) / Posts / X",
+                    }
+                ],
+            )
+
+            self.assertEqual(result.fetched, 1)
+            self.assertEqual(result.stored, 0)
+            self.assertEqual(result.skipped, 1)
+            self.assertEqual(provider.prompts, [])
+            self.assertEqual(store.list_viral_patterns(status="active", window="daily"), [])
+            store.close()
+
+    def test_pattern_groups_hide_placeholder_patterns_without_analysis(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            for index in range(6):
+                add_pattern_example(
+                    store,
+                    source_url=f"https://x.com/howardlindzon/{index}",
+                    source_author="X",
+                    source_text="Howard Lindzon (@howardlindzon) / Posts / X",
+                    source_summary="Howard Lindzon (@howardlindzon) / Posts / X",
+                    collected_at=f"2026-06-27T12:0{index}:00+00:00",
+                    window="daily",
+                )
+            specific = add_pattern_example(
+                store,
+                source_url="https://x.com/operator/status/pattern3",
+                source_author="Operator",
+                source_text="Most AI SDR takes are just volume with better adjectives and not enough buyer context.",
+                pattern_name="Specific teardown",
+                structure="weak claim, concrete counterexample, useful rule",
+                why_it_worked="It makes a familiar AI mistake feel obvious.",
+                collected_at="2026-06-20T12:00:00+00:00",
+                window="daily",
+            )
+
+            groups = pattern_groups(store)
+
+            self.assertEqual([pattern.id for pattern in groups["daily"]], [specific.id])
             store.close()
 
     def test_refresh_trends_task_saves_daily_and_weekly_metadata(self):
