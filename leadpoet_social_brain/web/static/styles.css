@@ -878,6 +878,12 @@ main {
   padding-right: 4px;
 }
 
+#voiceView.view.active {
+  height: 100dvh;
+  overflow: hidden;
+  padding: 28px 38px;
+}
+
 .add-menu-wrap {
   position: relative;
 }
@@ -1084,7 +1090,9 @@ main {
 .voice-layout {
   display: grid;
   gap: 18px;
-  max-width: 1180px;
+  grid-template-rows: auto minmax(150px, 0.7fr) minmax(0, 1.3fr) auto;
+  height: 100%;
+  min-height: 0;
 }
 
 .voice-status-panel {
@@ -1111,10 +1119,26 @@ main {
 .voice-list {
   display: grid;
   gap: 12px;
+  min-height: 0;
 }
 
 .voice-summary {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.voice-current-panel,
+.voice-examples-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.voice-current-panel .voice-summary,
+.voice-examples-panel .voice-list {
+  flex: 1;
+  align-content: start;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .voice-summary-section,
@@ -1196,6 +1220,9 @@ main {
 
 .voice-disclosure .voice-list {
   margin-top: 14px;
+  max-height: 24vh;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .voice-edit-section {
@@ -1456,6 +1483,23 @@ main {
 
   #reviewerView .card-list {
     overflow: visible;
+  }
+
+  #voiceView.view.active {
+    height: auto;
+    overflow: visible;
+  }
+
+  .voice-layout {
+    height: auto;
+    grid-template-rows: none;
+  }
+
+  .voice-current-panel .voice-summary,
+  .voice-examples-panel .voice-list,
+  .voice-disclosure .voice-list {
+    overflow: visible;
+    max-height: none;
   }
 
   .dashboard-grid {
