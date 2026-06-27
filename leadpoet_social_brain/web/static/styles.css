@@ -1015,40 +1015,27 @@ main {
   color: var(--muted);
 }
 
-.connection-list,
-.sync-table {
-  display: grid;
-  gap: 0;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
 .account-hub {
   max-width: 980px;
 }
 
 .account-settings-list {
   display: grid;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 10px;
-  overflow: hidden;
   background: var(--white);
 }
 
 .settings-row {
-  min-height: 76px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 18px;
   align-items: center;
+  min-height: 76px;
   padding: 14px 16px;
   border-bottom: 1px solid var(--line);
   cursor: pointer;
-}
-
-.settings-row > div {
-  min-width: 0;
 }
 
 .settings-row:last-child {
@@ -1057,20 +1044,24 @@ main {
 
 .settings-row:hover,
 .settings-row:focus-visible {
-  background: var(--soft);
   outline: 0;
+  background: var(--soft);
+}
+
+.settings-row > div {
+  min-width: 0;
 }
 
 .settings-row h2 {
+  margin-bottom: 4px;
   font-size: 17px;
   line-height: 1.2;
-  margin-bottom: 4px;
 }
 
 .settings-row p {
+  overflow: hidden;
   color: var(--muted);
   font-size: 13px;
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1102,6 +1093,15 @@ main {
   color: var(--muted);
 }
 
+.connection-list,
+.sync-table {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
 .connection-row,
 .sync-row,
 .security-row {
@@ -1120,8 +1120,7 @@ main {
 }
 
 .connection-row p,
-.sync-row p,
-.account-security p {
+.sync-row p {
   color: var(--muted);
   font-size: 13px;
 }
@@ -1183,14 +1182,14 @@ main {
   right: 18px;
   bottom: 74px;
   z-index: 23;
+  display: grid;
+  grid-template-rows: auto 1fr;
   width: min(480px, calc(100vw - 36px));
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--white);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.14);
-  display: grid;
-  grid-template-rows: auto 1fr;
-  overflow: hidden;
 }
 
 .account-detail-header {
@@ -1202,9 +1201,9 @@ main {
 }
 
 .account-detail-header p {
+  margin-top: 3px;
   color: var(--muted);
   font-size: 13px;
-  margin-top: 3px;
 }
 
 .account-detail-panel {

@@ -241,26 +241,28 @@
             <article class="settings-row" id="accountConnectionsRow" role="button" tabindex="0" aria-controls="accountDetailDrawer">
               <div>
                 <h2>Connections</h2>
-                <p id="accountConnectionsSummary">Loading connections.</p>
+                <p id="accountConnectionsSummary">Checking connected services...</p>
               </div>
               <div class="settings-row-actions">
-                <span id="accountConnectionsPill" class="status-badge">Loading</span>
-                <button class="settings-row-button" id="accountConnectionsManageButton" type="button" aria-label="Manage connections">Manage</button>
+                <span class="status-badge" id="accountConnectionsPill">Checking</span>
+                <button class="settings-row-button icon-only" id="accountConnectionsManageButton" type="button" aria-label="Manage connections">&rsaquo;</button>
               </div>
             </article>
 
             <article class="settings-row" id="accountModelsRow" role="button" tabindex="0" aria-controls="accountDetailDrawer">
               <div>
                 <h2>Model Routing</h2>
-                <p id="accountModelSummary">Loading model routing.</p>
+                <p id="accountModelSummary">Checking model routing...</p>
               </div>
-              <button class="settings-row-button" id="accountModelsManageButton" type="button" aria-label="Manage model routing">Manage</button>
+              <div class="settings-row-actions">
+                <button class="settings-row-button" id="accountModelsManageButton" type="button" aria-label="Manage model routing">Manage</button>
+              </div>
             </article>
 
-            <article class="settings-row settings-row-sync" id="accountSyncRow" role="button" tabindex="0" aria-controls="accountDetailDrawer">
+            <article class="settings-row" id="accountSyncRow" role="button" tabindex="0" aria-controls="accountDetailDrawer">
               <div>
                 <h2>Sync</h2>
-                <p id="accountSyncSummary">Loading sync status.</p>
+                <p id="accountSyncSummary">Checking sync status...</p>
               </div>
               <div class="settings-row-actions">
                 <div class="add-menu-wrap sync-menu-wrap">
@@ -273,17 +275,17 @@
                     <button class="secondary" id="accountRefreshPatternsButton" type="button">Sync Patterns</button>
                   </div>
                 </div>
-                <button class="settings-row-button icon-only" id="accountSyncManageButton" type="button" aria-label="View sync details">›</button>
+                <button class="settings-row-button icon-only" id="accountSyncManageButton" type="button" aria-label="View sync details">&rsaquo;</button>
               </div>
             </article>
 
-            <article class="settings-row settings-row-account" id="accountProfileRow" role="button" tabindex="0" aria-controls="accountDetailDrawer">
+            <article class="settings-row" id="accountProfileRow" role="button" tabindex="0" aria-controls="accountDetailDrawer">
               <div>
                 <h2>Account</h2>
-                <p id="accountUserSummary">Signed in.</p>
+                <p id="accountUserSummary">Signed in</p>
               </div>
-              <form method="post" action="/logout">
-                <button class="secondary subtle-button" type="submit">Log out</button>
+              <form class="settings-row-actions" method="post" action="/logout">
+                <button class="subtle-button" type="submit">Log out</button>
               </form>
             </article>
           </section>
@@ -291,20 +293,18 @@
       </section>
     </main>
 
-    <aside class="account-detail-drawer hidden" id="accountDetailDrawer" aria-hidden="true" aria-label="Account details">
+    <aside class="account-detail-drawer hidden" id="accountDetailDrawer" aria-hidden="true" aria-labelledby="accountDetailTitle">
       <div class="account-detail-header">
         <div>
-          <h2 id="accountDetailTitle">Account</h2>
+          <h2 id="accountDetailTitle">Account details</h2>
           <p id="accountDetailSubtitle">Manage account settings.</p>
         </div>
         <button class="icon-button" id="accountDetailCloseButton" type="button" aria-label="Close account details">x</button>
       </div>
-
-      <section class="account-detail-panel" id="accountConnectionsPanel" data-account-panel="connections">
+      <div class="account-detail-panel hidden" data-account-panel="connections" id="accountConnectionsPanel">
         <div class="connection-list" id="accountStatusGrid"></div>
-      </section>
-
-      <section class="account-detail-panel" id="accountModelsPanel" data-account-panel="models">
+      </div>
+      <div class="account-detail-panel hidden" data-account-panel="models" id="accountModelsPanel">
         <div class="settings-form">
           <label>
             Default model
@@ -323,18 +323,16 @@
             <input id="accountEvaluatorModel" placeholder="optional">
           </label>
           <div class="actions left">
-            <button id="saveAccountButton">Save Model Settings</button>
+            <button id="saveAccountButton" type="button">Save Model Settings</button>
           </div>
         </div>
-      </section>
-
-      <section class="account-detail-panel" id="accountSyncPanel" data-account-panel="sync">
+      </div>
+      <div class="account-detail-panel hidden" data-account-panel="sync" id="accountSyncPanel">
         <div class="sync-table" id="accountSyncGrid"></div>
-      </section>
-
-      <section class="account-detail-panel" id="accountProfilePanel" data-account-panel="profile">
+      </div>
+      <div class="account-detail-panel hidden" data-account-panel="profile" id="accountProfilePanel">
         <div class="account-security" id="accountSecurityBlock"></div>
-      </section>
+      </div>
     </aside>
 
     <section class="modal hidden" id="postModal" aria-hidden="true">

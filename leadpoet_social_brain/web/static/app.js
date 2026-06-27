@@ -2034,7 +2034,7 @@ function renderAccount() {
         <strong>${escapeHtml(security.username || "Configured user")}</strong>
       </div>
       <form method="post" action="/logout">
-        <button class="secondary" type="submit">Log Out</button>
+        <button class="secondary" type="submit">Log out</button>
       </form>
     </div>
   `;
@@ -2738,8 +2738,9 @@ function setup() {
     ["accountSyncRow", "sync"],
     ["accountProfileRow", "profile"],
   ].forEach(([id, panel]) => {
-    $(id).addEventListener("click", (event) => openAccountDetailFromRow(event, panel));
-    $(id).addEventListener("keydown", (event) => handleAccountDetailRowKeydown(event, panel));
+    const row = $(id);
+    row.addEventListener("click", (event) => openAccountDetailFromRow(event, panel));
+    row.addEventListener("keydown", (event) => handleAccountDetailRowKeydown(event, panel));
   });
   $("accountConnectionsManageButton").addEventListener("click", (event) => {
     event.stopPropagation();
