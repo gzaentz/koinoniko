@@ -13,11 +13,16 @@ from unittest.mock import patch
 from pathlib import Path
 
 from leadpoet_social_brain.analytics import build_analytics_summary
+from leadpoet_social_brain.assistant_context import (
+    ASSISTANT_MISSING_PROVIDER_MESSAGE,
+    build_assistant_context,
+    build_assistant_prompt,
+)
 from leadpoet_social_brain.categorization import XPostLLMCategorizer, parse_x_category_response
 from leadpoet_social_brain.content_queue import create_post_x, plan_week_x, post_queue_item_x
 from leadpoet_social_brain.cli import main as cli_main
 from leadpoet_social_brain.context import ContextManager
-from leadpoet_social_brain.core.models import ContentQueueItem, DraftRequest, EngagementMetrics, PostNote, SocialPost, TrendItem, utc_now
+from leadpoet_social_brain.core.models import ContentQueueItem, DraftRequest, EngagementMetrics, PostNote, SocialPost, SyncMetadata, TrendItem, utc_now
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
 from leadpoet_social_brain.openrouter_provider import OpenRouterProvider, create_provider
@@ -394,6 +399,16 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('id="patternModal"', index_html)
         self.assertIn('id="savedTrendList"', index_html)
         self.assertEqual(index_html.count('id="trendList"'), 1)
+        self.assertIn('id="assistantLauncher"', index_html)
+        self.assertIn('id="assistantDrawer"', index_html)
+        self.assertIn('id="assistantStarterPrompts"', index_html)
+        self.assertIn('id="assistantMessages"', index_html)
+        self.assertIn('id="assistantInput"', index_html)
+        self.assertIn("Ask Koinoniko", index_html)
+        self.assertIn("What should I post about today?", app_js)
+        self.assertIn("/api/assistant/chat", app_js)
+        self.assertIn("/api/assistant/starter-prompts", app_js)
+        self.assertNotIn('data-view="assistant"', index_html)
         self.assertIn("Use the structure, not the wording.", app_js)
         self.assertIn("usePatternInPost", app_js)
         self.assertIn("renderDashboardPatterns", app_js)
@@ -1190,6 +1205,139 @@ class SocialBrainTest(unittest.TestCase):
             store = SQLiteStore(db_path)
             saved = store.get_content_queue_item(item.id)
             self.assertEqual(saved.status, "needs_review")
+            store.close()
+
+    def test_assistant_endpoint_requires_login(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.save_web_auth_user(DEFAULT_AUTH_USERNAME, "test-password")
+            store.close()
+
+            allowed, captured = self.handler_guard(db_path, "/api/assistant/chat")
+
+            self.assertFalse(allowed)
+            self.assertEqual(captured["status"], 401)
+            self.assertEqual(captured["payload"]["error"], "Authentication required.")
+
+    def test_assistant_starter_prompts_and_missing_provider(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+
+            prompts_status, prompts = handle_api_request("GET", "/api/assistant/starter-prompts", db_path=db_path)
+            self.assertEqual(prompts_status, 200)
+            self.assertIn("What patterns are working best?", prompts["items"])
+
+            with patch("leadpoet_social_brain.web.app.load_configured_provider", return_value=None):
+                status, payload = handle_api_request(
+                    "POST",
+                    "/api/assistant/chat",
+                    json.dumps({"message": "What should I post about today?"}),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 400)
+            self.assertEqual(payload["error"], ASSISTANT_MISSING_PROVIDER_MESSAGE)
+
+    def test_assistant_context_includes_posts_metrics_and_queue(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            post = store.save_post(
+                SocialPost(
+                    platform="x",
+                    text="Sales AI only gets useful when it knows why this buyer cares today.",
+                    url="https://x.com/gavin/status/assistant101",
+                    published_at="2026-06-22T12:00:00+00:00",
+                    author="Gavin",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    status="published",
+                )
+            )
+            store.add_metrics(
+                post.id,
+                EngagementMetrics(impressions=1000, likes=50, replies=20, reposts=10, bookmarks=30),
+            )
+            store.save_content_queue_item(
+                ContentQueueItem(
+                    text="Scheduled post that might be too generic.",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-06-30T10:00:00+00:00",
+                    status="approved",
+                    approved_at=utc_now(),
+                )
+            )
+
+            voice_context = build_assistant_context(store, "What are the best posts to use as Voice Examples?")
+            queue_context = build_assistant_context(store, "Which scheduled posts feel weakest?")
+
+            self.assertEqual(voice_context["voice"]["candidate_examples"][0]["id"], post.id)
+            self.assertEqual(voice_context["voice"]["candidate_examples"][0]["metrics"]["impressions"], 1000)
+            self.assertIn("engagement rate", voice_context["voice"]["candidate_examples"][0]["key_metric"])
+            self.assertEqual(queue_context["queue"]["scheduled"][0]["summary"], "Scheduled post that might be too generic.")
+            store.close()
+
+    def test_assistant_chat_is_read_only_and_marks_suggested_actions_for_confirmation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            post = store.save_post(
+                SocialPost(
+                    platform="x",
+                    text="A strong founder post about buyer timing and sales AI.",
+                    url="https://x.com/gavin/status/assistant201",
+                    published_at="2026-06-22T12:00:00+00:00",
+                    author="Gavin",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    status="published",
+                )
+            )
+            store.add_metrics(post.id, EngagementMetrics(impressions=2000, likes=90, replies=25, bookmarks=50))
+            store.close()
+
+            provider = FakeProvider(["Use the June 22 buyer timing post as a Voice Example. It has strong engagement and teaches plain founder contrast."])
+            with patch("leadpoet_social_brain.web.app.load_configured_provider", return_value=provider):
+                status, payload = handle_api_request(
+                    "POST",
+                    "/api/assistant/chat",
+                    json.dumps({"message": "What are the best posts to use as Voice Examples?"}),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 200)
+            self.assertIn("Voice Example", payload["answer"])
+            self.assertTrue(payload["suggested_actions"])
+            self.assertTrue(all(action["requires_confirmation"] for action in payload["suggested_actions"]))
+            self.assertEqual(payload["suggested_actions"][0]["payload"]["post_id"], post.id)
+            self.assertIn("assistant201", provider.prompts[0])
+
+            store = SQLiteStore(db_path)
+            self.assertEqual(store.notes_by_post_id([post.id]), {})
+            store.close()
+
+    def test_assistant_context_omits_secrets_and_reports_missing_data(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            secret = "super-secret-token-value"
+            store.save_sync_metadata(
+                SyncMetadata(
+                    key="x_posts_sync",
+                    status="failed",
+                    error_message=secret,
+                    summary={"token": secret},
+                )
+            )
+            with patch.dict(os.environ, {"X_BEARER_TOKEN": secret, "OPENROUTER_API_KEY": secret}, clear=False):
+                context = build_assistant_context(store, "What are the best posts to use as Voice Examples?")
+                prompt = build_assistant_prompt("What are the best posts to use as Voice Examples?", context)
+
+            self.assertNotIn(secret, json.dumps(context))
+            self.assertNotIn(secret, prompt)
+            self.assertIn("No X posts are stored yet.", context["data_gaps"])
+            self.assertIn("No current Koinoniko Voice summary has been built yet.", context["data_gaps"])
             store.close()
 
     def test_task_endpoint_requires_configured_token(self):

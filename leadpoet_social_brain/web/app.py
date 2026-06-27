@@ -20,6 +20,14 @@ from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
 from leadpoet_social_brain.analytics import build_analytics_summary
+from leadpoet_social_brain.assistant_context import (
+    ASSISTANT_MISSING_PROVIDER_MESSAGE,
+    assistant_sources,
+    assistant_suggested_actions,
+    build_assistant_context,
+    build_assistant_prompt,
+    starter_prompts,
+)
 from leadpoet_social_brain.categorization import XPostLLMCategorizer
 from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.content_queue import (
@@ -572,6 +580,10 @@ def route_api(
         return test_provider_response(store)
     if method == "GET" and parts == ["api", "dashboard"]:
         return 200, dashboard_payload(store)
+    if method == "GET" and parts == ["api", "assistant", "starter-prompts"]:
+        return 200, {"items": starter_prompts()}
+    if method == "POST" and parts == ["api", "assistant", "chat"]:
+        return assistant_chat_response(store, payload)
     if method == "GET" and parts == ["api", "voice", "status"]:
         return 200, voice_status_payload(store)
     if method == "GET" and parts == ["api", "voice", "current"]:
@@ -776,6 +788,35 @@ def publish_due_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str
         author=str(payload.get("author") or "Gavin"),
     )
     return {"results": [publish_result_payload(result) for result in results]}
+
+
+def assistant_chat_response(store: SQLiteStore, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    message = clean_optional(payload.get("message"))
+    if not message:
+        return 400, {"error": "message is required."}
+    provider = load_configured_provider(store)
+    if not provider:
+        return 400, {"error": ASSISTANT_MISSING_PROVIDER_MESSAGE}
+    context = build_assistant_context(store, message)
+    prompt = build_assistant_prompt(message, context)
+    try:
+        answers = generate_with_provider(
+            provider,
+            prompt,
+            variants=1,
+            model=resolve_model_routing(store, provider).default,
+        )
+    except Exception as exc:  # noqa: BLE001 - provider failures should be visible in the drawer.
+        return 400, {"error": str(exc)}
+    answer = clean_optional(answers[0] if answers else None)
+    if not answer:
+        return 400, {"error": "Provider returned an empty assistant answer."}
+    return 200, {
+        "answer": answer,
+        "suggested_actions": assistant_suggested_actions(message, context),
+        "sources": assistant_sources(context),
+        "conversation_id": clean_optional(payload.get("conversation_id")),
+    }
 
 
 def sync_metrics_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:

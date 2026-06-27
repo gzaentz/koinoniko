@@ -1,5 +1,13 @@
 const DEFAULT_SYNC_USERNAME = "gavinzaentz";
 const SIDEBAR_COLLAPSED_KEY = "koinonikoSidebarCollapsed";
+const ASSISTANT_FALLBACK_STARTERS = [
+  "What are the best posts to use as Voice Examples?",
+  "What patterns are working best?",
+  "What should I post about today?",
+  "Which scheduled posts feel weakest?",
+  "What topics are getting the best engagement?",
+  "Which recent post should we make a follow-up to?",
+];
 
 const state = {
   view: "dashboard",
@@ -21,6 +29,13 @@ const state = {
   editingPostField: null,
   taxonomy: { topics: [], postTypes: [] },
   recentPostsSort: { key: "date", direction: "desc" },
+  assistant: {
+    open: false,
+    prompts: [],
+    messages: [],
+    loading: false,
+    conversationId: "",
+  },
 };
 
 const DEFAULT_TOPIC_OPTIONS = [
@@ -2073,6 +2088,134 @@ function runAccountSyncMenuAction(event, loadingText, work) {
   runButton($("accountSyncMenuButton"), loadingText, work);
 }
 
+function setAssistantOpen(open) {
+  state.assistant.open = open;
+  renderAssistantDrawer();
+  if (open) {
+    loadAssistantStarterPrompts().catch(() => {
+      state.assistant.prompts = ASSISTANT_FALLBACK_STARTERS;
+      renderAssistantDrawer();
+    });
+    window.setTimeout(() => $("assistantInput")?.focus(), 80);
+  }
+}
+
+function renderAssistantDrawer() {
+  const drawer = $("assistantDrawer");
+  const launcher = $("assistantLauncher");
+  if (!drawer || !launcher) return;
+  drawer.classList.toggle("hidden", !state.assistant.open);
+  drawer.setAttribute("aria-hidden", state.assistant.open ? "false" : "true");
+  launcher.setAttribute("aria-expanded", state.assistant.open ? "true" : "false");
+  const prompts = state.assistant.prompts.length ? state.assistant.prompts : ASSISTANT_FALLBACK_STARTERS;
+  $("assistantStarterPrompts").innerHTML = prompts
+    .map((prompt) => `<button class="assistant-starter" type="button" data-prompt="${escapeAttr(prompt)}">${escapeHtml(prompt)}</button>`)
+    .join("");
+  const messages = state.assistant.messages.map(assistantMessageHtml);
+  if (state.assistant.loading) {
+    messages.push(`<div class="assistant-message assistant"><span class="assistant-loading">Thinking...</span></div>`);
+  }
+  $("assistantMessages").innerHTML = messages.length
+    ? messages.join("")
+    : `<div class="assistant-empty">Ask what is working, what feels weak, or what Gavin should post next.</div>`;
+  $("assistantSendButton").disabled = state.assistant.loading;
+  scrollAssistantToBottom();
+}
+
+async function loadAssistantStarterPrompts() {
+  if (state.assistant.prompts.length) return;
+  const payload = await api("/api/assistant/starter-prompts");
+  state.assistant.prompts = (payload.items || []).filter(Boolean);
+  renderAssistantDrawer();
+}
+
+function assistantMessageHtml(message) {
+  const role = message.role === "user" ? "user" : "assistant";
+  const errorClass = message.error ? " error" : "";
+  return `
+    <div class="assistant-message ${role}${errorClass}">
+      <div class="assistant-message-text">${paragraphHtml(message.text)}</div>
+      ${assistantSourcesHtml(message.sources || [])}
+      ${assistantActionsHtml(message.actions || [])}
+    </div>
+  `;
+}
+
+function paragraphHtml(text) {
+  const paragraphs = String(text || "")
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!paragraphs.length) return "";
+  return paragraphs.map((part) => `<p>${escapeHtml(part).replaceAll("\n", "<br>")}</p>`).join("");
+}
+
+function assistantSourcesHtml(sources) {
+  const visible = sources.filter((source) => source.label).slice(0, 4);
+  if (!visible.length) return "";
+  return `
+    <div class="assistant-sources">
+      <span>Sources</span>
+      ${visible.map((source) => `<small>${escapeHtml(source.label)}${source.metric ? ` · ${escapeHtml(source.metric)}` : ""}</small>`).join("")}
+    </div>
+  `;
+}
+
+function assistantActionsHtml(actions) {
+  const visible = actions.filter((action) => action.requires_confirmation).slice(0, 3);
+  if (!visible.length) return "";
+  return `
+    <div class="assistant-actions">
+      ${visible.map((action) => `<span>${escapeHtml(action.label)} · confirm first</span>`).join("")}
+    </div>
+  `;
+}
+
+async function sendAssistantMessage() {
+  const input = $("assistantInput");
+  const text = input.value.trim();
+  if (!text || state.assistant.loading) return;
+  if (!state.assistant.conversationId) {
+    state.assistant.conversationId = `browser-${Date.now()}`;
+  }
+  state.assistant.messages.push({ role: "user", text });
+  input.value = "";
+  state.assistant.loading = true;
+  renderAssistantDrawer();
+  try {
+    const payload = await api("/api/assistant/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        message: text,
+        conversation_id: state.assistant.conversationId,
+      }),
+    });
+    state.assistant.messages.push({
+      role: "assistant",
+      text: payload.answer || "",
+      sources: payload.sources || [],
+      actions: payload.suggested_actions || [],
+    });
+  } catch (error) {
+    state.assistant.messages.push({
+      role: "assistant",
+      text: error.message,
+      error: true,
+    });
+  } finally {
+    state.assistant.loading = false;
+    renderAssistantDrawer();
+  }
+}
+
+function scrollAssistantToBottom() {
+  const messages = $("assistantMessages");
+  if (!messages) return;
+  window.requestAnimationFrame(() => {
+    messages.scrollTop = messages.scrollHeight;
+  });
+}
+
 function detail(labelText, value) {
   return `
     <div class="detail-item">
@@ -2251,6 +2394,24 @@ function setup() {
   $("accountRefreshPatternsButton").addEventListener("click", (event) => runAccountSyncMenuAction(event, "Syncing...", refreshPatternsFromAccount));
   document.addEventListener("click", closeAccountSyncMenu);
   $("updateVoiceButton").addEventListener("click", (event) => runButton(event.currentTarget, "Updating...", updateVoice));
+  $("assistantLauncher").addEventListener("click", () => setAssistantOpen(true));
+  $("assistantCloseButton").addEventListener("click", () => setAssistantOpen(false));
+  $("assistantStarterPrompts").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-prompt]");
+    if (!button) return;
+    $("assistantInput").value = button.dataset.prompt || "";
+    sendAssistantMessage().catch((error) => showMessage(error.message, true));
+  });
+  $("assistantForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    sendAssistantMessage().catch((error) => showMessage(error.message, true));
+  });
+  $("assistantInput").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      sendAssistantMessage().catch((error) => showMessage(error.message, true));
+    }
+  });
 
   $("reviewList").addEventListener("dragover", (event) => event.preventDefault());
   $("reviewList").addEventListener("drop", (event) => {
