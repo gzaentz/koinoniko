@@ -201,6 +201,9 @@ a {
 }
 
 .sidebar-toggle {
+  position: absolute;
+  top: 24px;
+  right: 24px;
   flex: 0 0 34px;
   width: 34px;
   min-height: 34px;
@@ -344,14 +347,18 @@ main {
 }
 
 .sidebar-collapsed .sidebar-toggle {
-  position: absolute;
-  top: 3px;
-  right: -14px;
-  flex-basis: 28px;
-  width: 28px;
-  min-height: 28px;
+  position: static;
+  flex-basis: auto;
+  align-self: center;
+  width: 42px;
+  min-height: 42px;
+  height: 42px;
+  padding: 0;
+  margin-top: -10px;
+  border-color: transparent;
+  background: transparent;
   color: var(--muted);
-  opacity: 0.45;
+  opacity: 0.55;
 }
 
 .sidebar-collapsed .sidebar-toggle:hover,

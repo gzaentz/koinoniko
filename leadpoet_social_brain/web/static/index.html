@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-account-modal">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-sidebar-expand-account-modal">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -24,9 +24,6 @@
           <img src="/static/koinoniko-logo.png" alt="" class="brand-logo" width="34" height="34">
           <strong>Koinoniko</strong>
         </div>
-        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar">
-          <span class="sidebar-toggle-icon" aria-hidden="true">&#8249;</span>
-        </button>
       </div>
       <nav aria-label="Primary">
         <button class="nav-button active" type="button" data-view="dashboard" aria-label="Dashboard" title="Dashboard">
@@ -61,6 +58,9 @@
           <span class="nav-label">Voice</span>
         </button>
       </nav>
+      <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar">
+        <span class="sidebar-toggle-icon" aria-hidden="true">&#8249;</span>
+      </button>
       <div class="sidebar-footer">
         <button class="nav-button" type="button" data-view="account" aria-label="Account" title="Account">
           <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
