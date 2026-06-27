@@ -153,11 +153,22 @@ async function api(path, options = {}) {
 }
 
 function showMessage(text, isError = false) {
+  if (!isError && state.view === "reviewer") {
+    clearMessage();
+    return;
+  }
   const box = $("message");
   box.textContent = text;
   box.classList.toggle("error", isError);
   box.classList.remove("hidden");
   window.setTimeout(() => box.classList.add("hidden"), isError ? 9000 : 5000);
+}
+
+function clearMessage() {
+  const box = $("message");
+  box.textContent = "";
+  box.classList.remove("error");
+  box.classList.add("hidden");
 }
 
 async function runButton(button, loadingText, work) {

@@ -503,6 +503,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("Generate Best Version", app_js)
         self.assertIn("Make More Natural", app_js)
         self.assertIn("Make More Founder-Led", app_js)
+        self.assertIn('state.view === "reviewer"', app_js)
+        self.assertIn("clearMessage", app_js)
         self.assertIn("/api/content/create-post", app_js)
         self.assertIn("No posts to review.", app_js)
         self.assertIn("saveAccount", app_js)
