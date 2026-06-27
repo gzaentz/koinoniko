@@ -437,6 +437,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('id="postModal"', index_html)
         self.assertIn('id="queueModal"', index_html)
         self.assertIn('id="recentPostsTable"', index_html)
+        self.assertNotIn("window.prompt", app_js)
+        self.assertNotIn("Scheduled date/time", app_js)
         self.assertIn('id="postVoiceFilter"', index_html)
         self.assertIn('id="trendList"', index_html)
         self.assertIn('id="trendDailyButton"', index_html)

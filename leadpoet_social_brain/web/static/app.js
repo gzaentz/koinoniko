@@ -1482,10 +1482,7 @@ async function handleDrop(target) {
 
 async function moveToScheduled(id) {
   const item = findQueueItem(id);
-  let scheduledAt = item?.scheduled_at || "";
-  if (!scheduledAt || item?.status !== "approved") {
-    scheduledAt = window.prompt("Scheduled date/time", scheduledAt || nextDefaultSchedule()) || "";
-  }
+  const scheduledAt = item?.scheduled_at || "";
   if (!scheduledAt.trim()) {
     showMessage("Schedule required before moving to Scheduled.", true);
     return;
@@ -3104,12 +3101,6 @@ function formatDateTime(value) {
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(parsed));
-}
-
-function nextDefaultSchedule() {
-  const date = new Date(Date.now() + 24 * 60 * 60 * 1000);
-  date.setMinutes(0, 0, 0);
-  return date.toISOString();
 }
 
 function dateTimeLocalValue(value) {
