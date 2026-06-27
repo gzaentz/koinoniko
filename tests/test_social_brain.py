@@ -364,16 +364,20 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn("Koinoniko Voice", index_html)
         self.assertNotIn("Koinoniko Voice is current.", index_html)
         self.assertNotIn("voiceStatusDescription", index_html + app_js)
+        self.assertNotIn("<h2>Voice Status</h2>", index_html)
+        self.assertEqual(index_html.count("<h2>Current Voice</h2>"), 1)
         self.assertIn("Voice Context", index_html)
         self.assertIn("Update Voice", index_html)
         self.assertIn('class="voice-status-row"', index_html)
         self.assertIn('class="voice-status-chip"', index_html)
+        self.assertIn('class="voice-context-control"', index_html)
         self.assertIn('id="voiceContextButton"', index_html)
         self.assertIn('id="voiceContextModal"', index_html)
         self.assertIn('id="voiceContextCount"', index_html)
         self.assertIn('id="voiceSuggestionsDisclosure"', index_html)
         self.assertIn("<summary>Show suggested examples</summary>", index_html)
         self.assertNotIn('class="panel voice-examples-panel"', index_html)
+        self.assertNotIn('class="panel voice-context-panel"', index_html)
         self.assertNotIn("<h2>Suggested Voice Examples</h2>", index_html)
         self.assertNotIn("<h2>Queue</h2>", index_html)
         self.assertIn('id="reviewNavBadge"', index_html)
@@ -412,11 +416,11 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('id="trendDailyButton"', index_html)
         self.assertIn('id="trendWeeklyButton"', index_html)
         self.assertIn('id="patternList"', index_html)
-        self.assertIn('id="patternWeeklyButton"', index_html)
-        self.assertIn('id="patternMonthlyButton"', index_html)
+        self.assertNotIn('id="patternWeeklyButton"', index_html)
+        self.assertNotIn('id="patternMonthlyButton"', index_html)
         self.assertNotIn('id="patternDailyButton"', index_html)
-        self.assertIn('selectedPatternWindow: "weekly"', app_js)
-        self.assertNotIn('selectedPatternWindow: "daily"', app_js)
+        self.assertNotIn("selectedPatternWindow", app_js)
+        self.assertIn("No weekly patterns yet", app_js)
         self.assertIn('id="patternModal"', index_html)
         self.assertIn('id="savedTrendList"', index_html)
         self.assertEqual(index_html.count('id="trendList"'), 1)
@@ -1844,16 +1848,6 @@ class SocialBrainTest(unittest.TestCase):
                 window="weekly",
             )
             store.mark_viral_pattern_status(pattern.id, "saved")
-            monthly_pattern = add_pattern_example(
-                store,
-                source_url="https://x.com/operator/status/monthlypattern",
-                source_text="A monthly pattern should capture a larger repeated market mechanic.",
-                topic="gtm",
-                category="gtm",
-                pattern_name="Monthly market mechanic",
-                structure="big market signal, repeated behavior, reusable rule",
-                window="monthly",
-            )
             store.close()
 
             status, payload = handle_api_request("GET", "/api/dashboard", db_path=db_path)
@@ -1866,8 +1860,8 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["trends"][0]["id"], trend.id)
             self.assertEqual(payload["trend_groups"]["daily"][0]["id"], trend.id)
             self.assertEqual(payload["pattern_groups"]["weekly"][0]["id"], pattern.id)
-            self.assertEqual(payload["pattern_groups"]["monthly"][0]["id"], monthly_pattern.id)
             self.assertNotIn("daily", payload["pattern_groups"])
+            self.assertNotIn("monthly", payload["pattern_groups"])
             self.assertEqual(payload["saved_patterns"][0]["id"], pattern.id)
             self.assertIn("analytics_hints", payload)
 
@@ -3034,14 +3028,16 @@ class SocialBrainTest(unittest.TestCase):
             {"limit": 50},
         )
 
-    def test_pattern_refresh_cli_defaults_to_weekly_and_supports_monthly(self):
+    def test_pattern_refresh_cli_defaults_to_weekly_only(self):
         parser = build_cli_parser()
 
         default_args = parser.parse_args(["refresh-patterns"])
-        monthly_args = parser.parse_args(["refresh-patterns", "--window", "monthly"])
+        weekly_args = parser.parse_args(["refresh-patterns", "--window", "weekly"])
 
         self.assertEqual(default_args.window, "weekly")
-        self.assertEqual(monthly_args.window, "monthly")
+        self.assertEqual(weekly_args.window, "weekly")
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            parser.parse_args(["refresh-patterns", "--window", "monthly"])
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             parser.parse_args(["refresh-patterns", "--window", "daily"])
 
@@ -3057,7 +3053,7 @@ class SocialBrainTest(unittest.TestCase):
                 status, payload = handle_api_request(
                     "POST",
                     "/tasks/refresh-patterns-weekly",
-                    json.dumps({"limit": 7, "window": "monthly"}),
+                    json.dumps({"limit": 7, "window": "daily"}),
                     db_path=db_path,
                 )
 

@@ -368,7 +368,6 @@ def pattern_groups(store: SQLiteStore, *, limit: int = 5) -> dict[str, list[Vira
 
     return {
         "weekly": visible("weekly"),
-        "monthly": visible("monthly"),
     }
 
 

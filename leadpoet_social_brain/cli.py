@@ -174,7 +174,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_pattern_example_parser.add_argument("--engagement-notes")
     add_metric_args(add_pattern_example_parser)
     add_pattern_example_parser.add_argument("--collected-at")
-    add_pattern_example_parser.add_argument("--window", default="manual", choices=["manual", "daily", "weekly", "monthly"])
+    add_pattern_example_parser.add_argument("--window", default="manual", choices=["manual", "daily", "weekly"])
     add_pattern_example_parser.add_argument("--status", default="active", choices=["active", "archived", "ignored"])
     add_pattern_example_parser.set_defaults(func=cmd_add_pattern_example)
 
@@ -190,7 +190,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     refresh_pattern_parser = subparsers.add_parser("refresh-patterns", help="Refresh Pattern Scout examples using ScrapingDog and the configured provider.")
     refresh_pattern_parser.add_argument("--limit", type=int, default=5)
-    refresh_pattern_parser.add_argument("--window", default="weekly", choices=["weekly", "monthly"])
+    refresh_pattern_parser.add_argument("--window", default="weekly", choices=["weekly"])
     refresh_pattern_parser.set_defaults(func=cmd_refresh_patterns)
 
     refresh_trends_parser = subparsers.add_parser("refresh-trends", help="Refresh Trend Scout sources and enrich selected trends.")

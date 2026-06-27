@@ -2178,7 +2178,6 @@ def trend_payload(trend: TrendItem, *, include_raw: bool = False) -> dict[str, A
 def pattern_groups_payload(groups: dict[str, list[ViralPattern]]) -> dict[str, Any]:
     return {
         "weekly": [pattern_payload(pattern) for pattern in groups.get("weekly", [])],
-        "monthly": [pattern_payload(pattern) for pattern in groups.get("monthly", [])],
     }
 
 

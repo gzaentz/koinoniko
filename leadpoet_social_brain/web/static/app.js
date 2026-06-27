@@ -20,7 +20,6 @@ const state = {
   scheduledItems: [],
   savedTrends: [],
   selectedTrendWindow: "daily",
-  selectedPatternWindow: "weekly",
   selectedTrendForCreate: null,
   selectedPatternForCreate: null,
   patternDetail: null,
@@ -1025,12 +1024,10 @@ function trendRelevanceText(item) {
 
 function renderDashboardPatterns() {
   const groups = state.dashboard?.pattern_groups || {};
-  $("patternWeeklyButton").classList.toggle("active", state.selectedPatternWindow === "weekly");
-  $("patternMonthlyButton").classList.toggle("active", state.selectedPatternWindow === "monthly");
-  const patterns = groups[state.selectedPatternWindow] || [];
+  const patterns = groups.weekly || [];
   $("patternList").innerHTML = patterns.length
     ? patterns.slice(0, 5).map(patternCard).join("")
-    : `<p class="muted">No ${escapeHtml(state.selectedPatternWindow)} patterns yet. Add patterns manually or refresh Pattern Scout.</p>`;
+    : `<p class="muted">No weekly patterns yet. Add patterns manually or refresh Pattern Scout.</p>`;
 }
 
 function patternCard(pattern) {
@@ -1130,7 +1127,6 @@ function findPatternItem(id) {
   if (!id) return null;
   const groups = state.dashboard?.pattern_groups || {};
   return [
-    ...(groups.daily || []),
     ...(groups.weekly || []),
     ...(state.dashboard?.saved_patterns || []),
   ].find((item) => item.id === id);
@@ -3055,14 +3051,6 @@ function setup() {
   $("trendWeeklyButton").addEventListener("click", () => {
     state.selectedTrendWindow = "weekly";
     renderDashboardTrends();
-  });
-  $("patternWeeklyButton").addEventListener("click", () => {
-    state.selectedPatternWindow = "weekly";
-    renderDashboardPatterns();
-  });
-  $("patternMonthlyButton").addEventListener("click", () => {
-    state.selectedPatternWindow = "monthly";
-    renderDashboardPatterns();
   });
   $("createPostTrend").addEventListener("change", syncCreatePostSelectionsFromInputs);
   $("createPostPattern").addEventListener("change", syncCreatePostSelectionsFromInputs);

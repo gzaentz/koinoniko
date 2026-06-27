@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-patterns-weekly-monthly">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-voice-context-top-patterns-weekly-only">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -105,10 +105,6 @@
               <div>
                 <h2>Patterns</h2>
               </div>
-              <div class="segmented-control" role="group" aria-label="Pattern window">
-                <button class="secondary active" id="patternWeeklyButton" type="button">Weekly</button>
-                <button class="secondary" id="patternMonthlyButton" type="button">Monthly</button>
-              </div>
             </div>
             <div id="patternList" class="pattern-list trend-scroll"></div>
           </section>
@@ -186,32 +182,24 @@
         <div class="voice-layout">
           <section class="panel voice-status-panel">
             <div class="voice-status-main">
-              <h2>Voice Status</h2>
+              <h2>Current Voice</h2>
               <div class="voice-status-row">
                 <span class="status-badge" id="voiceStatusLabel">Loading</span>
                 <span class="voice-status-chip"><strong id="voiceExampleCount">0</strong> Voice Context posts</span>
                 <span class="voice-status-chip">Updated <strong id="voiceLastUpdated">Never</strong></span>
               </div>
             </div>
-            <div class="actions left">
+            <div class="voice-context-control">
+              <button class="secondary voice-context-button" id="voiceContextButton" type="button">
+                <span>Voice Context</span>
+                <span><strong id="voiceContextCount">0</strong> posts</span>
+              </button>
               <button id="updateVoiceButton">Update Voice</button>
             </div>
           </section>
 
           <section class="panel voice-current-panel">
-            <div class="panel-header">
-              <div>
-                <h2>Current Voice</h2>
-              </div>
-            </div>
             <div id="currentVoiceSummary" class="voice-summary"></div>
-          </section>
-
-          <section class="panel voice-context-panel">
-            <button class="secondary voice-context-button" id="voiceContextButton" type="button">
-              <span>Voice Context</span>
-              <span><strong id="voiceContextCount">0</strong> posts</span>
-            </button>
           </section>
         </div>
       </section>
@@ -561,6 +549,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260627-voice-no-update-banner"></script>
+    <script src="/static/app.js?v=20260627-voice-context-top-patterns-weekly-only"></script>
   </body>
 </html>

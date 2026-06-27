@@ -1301,7 +1301,7 @@ main {
 .voice-layout {
   display: grid;
   gap: 18px;
-  grid-template-rows: auto minmax(150px, 1fr) auto;
+  grid-template-rows: auto minmax(150px, 1fr);
   height: 100%;
   min-height: 0;
 }
@@ -1356,10 +1356,13 @@ main {
 }
 
 .voice-current-panel,
-.voice-context-panel {
+.voice-context-control {
   display: flex;
-  flex-direction: column;
   min-height: 0;
+}
+
+.voice-current-panel {
+  flex-direction: column;
 }
 
 .voice-current-panel .voice-summary {
@@ -1369,16 +1372,25 @@ main {
   padding-right: 4px;
 }
 
-.voice-context-panel {
-  align-items: flex-start;
+.voice-context-control {
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px;
+  background: var(--soft);
 }
 
 .voice-context-button {
   display: inline-flex;
   justify-content: space-between;
   gap: 18px;
+  flex: 1 1 210px;
   min-width: 210px;
   min-height: 44px;
+  background: var(--white);
 }
 
 .voice-context-button span:last-child {
@@ -1388,6 +1400,12 @@ main {
 
 .voice-context-button strong {
   color: var(--ink);
+}
+
+.voice-context-control #updateVoiceButton {
+  flex: 0 0 auto;
+  min-height: 44px;
+  white-space: nowrap;
 }
 
 .voice-context-modal-card {
@@ -2132,6 +2150,10 @@ main {
   .voice-status-panel,
   .two-column {
     grid-template-columns: 1fr;
+  }
+
+  .voice-context-control {
+    justify-self: start;
   }
 
   #dashboardView.view.active {
