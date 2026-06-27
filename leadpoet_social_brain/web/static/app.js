@@ -1435,6 +1435,21 @@ function renderReviewer() {
 
 function queueCard(item, column) {
   const scheduled = item.scheduled_at ? formatDateTime(item.scheduled_at) : "";
+  const title = item.focus || summarize(item.angle || item.text, 88);
+  if (column === "review") {
+    return `
+      <article class="queue-card review-queue-card" draggable="true" ondragstart='dragQueue(event, ${jsArg(item.id)})'>
+        <button class="card-open" onclick='openQueueDetail(${jsArg(item.id)})'>
+          <h3>${escapeHtml(title)}</h3>
+          <div class="schedule-line">${escapeHtml(scheduled ? `Scheduled ${scheduled}` : "Scheduled not set")}</div>
+        </button>
+        <div class="card-actions">
+          <button onclick='openQueueDetail(${jsArg(item.id)})'>Edit</button>
+          <button class="secondary" onclick='skipQueue(event, ${jsArg(item.id)})'>Deny</button>
+        </div>
+      </article>
+    `;
+  }
   const canPost = item.status === "approved" && state.status?.x_write_configured;
   const quality = qualityLabel(item.quality_mode);
   const trend = trendSummary(item);
@@ -1448,13 +1463,12 @@ function queueCard(item, column) {
           ${quality ? `<span>${escapeHtml(quality)}</span>` : ""}
           ${trend ? `<span>${escapeHtml(trend)}</span>` : ""}
         </div>
-        <h3>${escapeHtml(item.focus || summarize(item.angle || item.text, 88))}</h3>
+        <h3>${escapeHtml(title)}</h3>
         <p>${escapeHtml(summarize(item.text, 150))}</p>
         <div class="schedule-line">${escapeHtml(scheduled ? `Scheduled ${scheduled}` : "Not scheduled")}</div>
       </button>
       <div class="card-actions">
-        <button onclick='openQueueDetail(${jsArg(item.id)})'>Review / Edit</button>
-        ${item.status !== "approved" ? `<button class="secondary" onclick='approveQueue(event, ${jsArg(item.id)})'>Approve</button>` : ""}
+        <button onclick='openQueueDetail(${jsArg(item.id)})'>Edit</button>
         ${item.status === "approved" ? `<button class="secondary" onclick='postNow(event, ${jsArg(item.id)})' ${canPost ? "" : "disabled"} title="${state.status?.x_write_configured ? "" : "X write auth is not connected."}">Post now</button>` : ""}
         ${column === "scheduled" ? `<button class="quiet-button" onclick='moveToReview(event, ${jsArg(item.id)})'>Move to review</button>` : `<button class="quiet-button" onclick='skipQueue(event, ${jsArg(item.id)})'>Skip</button>`}
       </div>
