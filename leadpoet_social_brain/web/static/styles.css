@@ -72,18 +72,6 @@ button.icon-button {
   border-radius: 50%;
 }
 
-.topbar-refresh {
-  width: 38px;
-  min-height: 38px;
-  border-color: var(--line);
-  background: rgba(255, 255, 255, 0.9);
-  color: var(--ink);
-  font-size: 20px;
-  line-height: 1;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
-  backdrop-filter: blur(14px);
-}
-
 button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -394,20 +382,6 @@ main {
   width: auto;
 }
 
-.top-actions {
-  position: fixed;
-  top: 28px;
-  right: 32px;
-  z-index: 8;
-  display: flex;
-  justify-content: flex-end;
-  pointer-events: none;
-}
-
-.top-actions > * {
-  pointer-events: auto;
-}
-
 .actions,
 .modal-actions,
 .option-row {
@@ -431,7 +405,7 @@ main {
 }
 
 .message {
-  margin: 28px 92px 0 38px;
+  margin: 28px 38px 0;
   padding: 11px 13px;
   border: 1px solid var(--line);
   background: var(--soft);
@@ -1617,13 +1591,8 @@ main {
     padding-right: 20px;
   }
 
-  .top-actions {
-    top: 18px;
-    right: 18px;
-  }
-
   .message {
-    margin: 18px 68px 0 20px;
+    margin: 18px 20px 0;
   }
 
   .compact-meta-row {

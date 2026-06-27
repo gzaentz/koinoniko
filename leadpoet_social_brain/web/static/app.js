@@ -257,10 +257,6 @@ function updateGlobalControls() {
   $("reviewNavBadge").textContent = String(reviewCount);
   $("reviewNavBadge").classList.toggle("muted-badge", reviewCount === 0);
 
-  $("refreshButton").title = state.status?.x_read_configured
-    ? "Sync X posts and metrics"
-    : "Refresh page data. Connect X read auth to sync posts and metrics.";
-
   [$("reviewAddButton"), $("generatePostButton")].forEach((button) => {
     button.disabled = !state.status?.provider_configured;
     button.title = state.status?.provider_configured ? "" : "Provider-backed generation is not connected.";
@@ -1521,15 +1517,6 @@ window.removeVoiceExample = (event, id) => {
   });
 };
 
-async function refreshTopbar() {
-  if (state.status?.x_read_configured) {
-    await syncAllXData();
-    return;
-  }
-  await refresh();
-  showMessage("Refreshed.");
-}
-
 async function publishDue() {
   const payload = await api("/api/publish-due", {
     method: "POST",
@@ -1973,7 +1960,6 @@ function setup() {
     header.querySelector("button")?.addEventListener("click", () => setRecentPostsSort(header.dataset.sortKey));
   });
 
-  $("refreshButton").addEventListener("click", (event) => runButton(event.currentTarget, "...", refreshTopbar));
   $("reviewAddButton").addEventListener("click", toggleReviewAddMenu);
   $("reviewAddMenu").addEventListener("click", (event) => event.stopPropagation());
   $("reviewAddPostButton").addEventListener("click", () => {
