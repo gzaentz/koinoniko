@@ -2834,7 +2834,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Positioning Rules", groups)
             self.assertIn("Voice Rules", groups)
             self.assertIn("Review Filters", groups)
-            self.assertIn("Writing Guardrails", payload["summary"])
+            self.assertEqual(payload["summary"], "Review filters and writing guardrails")
             self.assertIn("game changer", payload["avoid_phrases"])
             self.assertGreaterEqual(payload["rules_count"], 10)
             self.assertFalse(any("description" in group for group in payload["groups"]))

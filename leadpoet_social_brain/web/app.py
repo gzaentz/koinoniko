@@ -1723,7 +1723,7 @@ def voice_rules_payload(store: SQLiteStore) -> dict[str, Any]:
     rules_count = sum(len(group["items"]) for group in groups) + len(avoid_phrases)
     return {
         "rules_count": rules_count,
-        "summary": "Positioning, Voice, Review Filters, and Writing Guardrails",
+        "summary": "Review filters and writing guardrails",
         "groups": groups,
         "avoid_phrases": avoid_phrases,
     }

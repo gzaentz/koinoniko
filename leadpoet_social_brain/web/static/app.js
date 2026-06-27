@@ -1973,7 +1973,7 @@ function renderVoiceRules() {
   const groups = rules.groups || [];
   const rulesCount = groups.reduce((total, group) => total + (group.items || []).length, 0) + avoidCount;
   $("voiceRulesCount").textContent = `${metric(rulesCount || rules.rules_count || 0)} active rules`;
-  $("voiceRulesSummary").textContent = rules.summary || "Positioning, Voice, Review Filters, and Writing Guardrails";
+  $("voiceRulesSummary").textContent = rules.summary || "Review filters and writing guardrails";
   $("voiceRulesList").innerHTML = groups.length
     ? groups.map((group) => `
       <section class="voice-rule-group">
