@@ -743,6 +743,8 @@ main {
 .trend-row {
   display: grid;
   gap: 7px;
+  min-height: clamp(132px, 13vh, 176px);
+  align-content: start;
 }
 
 .trend-row[role="button"],
@@ -821,11 +823,11 @@ main {
 
 #dashboardView.view.active {
   display: grid;
-  grid-template-rows: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  grid-template-rows: minmax(310px, 1fr) minmax(0, 1.35fr);
   gap: 16px;
-  height: calc(100vh - 119px);
+  height: 100dvh;
   overflow: hidden;
-  padding: 24px 38px;
+  padding: 28px 38px;
 }
 
 .reviewer-intro {
@@ -836,12 +838,15 @@ main {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
+  min-height: 0;
 }
 
 .board-column {
   padding: 18px;
-  min-height: 520px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .board-header {
@@ -853,6 +858,24 @@ main {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+
+#reviewerView.view.active {
+  height: 100dvh;
+  overflow: hidden;
+  padding: 28px 38px;
+}
+
+#reviewerView .board {
+  height: 100%;
+}
+
+#reviewerView .card-list {
+  flex: 1;
+  min-height: 0;
+  align-content: start;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .add-menu-wrap {
@@ -1419,6 +1442,19 @@ main {
   #dashboardView.view.active {
     display: block;
     height: auto;
+    overflow: visible;
+  }
+
+  #reviewerView.view.active {
+    height: auto;
+    overflow: visible;
+  }
+
+  #reviewerView .board {
+    height: auto;
+  }
+
+  #reviewerView .card-list {
     overflow: visible;
   }
 
