@@ -970,8 +970,6 @@ main {
 }
 
 #voiceView.view.active {
-  height: 100dvh;
-  overflow: hidden;
   padding: 28px 38px;
 }
 
@@ -1308,7 +1306,6 @@ main {
 
 .voice-layout {
   display: grid;
-  height: 100%;
   min-height: 0;
 }
 
@@ -1320,20 +1317,20 @@ main {
 }
 
 .voice-summary {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
 }
 
 .voice-current-panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
+  display: grid;
+  gap: 18px;
+  min-height: auto;
 }
 
 .voice-current-panel .voice-summary {
-  flex: 1;
   align-content: start;
-  overflow: auto;
-  padding-right: 4px;
+  overflow: visible;
+  padding-right: 0;
 }
 
 .voice-panel-header {
@@ -1342,7 +1339,16 @@ main {
   justify-content: space-between;
   gap: 18px;
   flex-wrap: wrap;
-  margin-bottom: 18px;
+}
+
+.voice-panel-header h2 {
+  font-size: 21px;
+}
+
+.voice-examples-button {
+  min-height: 34px;
+  padding: 7px 12px;
+  font-size: 14px;
 }
 
 .voice-panel-header #voiceContextButton,
@@ -1373,13 +1379,14 @@ main {
 .voice-card {
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 15px;
+  padding: 14px;
   background: var(--white);
 }
 
 .voice-summary-section {
   display: grid;
-  gap: 10px;
+  gap: 9px;
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.02);
 }
 
 .voice-summary-section ul {
@@ -1387,14 +1394,15 @@ main {
   padding-left: 18px;
   color: var(--muted);
   display: grid;
-  gap: 7px;
+  gap: 6px;
+  font-size: 14px;
 }
 
 .voice-compact-section {
   border-top: 1px solid var(--line);
-  padding-top: 18px;
+  padding-top: 16px;
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .voice-section-heading {
@@ -1416,44 +1424,33 @@ main {
   font-size: 14px;
 }
 
-.voice-coverage-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.voice-coverage-group {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 12px;
-  display: grid;
-  gap: 10px;
-  background: var(--white);
-}
-
-.voice-coverage-group h4 {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.voice-coverage-list {
+.voice-coverage-block {
   display: grid;
   gap: 8px;
 }
 
-.voice-coverage-row {
+.voice-coverage-line {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
+  align-items: baseline;
+  gap: 10px;
   color: var(--muted);
   font-size: 14px;
 }
 
-.voice-coverage-row strong {
+.voice-coverage-line span {
+  flex: 0 0 128px;
+  color: var(--quiet);
+}
+
+.voice-coverage-line strong {
   color: var(--ink);
+  font-weight: 650;
+}
+
+.voice-coverage-recommendation {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
 }
 
 .phrase-chip-list {
@@ -1463,10 +1460,10 @@ main {
 }
 
 .phrase-chip {
-  min-height: 34px;
-  padding: 6px 10px;
+  min-height: 30px;
+  padding: 5px 9px;
   border-radius: 999px;
-  background: var(--soft);
+  background: var(--white);
   border-color: var(--line);
   color: var(--ink);
   display: inline-flex;
@@ -1493,7 +1490,7 @@ main {
 
 .voice-card {
   display: grid;
-  gap: 13px;
+  gap: 11px;
 }
 
 .voice-card.suggested {
@@ -1502,7 +1499,7 @@ main {
 
 .voice-card-main {
   display: grid;
-  gap: 8px;
+  gap: 7px;
 }
 
 .voice-card-main p {
@@ -1511,6 +1508,29 @@ main {
 
 .voice-card-main p strong {
   color: var(--ink);
+}
+
+.voice-post-preview {
+  color: var(--ink) !important;
+  font-size: 15px;
+  line-height: 1.42;
+}
+
+.voice-why {
+  display: grid;
+  gap: 3px;
+  font-size: 14px;
+}
+
+.voice-why span {
+  color: var(--muted);
+}
+
+.voice-card > .actions button,
+.voice-card > .actions .button-link {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 13px;
 }
 
 .voice-metrics {
@@ -2257,6 +2277,10 @@ main {
   .voice-layout {
     height: auto;
     grid-template-rows: none;
+  }
+
+  .voice-summary {
+    grid-template-columns: 1fr;
   }
 
   .voice-current-panel .voice-summary,

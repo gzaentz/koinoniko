@@ -12,7 +12,6 @@ DEFAULT_AVOID_PHRASES = [
     "supercharge",
     "AI is transforming",
     "not just X, but Y",
-    "future of sales",
     "generic launch language",
     "overly polished thought leadership",
     "vague market commentary",

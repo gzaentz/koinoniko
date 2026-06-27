@@ -26,7 +26,7 @@ Koinoniko currently supports:
 - marking strong posts as Voice Examples with "Why this worked" notes
 - suggesting "Why this worked" notes for Voice Examples through the configured provider
 - updating Koinoniko Voice from selected Voice Examples
-- tracking compact Voice Coverage and editable Avoid Phrases
+- tracking compact Voice Coverage and editable Writing Guardrails
 - generating X drafts through a configured LLM provider
 - using OpenRouter as the built-in provider
 - routing Standard and Best Version generation to configurable models
@@ -240,7 +240,7 @@ The Voice page shows:
 - last Voice update time
 - current Koinoniko Voice summary in clean sections
 - compact Voice Coverage by topic and post type
-- editable Avoid Phrases that generation and AI revisions should write around
+- editable Writing Guardrails that generation and AI revisions should write around
 - selected Voice Examples with one simple performance signal
 - suggested Voice Examples behind `Show suggested examples`
 
@@ -1219,7 +1219,7 @@ Current tests cover:
 - metrics sync snapshots and latest-snapshot analytics
 - Voice Example note workflows
 - Voice updates from selected examples
-- Voice suggested notes, coverage, and Avoid Phrases
+- Voice suggested notes, coverage, and Writing Guardrails
 - Voice page and post detail drawer UI expectations
 - Ask Koinoniko context, starter prompts, read-only chat behavior, source display, and drawer UI expectations
 - topic and post type option endpoints

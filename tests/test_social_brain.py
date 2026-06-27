@@ -366,15 +366,16 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn("Koinoniko Voice is current.", index_html)
         self.assertNotIn("voiceStatusDescription", index_html + app_js)
         self.assertNotIn("<h2>Voice Status</h2>", index_html)
-        self.assertNotIn("<h2>Current Voice</h2>", index_html)
-        self.assertEqual(index_html.count("<h2>Voice</h2>"), 1)
-        self.assertIn("Voice Context", index_html)
+        self.assertIn("<h2>Current Voice</h2>", index_html)
+        self.assertNotIn("<h2>Voice</h2>", index_html)
+        self.assertIn("Voice Examples", index_html)
         self.assertIn("Update Voice", index_html)
         self.assertIn("Voice Coverage", index_html)
-        self.assertIn("Avoid Phrases", index_html)
+        self.assertIn("Writing Guardrails", index_html)
         self.assertIn('id="voiceCoverageGrid"', index_html)
         self.assertIn('id="voiceAvoidPhraseList"', index_html)
         self.assertIn('id="voiceAvoidPhraseInput"', index_html)
+        self.assertNotIn("Voice Context", index_html)
         self.assertNotIn("Voice Context posts", index_html)
         self.assertNotIn('class="voice-status-row"', index_html)
         self.assertNotIn('class="voice-status-chip"', index_html)
@@ -1034,7 +1035,7 @@ class SocialBrainTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
             store.seed_defaults()
-            save_avoid_phrases(store, ["game changer", "future of sales"])
+            save_avoid_phrases(store, ["game changer", "generic launch language"])
             store.save_app_setting("model.default", "openrouter/default")
             store.save_app_setting("model.strategist", "openrouter/strategy")
             store.save_app_setting("model.natural_writer", "openrouter/writer")
@@ -2769,7 +2770,7 @@ class SocialBrainTest(unittest.TestCase):
             status, loaded = handle_api_request("GET", "/api/voice/avoid-phrases", db_path=db_path)
             self.assertEqual(status, 200)
             self.assertEqual(loaded["items"], ["game changer", "unlock", "AI is transforming"])
-            self.assertIn("future of sales", loaded["defaults"])
+            self.assertNotIn("future of sales", loaded["defaults"])
 
             status, posted = handle_api_request(
                 "POST",

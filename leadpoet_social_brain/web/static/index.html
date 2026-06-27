@@ -123,7 +123,7 @@
               <input id="postSearch" placeholder="Search posts">
               <select id="postVoiceFilter" aria-label="Post voice filter">
                 <option value="all">All posts</option>
-                <option value="voice">Voice Context</option>
+                <option value="voice">Voice Examples</option>
               </select>
               <input id="postDateFrom" type="date" aria-label="Start date">
               <input id="postDateTo" type="date" aria-label="End date">
@@ -186,20 +186,20 @@
         <div class="voice-layout">
           <section class="panel voice-current-panel">
             <div class="voice-panel-header">
-              <h2>Voice</h2>
-              <button id="voiceContextButton" type="button">Voice Context</button>
+              <h2>Current Voice</h2>
+              <button class="secondary voice-examples-button" id="voiceContextButton" type="button">Voice Examples</button>
             </div>
             <div id="currentVoiceSummary" class="voice-summary"></div>
             <section class="voice-compact-section" aria-labelledby="voiceCoverageTitle">
               <div class="voice-section-heading">
                 <h3 id="voiceCoverageTitle">Voice Coverage</h3>
-                <p id="voiceCoverageRecommendation">Add a few Voice Examples to see coverage.</p>
               </div>
-              <div id="voiceCoverageGrid" class="voice-coverage-grid"></div>
+              <div id="voiceCoverageGrid" class="voice-coverage-block"></div>
+              <p id="voiceCoverageRecommendation" class="voice-coverage-recommendation">Add a few Voice Examples to see coverage.</p>
             </section>
             <section class="voice-compact-section" aria-labelledby="voiceAvoidTitle">
               <div class="voice-section-heading">
-                <h3 id="voiceAvoidTitle">Avoid Phrases</h3>
+                <h3 id="voiceAvoidTitle">Writing Guardrails</h3>
                 <p>Words and habits Koinoniko should write around.</p>
               </div>
               <div id="voiceAvoidPhraseList" class="phrase-chip-list"></div>
@@ -328,7 +328,7 @@
         <div class="modal-header">
           <div>
             <span class="eyebrow">Voice</span>
-            <h2>Voice Context</h2>
+            <h2>Voice Examples</h2>
           </div>
           <div class="modal-header-actions">
             <button id="updateVoiceButton" type="button">Update Voice</button>

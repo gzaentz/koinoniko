@@ -1,7 +1,7 @@
 const DEFAULT_SYNC_USERNAME = "gavinzaentz";
 const SIDEBAR_COLLAPSED_KEY = "koinonikoSidebarCollapsed";
 const ASSISTANT_FALLBACK_STARTERS = [
-  "What are the best posts to use as Voice Context?",
+  "What are the best posts to use as Voice Examples?",
   "What patterns are working best?",
   "What should I post about today?",
   "Which scheduled posts feel weakest?",
@@ -1902,7 +1902,7 @@ function renderVoice() {
 function renderCurrentVoice() {
   const current = state.voice?.current || {};
   if (!current.exists) {
-    $("currentVoiceSummary").innerHTML = `<p class="empty-copy">${escapeHtml(current.empty_message || "No Voice yet. Mark a few strong posts as Voice Context, then update Voice.")}</p>`;
+    $("currentVoiceSummary").innerHTML = `<p class="empty-copy">${escapeHtml(current.empty_message || "No Voice yet. Mark a few strong posts as Voice Examples, then update Voice.")}</p>`;
     return;
   }
   const sections = cleanVoiceSections(current.sections || []);
@@ -1921,14 +1921,13 @@ function cleanVoiceSections(sections) {
     "Recurring voice traits": "Voice traits",
     "Voice traits": "Voice traits",
     "What strong posts tend to do": "What strong posts tend to do",
-    "Avoid": "What to avoid",
-    "What to avoid": "What to avoid",
+    "Avoid": "Guardrails",
+    "What to avoid": "Guardrails",
     "Reusable writing principles": "Reusable writing principles",
   };
   const preferredOrder = [
     "Voice traits",
-    "What strong posts tend to do",
-    "What to avoid",
+    "Guardrails",
     "Reusable writing principles",
   ];
   const cleaned = sections
@@ -1949,25 +1948,21 @@ function renderVoiceCoverage() {
   $("voiceCoverageRecommendation").textContent = coverage.recommendation || "Voice coverage looks balanced enough for now.";
   $("voiceCoverageGrid").innerHTML = (topics.length || postTypes.length)
     ? [
-        voiceCoverageGroup("Topics", topics),
-        voiceCoverageGroup("Post types", postTypes.map((item) => ({ ...item, name: label(item.name) }))),
+        voiceCoverageLine("Topics covered", topics),
+        voiceCoverageLine("Post types covered", postTypes.map((item) => ({ ...item, name: label(item.name) }))),
       ].join("")
     : `<p class="empty-copy compact">Add a few Voice Examples to see coverage.</p>`;
 }
 
-function voiceCoverageGroup(title, items) {
+function voiceCoverageLine(title, items) {
+  const summary = items
+    .map((item) => `${topicLabel(item.name || "Unknown")} ${metric(item.count || 0)}`)
+    .join(" · ");
   return `
-    <article class="voice-coverage-group">
-      <h4>${escapeHtml(title)}</h4>
-      <div class="voice-coverage-list">
-        ${items.map((item) => `
-          <div class="voice-coverage-row">
-            <span>${escapeHtml(topicLabel(item.name || "Unknown"))}</span>
-            <strong>${metric(item.count || 0)}</strong>
-          </div>
-        `).join("")}
-      </div>
-    </article>
+    <div class="voice-coverage-line">
+      <span>${escapeHtml(title)}</span>
+      <strong>${escapeHtml(summary || "No examples yet")}</strong>
+    </div>
   `;
 }
 
@@ -2011,7 +2006,7 @@ async function saveAvoidPhrases() {
   state.voiceAvoidDraft = [...state.voice.avoidPhrases];
   setVoiceAvoidSaveStatus("Saved");
   renderAvoidPhrases();
-  showMessage("Avoid Phrases saved.");
+  showMessage("Writing Guardrails saved.");
 }
 
 function setVoiceAvoidSaveStatus(text, isError = false) {
@@ -2035,7 +2030,7 @@ function renderVoiceExamples() {
   const examples = filteredVoiceExamples();
   $("voiceExamplesList").innerHTML = examples.length
     ? examples.map((post) => voiceExampleCard(post, { removable: true })).join("")
-    : `<p class="empty-copy">No Voice Context posts yet. Mark a few strong posts so Koinoniko can learn Gavin's voice.</p>`;
+    : `<p class="empty-copy">No Voice Examples yet. Mark a few strong posts so Koinoniko can learn Gavin's voice.</p>`;
 }
 
 function filteredVoiceExamples() {
@@ -2071,8 +2066,8 @@ function voiceExampleCard(post, { removable = false } = {}) {
           <span>${escapeHtml(label(post.post_type || "post"))}</span>
           <span>${escapeHtml(voicePerformanceSignal(post))}</span>
         </div>
-        <h3>${escapeHtml(post.summary || summarize(post.text, 110))}</h3>
-        <p><strong>Why this worked:</strong> ${escapeHtml(whyThisWorked || "No note yet.")}</p>
+        <p class="voice-post-preview">${escapeHtml(summarize(post.text, 190))}</p>
+        <p class="voice-why"><strong>Why this worked</strong><span>${escapeHtml(whyThisWorked || "No note yet.")}</span></p>
       </div>
       <details class="advanced-fields voice-example-fields" id="${escapeAttr(voiceDetailPanelId(post.id))}">
         <summary>Voice details</summary>
@@ -2087,11 +2082,11 @@ function voiceExampleCard(post, { removable = false } = {}) {
         </div>
         <div class="actions left">
           <button class="secondary" onclick='suggestWhyWorked(event, ${jsArg(post.id)})'>Suggest why this worked</button>
-          <button class="secondary" onclick='saveVoiceExampleDetails(event, ${jsArg(post.id)})'>Save Voice Details</button>
+          <button class="secondary" onclick='saveVoiceExampleDetails(event, ${jsArg(post.id)})'>Save Details</button>
         </div>
       </details>
       <div class="actions left">
-        <button class="secondary" onclick='openPostDetails(${jsArg(post.id)})'>Open post</button>
+        <button class="secondary" onclick='openPostDetails(${jsArg(post.id)})'>Open Post</button>
         ${post.url ? `<a class="button-link secondary-link" href="${escapeAttr(post.url)}" target="_blank" rel="noreferrer">Open on X</a>` : ""}
         ${removable ? `<button class="quiet-button" onclick='removeVoiceExample(event, ${jsArg(post.id)})'>Remove</button>` : ""}
       </div>
@@ -2137,7 +2132,7 @@ function voiceSuggestionCard(post) {
           <span>${escapeHtml(post.reason || "Suggested by performance")}</span>
           <span>${escapeHtml(topicLabel(post.topic || "No topic"))}</span>
         </div>
-        <h3>${escapeHtml(post.summary || summarize(post.text, 110))}</h3>
+        <p class="voice-post-preview">${escapeHtml(summarize(post.text, 170))}</p>
       </div>
       <div class="actions left">
         <button onclick='markSuggestedVoiceExample(event, ${jsArg(post.id)})'>Mark as Voice Example</button>
@@ -2235,7 +2230,7 @@ window.removeVoiceExample = (event, id) => {
       method: "POST",
       body: JSON.stringify({ voice_example: false }),
     });
-    showMessage("Removed from Voice Context.");
+    showMessage("Removed from Voice Examples.");
     await refresh();
     await loadVoice();
   });
