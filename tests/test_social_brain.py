@@ -28,6 +28,7 @@ from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_ba
 from leadpoet_social_brain.openrouter_provider import OpenRouterProvider, create_provider
 from leadpoet_social_brain.pattern_scout import (
     PATTERN_REFRESH_MISSING_SCRAPINGDOG,
+    PatternRefreshResult,
     add_pattern_example,
     ingest_patterns_batch_csv,
     pattern_groups,
@@ -1843,6 +1844,16 @@ class SocialBrainTest(unittest.TestCase):
                 window="weekly",
             )
             store.mark_viral_pattern_status(pattern.id, "saved")
+            monthly_pattern = add_pattern_example(
+                store,
+                source_url="https://x.com/operator/status/monthlypattern",
+                source_text="A monthly pattern should capture a larger repeated market mechanic.",
+                topic="gtm",
+                category="gtm",
+                pattern_name="Monthly market mechanic",
+                structure="big market signal, repeated behavior, reusable rule",
+                window="monthly",
+            )
             store.close()
 
             status, payload = handle_api_request("GET", "/api/dashboard", db_path=db_path)
@@ -1855,6 +1866,8 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["trends"][0]["id"], trend.id)
             self.assertEqual(payload["trend_groups"]["daily"][0]["id"], trend.id)
             self.assertEqual(payload["pattern_groups"]["weekly"][0]["id"], pattern.id)
+            self.assertEqual(payload["pattern_groups"]["monthly"][0]["id"], monthly_pattern.id)
+            self.assertNotIn("daily", payload["pattern_groups"])
             self.assertEqual(payload["saved_patterns"][0]["id"], pattern.id)
             self.assertIn("analytics_hints", payload)
 
