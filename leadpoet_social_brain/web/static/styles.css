@@ -704,8 +704,12 @@ main {
 .pattern-card {
   display: grid;
   gap: 7px;
-  min-height: clamp(132px, 13vh, 176px);
+  min-height: clamp(150px, 15vh, 184px);
   align-content: start;
+}
+
+.trend-row {
+  grid-template-rows: auto auto minmax(34px, auto) 1fr;
 }
 
 .trend-row[role="button"],
@@ -744,6 +748,29 @@ main {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
+}
+
+.trend-row h3 {
+  font-size: 14px;
+  line-height: 1.22;
+}
+
+.trend-row .trend-summary {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.34;
+  -webkit-line-clamp: 2;
+}
+
+.trend-row .actions {
+  align-self: end;
+  margin-top: 4px;
+}
+
+.trend-row .actions button {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 13px;
 }
 
 .trend-row strong,

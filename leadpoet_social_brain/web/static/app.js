@@ -989,9 +989,7 @@ function renderTrendList(targetId, trends, emptyText) {
 }
 
 function dashboardTrendRow(item) {
-  const summary = cleanString(item.summary);
-  const relevance = trendRelevanceText(item);
-  const leadpoetAngle = cleanString(item.leadpoet_angle);
+  const summary = trendCardSummary(item);
   return `
     <article class="trend-row" role="button" tabindex="0" onclick='openTrendDetails(${jsArg(item.id)})' onkeydown='openTrendDetailsFromKey(event, ${jsArg(item.id)})'>
       <div class="meta-row">
@@ -1000,13 +998,18 @@ function dashboardTrendRow(item) {
       </div>
       <h3>${escapeHtml(item.title)}</h3>
       ${summary ? `<p class="trend-summary">${escapeHtml(summary)}</p>` : ""}
-      <p class="trend-relevance"><strong>Why relevant:</strong> ${escapeHtml(relevance)}</p>
-      ${leadpoetAngle && leadpoetAngle !== relevance ? `<p class="trend-angle"><strong>Leadpoet angle:</strong> ${escapeHtml(leadpoetAngle)}</p>` : ""}
       <div class="actions left">
         <button class="secondary" onclick='useTrendInPost(event, ${jsArg(item.id)})'>Use in Post</button>
       </div>
     </article>
   `;
+}
+
+function trendCardSummary(item) {
+  return cleanString(item.summary)
+    || summarize(item.source_text_excerpt || item.source_excerpt || "", 150)
+    || cleanString(item.why_it_matters)
+    || cleanString(item.leadpoet_angle);
 }
 
 function trendRelevanceText(item) {
