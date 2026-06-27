@@ -354,12 +354,13 @@ def parse_json_object(raw: str) -> dict[str, object] | None:
 
 
 def pattern_groups(store: SQLiteStore, *, limit: int = 5) -> dict[str, list[ViralPattern]]:
-    def visible(window: str) -> list[ViralPattern]:
+    def visible(windows: list[str]) -> list[ViralPattern]:
         query_limit = max(limit * 4, 20)
-        patterns = [
-            *store.list_viral_patterns(status="active", window=window, limit=query_limit),
-            *store.list_viral_patterns(status="saved", window=window, limit=query_limit),
-        ]
+        patterns: list[ViralPattern] = []
+        for window in windows:
+            patterns.extend(store.list_viral_patterns(status="active", window=window, limit=query_limit))
+            patterns.extend(store.list_viral_patterns(status="saved", window=window, limit=query_limit))
+        patterns.sort(key=lambda pattern: (pattern.collected_at or "", pattern.updated_at or ""), reverse=True)
         seen: set[str] = set()
         return [
             pattern for pattern in patterns
@@ -367,7 +368,8 @@ def pattern_groups(store: SQLiteStore, *, limit: int = 5) -> dict[str, list[Vira
         ][:limit]
 
     return {
-        "weekly": visible("weekly"),
+        "weekly": visible(["weekly"]),
+        "monthly": visible(["monthly", "weekly"]),
     }
 
 

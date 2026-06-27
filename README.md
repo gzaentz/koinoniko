@@ -924,7 +924,7 @@ The rule is:
 Use the structure, not the wording.
 ```
 
-The Dashboard shows weekly Pattern cards next to Trends. Pattern cards stay compact and use sensible placeholders when a field is missing. Clicking a Pattern opens its source text, structure, why it worked, adaptation rule, source link, and Archive/Ignore actions. `Use Pattern` opens Create Post with that pattern selected; generated output still goes to Queue as `needs_review`.
+The Dashboard shows weekly and monthly Pattern cards next to Trends. The monthly view rolls up monthly-specific patterns plus recent weekly Pattern Scout results, so the weekly refresh keeps both views useful. Pattern cards stay compact and use sensible placeholders when a field is missing. Clicking a Pattern opens its source text, structure, why it worked, adaptation rule, source link, and Archive/Ignore actions. `Use Pattern` opens Create Post with that pattern selected; generated output still goes to Queue as `needs_review`.
 
 Manual add:
 
