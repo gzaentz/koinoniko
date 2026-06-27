@@ -1470,11 +1470,11 @@ main {
 
 .assistant-message {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   max-width: 92%;
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 12px;
+  padding: 14px 16px;
   background: var(--white);
 }
 
@@ -1495,16 +1495,71 @@ main {
 
 .assistant-message-text {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   font-size: 14px;
+  line-height: 1.48;
+}
+
+.assistant-message-text h3,
+.assistant-message-text h4 {
+  margin: 0;
+  font-family: var(--font-display);
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+
+.assistant-message-text h3 {
+  font-size: 17px;
+}
+
+.assistant-message-text h4 {
+  font-size: 15px;
+  margin-top: 2px;
+}
+
+.assistant-message-text p {
+  margin: 0;
+}
+
+.assistant-message-text strong {
+  font-weight: 750;
+}
+
+.assistant-message-text code {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--soft);
+  padding: 1px 5px;
+  font-size: 12px;
+}
+
+.assistant-message-text ul,
+.assistant-message-text ol {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 7px;
+}
+
+.assistant-message-text li {
+  padding-left: 2px;
+}
+
+.assistant-message-text blockquote {
+  margin: 0;
+  border-left: 3px solid var(--black);
+  padding: 8px 10px;
+  background: var(--soft);
+  color: var(--ink);
+  border-radius: 0 7px 7px 0;
 }
 
 .assistant-sources,
 .assistant-actions {
   display: grid;
-  gap: 5px;
+  gap: 7px;
   border-top: 1px solid var(--line);
-  padding-top: 8px;
+  padding-top: 10px;
 }
 
 .assistant-sources span,
@@ -1517,6 +1572,20 @@ main {
 .assistant-sources small {
   color: var(--muted);
   font-size: 12px;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.assistant-actions span {
+  display: inline-flex;
+  width: fit-content;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: var(--soft);
 }
 
 .assistant-form {

@@ -411,6 +411,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("/api/assistant/starter-prompts", app_js)
         self.assertIn("shouldShowAssistantStarters", app_js)
         self.assertIn("toggleAssistantExpanded", app_js)
+        self.assertIn("assistantRichTextHtml", app_js)
+        self.assertIn("assistantInlineHtml", app_js)
         self.assertIn('drawer.classList.toggle("expanded"', app_js)
         self.assertNotIn('data-view="assistant"', index_html)
         self.assertIn("Use the structure, not the wording.", app_js)

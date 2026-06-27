@@ -2222,20 +2222,86 @@ function assistantMessageHtml(message) {
   const errorClass = message.error ? " error" : "";
   return `
     <div class="assistant-message ${role}${errorClass}">
-      <div class="assistant-message-text">${paragraphHtml(message.text)}</div>
+      <div class="assistant-message-text">${assistantRichTextHtml(message.text)}</div>
       ${assistantSourcesHtml(message.sources || [])}
       ${assistantActionsHtml(message.actions || [])}
     </div>
   `;
 }
 
-function paragraphHtml(text) {
-  const paragraphs = String(text || "")
-    .split(/\n{2,}/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  if (!paragraphs.length) return "";
-  return paragraphs.map((part) => `<p>${escapeHtml(part).replaceAll("\n", "<br>")}</p>`).join("");
+function assistantRichTextHtml(text) {
+  const lines = String(text || "").split(/\r?\n/);
+  const html = [];
+  let paragraph = [];
+  let listType = "";
+  let listItems = [];
+  let quoteLines = [];
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    html.push(`<p>${assistantInlineHtml(paragraph.join(" "))}</p>`);
+    paragraph = [];
+  };
+  const flushList = () => {
+    if (!listItems.length) return;
+    html.push(`<${listType}>${listItems.map((item) => `<li>${assistantInlineHtml(item)}</li>`).join("")}</${listType}>`);
+    listItems = [];
+    listType = "";
+  };
+  const flushQuote = () => {
+    if (!quoteLines.length) return;
+    html.push(`<blockquote>${assistantInlineHtml(quoteLines.join(" "))}</blockquote>`);
+    quoteLines = [];
+  };
+  const flushAll = () => {
+    flushParagraph();
+    flushList();
+    flushQuote();
+  };
+
+  lines.forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line) {
+      flushAll();
+      return;
+    }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      flushAll();
+      const level = heading[1].length === 1 ? "h3" : "h4";
+      html.push(`<${level}>${assistantInlineHtml(heading[2])}</${level}>`);
+      return;
+    }
+    const quote = line.match(/^>\s?(.+)$/);
+    if (quote) {
+      flushParagraph();
+      flushList();
+      quoteLines.push(quote[1]);
+      return;
+    }
+    const unordered = line.match(/^[-*]\s+(.+)$/);
+    const ordered = line.match(/^\d+[.)]\s+(.+)$/);
+    if (unordered || ordered) {
+      flushParagraph();
+      flushQuote();
+      const nextType = ordered ? "ol" : "ul";
+      if (listType && listType !== nextType) flushList();
+      listType = nextType;
+      listItems.push((unordered || ordered)[1]);
+      return;
+    }
+    flushList();
+    flushQuote();
+    paragraph.push(line);
+  });
+  flushAll();
+  return html.join("");
+}
+
+function assistantInlineHtml(value) {
+  return escapeHtml(value)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
 }
 
 function assistantSourcesHtml(sources) {
