@@ -190,6 +190,26 @@
               <button id="voiceContextButton" type="button">Voice Context</button>
             </div>
             <div id="currentVoiceSummary" class="voice-summary"></div>
+            <section class="voice-compact-section" aria-labelledby="voiceCoverageTitle">
+              <div class="voice-section-heading">
+                <h3 id="voiceCoverageTitle">Voice Coverage</h3>
+                <p id="voiceCoverageRecommendation">Add a few Voice Examples to see coverage.</p>
+              </div>
+              <div id="voiceCoverageGrid" class="voice-coverage-grid"></div>
+            </section>
+            <section class="voice-compact-section" aria-labelledby="voiceAvoidTitle">
+              <div class="voice-section-heading">
+                <h3 id="voiceAvoidTitle">Avoid Phrases</h3>
+                <p>Words and habits Koinoniko should write around.</p>
+              </div>
+              <div id="voiceAvoidPhraseList" class="phrase-chip-list"></div>
+              <div class="phrase-editor">
+                <input id="voiceAvoidPhraseInput" placeholder="Add phrase">
+                <button class="secondary" id="voiceAvoidAddButton" type="button">Add</button>
+                <button id="voiceAvoidSaveButton" type="button">Save</button>
+              </div>
+              <span id="voiceAvoidSaveStatus" class="inline-save-status" aria-live="polite"></span>
+            </section>
           </section>
         </div>
       </section>

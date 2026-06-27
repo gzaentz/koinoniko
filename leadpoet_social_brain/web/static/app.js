@@ -16,6 +16,7 @@ const state = {
   status: null,
   account: null,
   voice: null,
+  voiceAvoidDraft: [],
   reviewItems: [],
   scheduledItems: [],
   savedTrends: [],
@@ -1867,18 +1868,23 @@ async function refreshAfterAccountAction() {
 }
 
 async function loadVoice() {
-  const [status, current, examples, suggestions] = await Promise.all([
+  const [status, current, examples, suggestions, coverage, avoidPhrases] = await Promise.all([
     api("/api/voice/status"),
     api("/api/voice/current"),
     api("/api/voice/examples"),
     api("/api/voice/suggestions"),
+    api("/api/voice/coverage"),
+    api("/api/voice/avoid-phrases"),
   ]);
   state.voice = {
     status,
     current,
     examples: examples.items || [],
     suggestions: suggestions.items || [],
+    coverage,
+    avoidPhrases: avoidPhrases.items || [],
   };
+  state.voiceAvoidDraft = [...state.voice.avoidPhrases];
   renderVoice();
 }
 
@@ -1886,6 +1892,8 @@ function renderVoice() {
   const status = state.voice?.status || {};
   $("updateVoiceButton").disabled = status.status === "needs_examples";
   renderCurrentVoice();
+  renderVoiceCoverage();
+  renderAvoidPhrases();
   renderVoiceTopicOptions();
   renderVoiceExamples();
   renderVoiceSuggestions();
@@ -1932,6 +1940,84 @@ function cleanVoiceSections(sections) {
   return preferredOrder
     .map((title) => cleaned.find((section) => section.title === title))
     .filter(Boolean);
+}
+
+function renderVoiceCoverage() {
+  const coverage = state.voice?.coverage || {};
+  const topics = coverage.topics || [];
+  const postTypes = coverage.post_types || [];
+  $("voiceCoverageRecommendation").textContent = coverage.recommendation || "Voice coverage looks balanced enough for now.";
+  $("voiceCoverageGrid").innerHTML = (topics.length || postTypes.length)
+    ? [
+        voiceCoverageGroup("Topics", topics),
+        voiceCoverageGroup("Post types", postTypes.map((item) => ({ ...item, name: label(item.name) }))),
+      ].join("")
+    : `<p class="empty-copy compact">Add a few Voice Examples to see coverage.</p>`;
+}
+
+function voiceCoverageGroup(title, items) {
+  return `
+    <article class="voice-coverage-group">
+      <h4>${escapeHtml(title)}</h4>
+      <div class="voice-coverage-list">
+        ${items.map((item) => `
+          <div class="voice-coverage-row">
+            <span>${escapeHtml(topicLabel(item.name || "Unknown"))}</span>
+            <strong>${metric(item.count || 0)}</strong>
+          </div>
+        `).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderAvoidPhrases() {
+  const phrases = state.voiceAvoidDraft || [];
+  $("voiceAvoidPhraseList").innerHTML = phrases.length
+    ? phrases.map((phrase, index) => `
+      <button class="phrase-chip" type="button" onclick="removeAvoidPhrase(${index})" title="Remove phrase">
+        <span>${escapeHtml(phrase)}</span>
+        <span aria-hidden="true">x</span>
+      </button>
+    `).join("")
+    : `<p class="empty-copy compact">No avoid phrases set.</p>`;
+}
+
+function addAvoidPhrase() {
+  const input = $("voiceAvoidPhraseInput");
+  const phrase = input.value.trim().replace(/\s+/g, " ");
+  if (!phrase) return;
+  const existing = new Set((state.voiceAvoidDraft || []).map((item) => item.toLowerCase()));
+  if (!existing.has(phrase.toLowerCase())) {
+    state.voiceAvoidDraft = [...(state.voiceAvoidDraft || []), phrase];
+  }
+  input.value = "";
+  setVoiceAvoidSaveStatus("Unsaved changes");
+  renderAvoidPhrases();
+}
+
+window.removeAvoidPhrase = (index) => {
+  state.voiceAvoidDraft = (state.voiceAvoidDraft || []).filter((_, itemIndex) => itemIndex !== index);
+  setVoiceAvoidSaveStatus("Unsaved changes");
+  renderAvoidPhrases();
+};
+
+async function saveAvoidPhrases() {
+  const payload = await api("/api/voice/avoid-phrases", {
+    method: "POST",
+    body: JSON.stringify({ phrases: state.voiceAvoidDraft || [] }),
+  });
+  state.voice.avoidPhrases = payload.items || [];
+  state.voiceAvoidDraft = [...state.voice.avoidPhrases];
+  setVoiceAvoidSaveStatus("Saved");
+  renderAvoidPhrases();
+  showMessage("Avoid Phrases saved.");
+}
+
+function setVoiceAvoidSaveStatus(text, isError = false) {
+  const status = $("voiceAvoidSaveStatus");
+  status.textContent = text || "";
+  status.classList.toggle("error", isError);
 }
 
 function renderVoiceTopicOptions() {
@@ -1988,7 +2074,7 @@ function voiceExampleCard(post, { removable = false } = {}) {
         <h3>${escapeHtml(post.summary || summarize(post.text, 110))}</h3>
         <p><strong>Why this worked:</strong> ${escapeHtml(whyThisWorked || "No note yet.")}</p>
       </div>
-      <details class="advanced-fields voice-example-fields">
+      <details class="advanced-fields voice-example-fields" id="${escapeAttr(voiceDetailPanelId(post.id))}">
         <summary>Voice details</summary>
         <div class="form-grid">
           ${voiceDetailTextarea(post, "why_this_worked", "Why this worked", 3)}
@@ -2000,6 +2086,7 @@ function voiceExampleCard(post, { removable = false } = {}) {
           ${voiceDetailInput(post, "pattern", "Pattern")}
         </div>
         <div class="actions left">
+          <button class="secondary" onclick='suggestWhyWorked(event, ${jsArg(post.id)})'>Suggest why this worked</button>
           <button class="secondary" onclick='saveVoiceExampleDetails(event, ${jsArg(post.id)})'>Save Voice Details</button>
         </div>
       </details>
@@ -2030,6 +2117,10 @@ function voiceDetailTextarea(post, field, labelText, rows = 3) {
 
 function voiceDetailFieldId(postId, field) {
   return `voice-detail-${field}-${postId}`;
+}
+
+function voiceDetailPanelId(postId) {
+  return `voice-detail-panel-${postId}`;
 }
 
 function voiceDetailValue(post, field) {
@@ -2117,6 +2208,24 @@ window.saveVoiceExampleDetails = (event, id) => {
     showMessage(payload.message || "Voice details saved.");
     await refresh();
     await loadVoice();
+  });
+};
+
+window.suggestWhyWorked = (event, id) => {
+  event.stopPropagation();
+  runButton(event.currentTarget, "Suggesting...", async () => {
+    const payload = await api(`/api/voice/examples/${encodeURIComponent(id)}/suggest-note`, {
+      method: "POST",
+      body: JSON.stringify({ post_id: id }),
+    });
+    const field = $(voiceDetailFieldId(id, "why_this_worked"));
+    const panel = $(voiceDetailPanelId(id));
+    if (panel) panel.open = true;
+    if (field) {
+      field.value = payload.suggested_note || "";
+      field.focus();
+    }
+    showMessage("Suggestion added. Review it, then Save Voice Details.");
   });
 };
 
@@ -2996,6 +3105,14 @@ function setup() {
     $(id).addEventListener("input", renderVoiceExamples);
   });
   $("voiceContextButton").addEventListener("click", () => openModal("voiceContextModal"));
+  $("voiceAvoidAddButton").addEventListener("click", addAvoidPhrase);
+  $("voiceAvoidSaveButton").addEventListener("click", (event) => runButton(event.currentTarget, "Saving...", saveAvoidPhrases));
+  $("voiceAvoidPhraseInput").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      addAvoidPhrase();
+    }
+  });
   document.querySelectorAll(".posts-table th[data-sort-key]").forEach((header) => {
     header.querySelector("button")?.addEventListener("click", () => setRecentPostsSort(header.dataset.sortKey));
   });

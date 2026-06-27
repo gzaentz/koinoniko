@@ -10,6 +10,7 @@ from leadpoet_social_brain.platforms.x import get_x_adapter
 from leadpoet_social_brain.providers import DraftProvider, ModelRouting, generate_with_provider, resolve_model_routing
 from leadpoet_social_brain.skills import SkillAsset, generation_skills
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
+from leadpoet_social_brain.voice import avoid_phrases_prompt_section, load_avoid_phrases
 
 
 MISSING_PROVIDER_MESSAGE = (
@@ -42,6 +43,7 @@ class SocialBrainGenerator:
         )
         trends = self._trends_for(request)
         patterns = self._patterns_for(request)
+        avoid_phrases = load_avoid_phrases(self.store)
         skills = generation_skills(platform=request.platform, post_type=request.post_type)
         if not self.provider:
             raise ValueError(MISSING_PROVIDER_MESSAGE)
@@ -54,13 +56,22 @@ class SocialBrainGenerator:
                 skills=skills,
                 trends=trends,
                 patterns=patterns,
+                avoid_phrases=avoid_phrases,
                 max_chars=max_chars,
                 provider_name=provider_name,
                 model_routing=model_routing,
                 save=save,
             )
 
-        prompt = build_generation_prompt(request, bundle, skills=skills, trends=trends, patterns=patterns, max_chars=max_chars)
+        prompt = build_generation_prompt(
+            request,
+            bundle,
+            skills=skills,
+            trends=trends,
+            patterns=patterns,
+            avoid_phrases=avoid_phrases,
+            max_chars=max_chars,
+        )
         raw_texts = generate_with_provider(
             self.provider,
             prompt,
@@ -87,6 +98,7 @@ class SocialBrainGenerator:
                     skills=skills,
                     trends=trends,
                     patterns=patterns,
+                    avoid_phrases=avoid_phrases,
                     quality_notes=quality_notes,
                     provider_name=provider_name,
                     quality_mode="standard",
@@ -107,6 +119,7 @@ class SocialBrainGenerator:
         skills: list[SkillAsset],
         trends: list[TrendItem],
         patterns: list[ViralPattern],
+        avoid_phrases: list[str],
         max_chars: int,
         provider_name: str,
         model_routing: ModelRouting,
@@ -114,7 +127,7 @@ class SocialBrainGenerator:
     ) -> list[GeneratedDraft]:
         assert self.provider is not None
         adapter = self._adapter_for(request.platform)
-        strategy_prompt = build_strategy_prompt(request, bundle, trends=trends, patterns=patterns)
+        strategy_prompt = build_strategy_prompt(request, bundle, trends=trends, patterns=patterns, avoid_phrases=avoid_phrases)
         strategy_raw = generate_with_provider(
             self.provider,
             strategy_prompt,
@@ -128,6 +141,7 @@ class SocialBrainGenerator:
             skills=skills,
             trends=trends,
             patterns=patterns,
+            avoid_phrases=avoid_phrases,
             strategy_summary=strategy_summary,
             max_chars=max_chars,
         )
@@ -146,6 +160,7 @@ class SocialBrainGenerator:
             skills=skills,
             strategy_summary=strategy_summary,
             draft_options=cleaned_options,
+            avoid_phrases=avoid_phrases,
         )
         evaluation_raw = generate_with_provider(
             self.provider,
@@ -168,6 +183,7 @@ class SocialBrainGenerator:
                 skills=skills,
                 trends=trends,
                 patterns=patterns,
+                avoid_phrases=avoid_phrases,
                 quality_notes=notes,
                 provider_name=provider_name,
                 quality_mode="best_version",
@@ -196,8 +212,17 @@ class SocialBrainGenerator:
         )
         trends = self._trends_for(request)
         patterns = self._patterns_for(request)
+        avoid_phrases = load_avoid_phrases(self.store)
         skills = generation_skills(platform=request.platform, post_type=request.post_type)
-        return build_generation_prompt(request, bundle, skills=skills, trends=trends, patterns=patterns, max_chars=max_chars)
+        return build_generation_prompt(
+            request,
+            bundle,
+            skills=skills,
+            trends=trends,
+            patterns=patterns,
+            avoid_phrases=avoid_phrases,
+            max_chars=max_chars,
+        )
 
     def _adapter_for(self, platform: str):
         if platform == "x":
@@ -232,6 +257,7 @@ def build_generation_prompt(
     skills: list[SkillAsset],
     trends: list[TrendItem],
     patterns: list[ViralPattern],
+    avoid_phrases: list[str] | None = None,
     max_chars: int,
 ) -> str:
     skill_text = "\n\n".join(
@@ -253,6 +279,7 @@ def build_generation_prompt(
     analytics_section = f"\n\nUseful performance guidance:\n{analytics}" if analytics else ""
     trend_section = f"\n\nTimely market context:\n{trends_text}" if trends_text else ""
     pattern_section = f"\n\nPattern mechanics to adapt:\n{patterns_text}" if patterns_text else ""
+    avoid_section = avoid_phrases_prompt_section(avoid_phrases or [])
     return f"""Write {request.platform.upper()} posts for Leadpoet.
 
 Study these Gavin/Leadpoet examples first:
@@ -280,6 +307,8 @@ Request:
 Writing and review instructions:
 {skill_text or "- No skill files found. Use retrieved context and keep the post natural."}
 
+{avoid_section}
+
 Priority order: Koinoniko Voice, Leadpoet context, current trend/topic, Pattern mechanics, then platform rules.
 Pattern safety: Use the structure, not the wording. Do not copy source post wording, claims, examples, or framing directly. If a Pattern conflicts with Voice, Voice wins.
 
@@ -292,12 +321,14 @@ def build_strategy_prompt(
     *,
     trends: list[TrendItem],
     patterns: list[ViralPattern],
+    avoid_phrases: list[str] | None = None,
 ) -> str:
     context = "\n".join(f"- {section.kind}/{section.name}: {section.content}" for section in bundle.positioning_sections)
     examples_text = "\n\n".join(_format_example(post, bundle) for post in bundle.examples)
     trends_text = "\n\n".join(_format_trend(trend) for trend in trends)
     patterns_text = "\n\n".join(_format_viral_pattern(pattern) for pattern in patterns)
     analytics = "\n".join(f"- {hint}" for hint in bundle.analytics_hints)
+    avoid_section = avoid_phrases_prompt_section(avoid_phrases or [])
     return f"""You are helping Gavin decide the strongest X post angle for Leadpoet.
 
 Do not write the post yet. Decide what the post should accomplish.
@@ -324,6 +355,8 @@ Pattern mechanics:
 Analytics hints:
 {analytics or "- No analytics hints available."}
 
+{avoid_section}
+
 Return compact JSON only with these keys:
 core_point, intended_audience, why_timely, post_angle, hook_direction, what_to_avoid, success_criteria."""
 
@@ -335,6 +368,7 @@ def build_best_writer_prompt(
     skills: list[SkillAsset],
     trends: list[TrendItem],
     patterns: list[ViralPattern],
+    avoid_phrases: list[str] | None = None,
     strategy_summary: dict[str, object],
     max_chars: int,
 ) -> str:
@@ -344,6 +378,7 @@ def build_best_writer_prompt(
     trends_text = "\n\n".join(_format_trend(trend) for trend in trends)
     patterns_text = "\n\n".join(_format_viral_pattern(pattern) for pattern in patterns)
     analytics = "\n".join(f"- {hint}" for hint in bundle.analytics_hints)
+    avoid_section = avoid_phrases_prompt_section(avoid_phrases or [])
     return f"""Write 3 X draft options for Gavin.
 
 Prioritize exact Gavin examples, worked-reason notes, and the writing skills below over generic marketing instincts.
@@ -377,6 +412,8 @@ Performance hints:
 Writing and review instructions:
 {skill_text}
 
+{avoid_section}
+
 Avoid corporate thought leadership, generic hype, fake profundity, em dashes, overly symmetrical phrasing, LinkedIn-style moral lessons, and "not just X, but Y" framing.
 Use Pattern mechanics only as structure. Do not copy source post wording or make the post feel derivative. Make it specific to Gavin/Leadpoet.
 
@@ -389,9 +426,11 @@ def build_evaluation_prompt(
     skills: list[SkillAsset],
     strategy_summary: dict[str, object],
     draft_options: list[str],
+    avoid_phrases: list[str] | None = None,
 ) -> str:
     skill_text = "\n\n".join(f"## {skill.path}\n{skill.content}" for skill in skills)
     options = "\n\n".join(f"Draft {index}:\n{text}" for index, text in enumerate(draft_options, start=1))
+    avoid_section = avoid_phrases_prompt_section(avoid_phrases or [])
     return f"""Choose the best X post for Gavin and clean it up lightly.
 
 Original request:
@@ -406,12 +445,21 @@ Success criteria:
 Voice and review rules:
 {skill_text}
 
+{avoid_section}
+
 Draft options:
 {options}
 
 Return compact JSON only with:
 ranked_drafts, quality_notes, warnings, suggested_final_version.
 
+Best Version evaluator should check:
+- no avoid phrases
+- no generic AI language
+- no forced CTA
+- no corporate launch tone
+
+If a draft uses an Avoid Phrase, revise away from it in suggested_final_version.
 The suggested_final_version must be natural, specific, founder-led, concise, non-corporate, and free of em dashes."""
 
 
@@ -422,6 +470,7 @@ def build_context_snapshot(
     skills: list[SkillAsset],
     trends: list[TrendItem],
     patterns: list[ViralPattern],
+    avoid_phrases: list[str] | None,
     quality_notes: str,
     provider_name: str,
     quality_mode: str,
@@ -465,6 +514,7 @@ def build_context_snapshot(
         "strategy_summary": strategy_summary,
         "evaluation": evaluation,
         "quality_notes": quality_notes,
+        "avoid_phrases": avoid_phrases or [],
         "skills": [
             {
                 "path": skill.path,

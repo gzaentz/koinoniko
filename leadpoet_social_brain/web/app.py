@@ -84,6 +84,11 @@ from leadpoet_social_brain.storage.sqlite_store import (
     resolve_db_path,
 )
 from leadpoet_social_brain.trend_scout import refresh_web_trends, scrapingdog_configured, web_trend_groups
+from leadpoet_social_brain.voice import (
+    DEFAULT_AVOID_PHRASES,
+    load_avoid_phrases,
+    save_avoid_phrases,
+)
 
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -136,6 +141,7 @@ TASK_SECRET_CONFIG_MESSAGE = "Task secret is not configured. Set TASK_SECRET."
 TASK_SECRET_REQUIRED_MESSAGE = "Task authentication required."
 MISSING_X_READ_CREDENTIALS_MESSAGE = "X read credentials missing. Set X_BEARER_TOKEN."
 CREATE_POST_MISSING_PROVIDER_MESSAGE = "No LLM provider configured. Set provider before creating posts."
+SUGGEST_NOTE_MISSING_PROVIDER_MESSAGE = "No LLM provider configured. Set a provider before suggesting notes."
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -592,8 +598,16 @@ def route_api(
         return 200, voice_current_payload(store)
     if method == "GET" and parts == ["api", "voice", "examples"]:
         return 200, {"items": voice_examples_payload(store)}
+    if method == "POST" and len(parts) == 5 and parts[:3] == ["api", "voice", "examples"] and parts[4] == "suggest-note":
+        return suggest_voice_note_response(store, parts[3])
     if method == "GET" and parts == ["api", "voice", "suggestions"]:
         return 200, {"items": voice_suggestions_payload(store)}
+    if method == "GET" and parts == ["api", "voice", "coverage"]:
+        return 200, voice_coverage_payload(store)
+    if method == "GET" and parts == ["api", "voice", "avoid-phrases"]:
+        return 200, {"items": load_avoid_phrases(store), "defaults": DEFAULT_AVOID_PHRASES}
+    if method == "POST" and parts == ["api", "voice", "avoid-phrases"]:
+        return 200, {"items": save_avoid_phrases(store, phrase_list_payload(payload))}
     if method == "GET" and parts == ["api", "taxonomy", "topics"]:
         return 200, {"items": taxonomy_options_payload(store, "topic", DEFAULT_TOPIC_OPTIONS)}
     if method == "GET" and parts == ["api", "taxonomy", "post-types"]:
@@ -1582,6 +1596,108 @@ def voice_suggestions_payload(store: SQLiteStore, *, limit: int = 6) -> list[dic
     ]
 
 
+def suggest_voice_note_response(store: SQLiteStore, post_id: str) -> tuple[int, dict[str, Any]]:
+    post = store.get_post(post_id)
+    if not post:
+        return 404, {"error": "Post not found."}
+    provider = load_configured_provider(store)
+    if not provider:
+        return 400, {"error": SUGGEST_NOTE_MISSING_PROVIDER_MESSAGE}
+    metrics = store.latest_metrics_by_post_id([post.id]).get(post.id)
+    current_voice = current_voice_section(store)
+    prompt = build_voice_note_prompt(post, metrics=metrics, current_voice=current_voice.content if current_voice else "")
+    try:
+        suggestions = generate_with_provider(
+            provider,
+            prompt,
+            variants=1,
+            model=resolve_model_routing(store, provider).default,
+        )
+    except Exception as exc:  # noqa: BLE001 - show provider errors in the UI.
+        return 400, {"error": str(exc)}
+    suggested_note = clean_suggested_voice_note(suggestions[0] if suggestions else "")
+    if not suggested_note:
+        return 400, {"error": "Provider returned an empty suggested note."}
+    return 200, {"suggested_note": suggested_note}
+
+
+def build_voice_note_prompt(post: SocialPost, *, metrics: Any | None, current_voice: str = "") -> str:
+    metric = metrics_payload(metrics)
+    metrics_text = "\n".join(
+        f"- {key}: {value}"
+        for key, value in metric.items()
+        if value is not None and key != "measured_at"
+    ) or "- No metrics available."
+    return f"""Suggest a concise "Why this worked" note for this Koinoniko Voice Example.
+
+Post text:
+{post.text}
+
+Topic: {post.topic}
+Post type: {post.post_type}
+
+Metrics:
+{metrics_text}
+
+Current Koinoniko Voice:
+{current_voice or "- No current Voice summary yet."}
+
+Focus on voice, structure, specificity, why it sounds like Gavin, and why the audience likely responded.
+Avoid generic notes like "This post performed well because it got engagement."
+
+Return one concise paragraph, maximum 35 words. Do not include bullets, labels, or quotation marks."""
+
+
+def clean_suggested_voice_note(value: str) -> str:
+    cleaned = " ".join(str(value or "").strip().strip('"').strip("'").split())
+    if len(cleaned) <= 420:
+        return cleaned
+    return cleaned[:417].rstrip() + "..."
+
+
+def voice_coverage_payload(store: SQLiteStore) -> dict[str, Any]:
+    examples = voice_example_posts(store)
+    if not examples:
+        return {
+            "topics": [],
+            "post_types": [],
+            "recommendation": "Add a few Voice Examples to see coverage.",
+        }
+    topic_counts = Counter(post.topic or "Uncategorized" for post in examples)
+    type_counts = Counter(post.post_type or "unknown" for post in examples)
+    topics = coverage_rows(topic_counts, ["sales LLMs", "Bittensor", "product"])
+    post_types = coverage_rows(type_counts, ["founder_insight", "quote_tweet", "product_update"])
+    return {
+        "topics": topics,
+        "post_types": post_types,
+        "recommendation": voice_coverage_recommendation(topic_counts, type_counts, len(examples)),
+    }
+
+
+def coverage_rows(counts: Counter[str], defaults: list[str]) -> list[dict[str, Any]]:
+    names: list[str] = []
+    for name in defaults:
+        if name not in names:
+            names.append(name)
+    for name, _ in counts.most_common():
+        if name not in names:
+            names.append(name)
+    return [{"name": name, "count": int(counts.get(name, 0))} for name in names[:8]]
+
+
+def voice_coverage_recommendation(topic_counts: Counter[str], type_counts: Counter[str], examples_count: int) -> str:
+    if examples_count < 3:
+        return "Add 2-3 more Voice Examples across sales, product, and Bittensor before relying on Voice too heavily."
+    if type_counts.get("product_update", 0) == 0:
+        return "Add 1-2 product update examples so Koinoniko can write stronger launch/product posts."
+    active_topics = [topic for topic, count in topic_counts.items() if count > 0]
+    if len(active_topics) == 1:
+        return f"Add 1-2 Voice Examples outside {active_topics[0]} so Voice does not overfit one lane."
+    if type_counts.get("quote_tweet", 0) == 0 and examples_count >= 4:
+        return "Add one quote tweet example if you want Koinoniko to handle commentary posts better."
+    return "Voice coverage looks balanced enough for now."
+
+
 def save_post_voice_payload(store: SQLiteStore, post: SocialPost, payload: dict[str, Any]) -> dict[str, Any]:
     existing = store.notes_by_post_id([post.id]).get(post.id)
     if "topic" in payload or "post_type" in payload:
@@ -2521,6 +2637,18 @@ def string_list_payload(value: object) -> list[str]:
         return [cleaned for item in value if (cleaned := clean_optional(item))]
     cleaned = clean_optional(value)
     return [cleaned] if cleaned else []
+
+
+def phrase_list_payload(payload: dict[str, Any]) -> list[object]:
+    phrases = payload.get("phrases")
+    if isinstance(phrases, list):
+        return phrases
+    if isinstance(payload.get("items"), list):
+        return payload["items"]
+    text = clean_optional(payload.get("text"))
+    if text:
+        return text.splitlines()
+    return []
 
 
 def value_or_current(payload: dict[str, Any], key: str, current):

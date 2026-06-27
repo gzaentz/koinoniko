@@ -30,6 +30,7 @@ from leadpoet_social_brain.platforms.x_api import XPostedTweet, XWriteClient
 from leadpoet_social_brain.providers import DraftProvider, generate_with_provider, resolve_model_routing
 from leadpoet_social_brain.skills import generation_skills
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
+from leadpoet_social_brain.voice import avoid_phrases_prompt_section, load_avoid_phrases
 
 
 LOCAL_TZ = ZoneInfo("America/New_York")
@@ -243,6 +244,7 @@ def revise_queued_post(
         max_examples=4,
     )
     skills = generation_skills(platform=item.platform, post_type=item.post_type)
+    avoid_phrases = load_avoid_phrases(store)
     examples = "\n\n".join(post.text for post in bundle.examples) or "No examples selected."
     context = "\n".join(
         f"- {section.kind}/{section.name}: {section.content}"
@@ -274,6 +276,8 @@ Useful performance guidance:
 Writing and review instructions:
 {skill_text}
 
+{avoid_phrases_prompt_section(avoid_phrases)}
+
 Return only revised post text variants. Do not explain. Do not approve or post anything."""
     model_routing = resolve_model_routing(store, provider)
     if best_version:
@@ -294,7 +298,7 @@ Return only revised post text variants. Do not explain. Do not approve or post a
         ]
         strategy_raw = generate_with_provider(
             provider,
-            build_strategy_prompt(request, bundle, trends=trends, patterns=[]),
+            build_strategy_prompt(request, bundle, trends=trends, patterns=[], avoid_phrases=avoid_phrases),
             variants=1,
             model=model_routing.strategist,
         )[0]
@@ -307,6 +311,7 @@ Return only revised post text variants. Do not explain. Do not approve or post a
                 skills=skills,
                 trends=trends,
                 patterns=[],
+                avoid_phrases=avoid_phrases,
                 strategy_summary=strategy_summary,
                 max_chars=adapter.rules.default_max_chars,
             ),
@@ -326,6 +331,7 @@ Return only revised post text variants. Do not explain. Do not approve or post a
                 skills=skills,
                 strategy_summary=strategy_summary,
                 draft_options=options,
+                avoid_phrases=avoid_phrases,
             ),
             variants=1,
             model=model_routing.evaluator,

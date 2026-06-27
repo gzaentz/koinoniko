@@ -53,6 +53,7 @@ from leadpoet_social_brain.storage.sqlite_store import (
     resolve_db_path,
 )
 from leadpoet_social_brain.trend_scout import WebTrendGroups, refresh_web_trends, web_trend_groups
+from leadpoet_social_brain.voice import DEFAULT_AVOID_PHRASES, load_avoid_phrases, save_avoid_phrases
 from leadpoet_social_brain.web.app import (
     CREATE_POST_MISSING_PROVIDER_MESSAGE,
     DEFAULT_AUTH_USERNAME,
@@ -369,6 +370,11 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(index_html.count("<h2>Voice</h2>"), 1)
         self.assertIn("Voice Context", index_html)
         self.assertIn("Update Voice", index_html)
+        self.assertIn("Voice Coverage", index_html)
+        self.assertIn("Avoid Phrases", index_html)
+        self.assertIn('id="voiceCoverageGrid"', index_html)
+        self.assertIn('id="voiceAvoidPhraseList"', index_html)
+        self.assertIn('id="voiceAvoidPhraseInput"', index_html)
         self.assertNotIn("Voice Context posts", index_html)
         self.assertNotIn('class="voice-status-row"', index_html)
         self.assertNotIn('class="voice-status-chip"', index_html)
@@ -557,6 +563,12 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("/api/voice/examples", app_js)
         self.assertIn("/api/voice/current", app_js)
         self.assertIn("/api/voice/suggestions", app_js)
+        self.assertIn("/api/voice/coverage", app_js)
+        self.assertIn("/api/voice/avoid-phrases", app_js)
+        self.assertIn("/api/voice/examples/", app_js)
+        self.assertIn("Suggest why this worked", app_js)
+        self.assertIn("renderVoiceCoverage", app_js)
+        self.assertIn("renderAvoidPhrases", app_js)
         self.assertIn("/api/taxonomy/topics", app_js)
         self.assertIn("/api/taxonomy/post-types", app_js)
         self.assertIn("/api/posts/", app_js)
@@ -1019,6 +1031,7 @@ class SocialBrainTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
             store.seed_defaults()
+            save_avoid_phrases(store, ["game changer", "future of sales"])
             store.save_app_setting("model.default", "openrouter/default")
             store.save_app_setting("model.strategist", "openrouter/strategy")
             store.save_app_setting("model.natural_writer", "openrouter/writer")
@@ -1047,6 +1060,8 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(snapshot["evaluator_model"], "openrouter/evaluator")
             self.assertIn("strategy_summary", snapshot)
             self.assertIn("quality_notes", snapshot)
+            self.assertIn("Best Version evaluator should check", provider.calls[2]["prompt"])
+            self.assertIn("- game changer", provider.calls[2]["prompt"])
             self.assertIn("Most sales AI", drafts[0].text)
             store.close()
 
@@ -1591,6 +1606,7 @@ class SocialBrainTest(unittest.TestCase):
             db_path = Path(tmpdir) / "brain.sqlite3"
             store = SQLiteStore(db_path)
             store.seed_defaults()
+            save_avoid_phrases(store, ["game changer"])
             item = store.save_content_queue_item(
                 ContentQueueItem(
                     text="Original queued post.",
@@ -1613,6 +1629,8 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(len(payload["versions"]), 1)
             self.assertIn("Original queued post.", provider.prompts[0])
+            self.assertIn("Avoid Phrases:", provider.prompts[0])
+            self.assertIn("- game changer", provider.prompts[0])
 
             store = SQLiteStore(db_path)
             unchanged = store.get_content_queue_item(item.id)
@@ -2638,6 +2656,140 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn(suggested.id, suggestion_ids)
             self.assertNotIn(selected.id, suggestion_ids)
             self.assertIn("reason", suggestions["items"][0])
+
+    def test_voice_suggest_note_requires_provider_and_does_not_save_automatically(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            post = ingest_x_post(
+                store,
+                text="The dirty secret of intent data is that most vendors are selling yesterday's curiosity as today's buying signal.",
+                url="https://x.com/gavin/status/voice-note-101",
+                date="2026-06-24",
+                author="Gavin",
+                topic="sales LLMs",
+                post_type="founder_insight",
+                metrics=EngagementMetrics(impressions=3000, likes=100, replies=8, reposts=12, bookmarks=40),
+                imitate=True,
+            )
+            store.close()
+
+            with patch("leadpoet_social_brain.web.app.load_configured_provider", return_value=None):
+                status, missing = handle_api_request(
+                    "POST",
+                    f"/api/voice/examples/{post.id}/suggest-note",
+                    json.dumps({"post_id": post.id}),
+                    db_path=db_path,
+                )
+            self.assertEqual(status, 400)
+            self.assertEqual(missing["error"], "No LLM provider configured. Set a provider before suggesting notes.")
+
+            provider = FakeProvider([
+                "Strong because it reframes intent data as a timing problem in plain language, with a concrete enemy and no forced CTA."
+            ])
+            with patch("leadpoet_social_brain.web.app.load_configured_provider", return_value=provider):
+                status, payload = handle_api_request(
+                    "POST",
+                    f"/api/voice/examples/{post.id}/suggest-note",
+                    json.dumps({"post_id": post.id}),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(
+                payload["suggested_note"],
+                "Strong because it reframes intent data as a timing problem in plain language, with a concrete enemy and no forced CTA.",
+            )
+            self.assertIn("dirty secret of intent data", provider.prompts[0])
+            self.assertIn("- bookmarks: 40", provider.prompts[0])
+            self.assertIn("Current Koinoniko Voice:", provider.prompts[0])
+
+            store = SQLiteStore(db_path)
+            note = store.notes_by_post_id([post.id])[post.id]
+            self.assertIsNone(note.worked_reason)
+            store.close()
+
+            status, saved = handle_api_request(
+                "POST",
+                f"/api/posts/{post.id}/voice",
+                json.dumps({"voice_example": True, "why_this_worked": payload["suggested_note"]}),
+                db_path=db_path,
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(saved["post"]["voice"]["why_this_worked"], payload["suggested_note"])
+
+    def test_voice_coverage_counts_and_recommendations(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+
+            status, empty = handle_api_request("GET", "/api/voice/coverage", db_path=db_path)
+            self.assertEqual(status, 200)
+            self.assertEqual(empty["topics"], [])
+            self.assertEqual(empty["recommendation"], "Add a few Voice Examples to see coverage.")
+
+            store = SQLiteStore(db_path)
+            for index in range(3):
+                ingest_x_post(
+                    store,
+                    text=f"Sales AI post {index}",
+                    url=f"https://x.com/gavin/status/coverage{index}",
+                    date="2026-06-24",
+                    author="Gavin",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    worked_reason="Plain, direct contrast.",
+                    imitate=True,
+                )
+            store.close()
+
+            status, coverage = handle_api_request("GET", "/api/voice/coverage", db_path=db_path)
+            self.assertEqual(status, 200)
+            topic_counts = {item["name"]: item["count"] for item in coverage["topics"]}
+            type_counts = {item["name"]: item["count"] for item in coverage["post_types"]}
+            self.assertEqual(topic_counts["sales LLMs"], 3)
+            self.assertEqual(topic_counts["product"], 0)
+            self.assertEqual(type_counts["founder_insight"], 3)
+            self.assertEqual(type_counts["product_update"], 0)
+            self.assertIn("product update examples", coverage["recommendation"])
+
+    def test_voice_avoid_phrases_can_load_save_and_appear_in_prompts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.seed_defaults()
+            self.assertEqual(load_avoid_phrases(store), DEFAULT_AVOID_PHRASES)
+            saved_phrases = save_avoid_phrases(store, ["game changer", "unlock", "unlock", " AI is transforming "])
+            self.assertEqual(saved_phrases, ["game changer", "unlock", "AI is transforming"])
+            store.close()
+
+            status, loaded = handle_api_request("GET", "/api/voice/avoid-phrases", db_path=db_path)
+            self.assertEqual(status, 200)
+            self.assertEqual(loaded["items"], ["game changer", "unlock", "AI is transforming"])
+            self.assertIn("future of sales", loaded["defaults"])
+
+            status, posted = handle_api_request(
+                "POST",
+                "/api/voice/avoid-phrases",
+                json.dumps({"phrases": ["game changer", "overly polished thought leadership"]}),
+                db_path=db_path,
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(posted["items"], ["game changer", "overly polished thought leadership"])
+
+            store = SQLiteStore(db_path)
+            provider = FakeProvider(["Sales AI should make buyer timing obvious."])
+            SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(platform="x", topic="sales LLMs", post_type="founder_insight"),
+                variants=1,
+            )
+            self.assertIn("Avoid Phrases:", provider.prompts[0])
+            self.assertIn("- game changer", provider.prompts[0])
+            self.assertIn("Do not use these phrases or close variants", provider.prompts[0])
+            draft = store.conn.execute("SELECT context_snapshot_json FROM generated_drafts LIMIT 1").fetchone()
+            snapshot = json.loads(draft["context_snapshot_json"])
+            self.assertEqual(snapshot["avoid_phrases"], ["game changer", "overly polished thought leadership"])
+            store.close()
 
     def test_post_detail_and_dashboard_payload_include_voice_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:
