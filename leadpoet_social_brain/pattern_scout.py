@@ -230,13 +230,19 @@ def select_relevant_patterns(
     pattern_ids: list[str] | None = None,
     limit: int = 3,
 ) -> list[ViralPattern]:
+    selectable_statuses = {"active", "saved"}
     if pattern_ids:
         patterns = [
             pattern for pattern_id in pattern_ids
-            if (pattern := store.get_viral_pattern(pattern_id)) is not None and pattern.status == "active"
+            if (pattern := store.get_viral_pattern(pattern_id)) is not None and pattern.status in selectable_statuses
         ]
         return patterns[:limit]
-    active = store.list_viral_patterns(status="active", limit=100)
+    active = [
+        *store.list_viral_patterns(status="saved", limit=100),
+        *store.list_viral_patterns(status="active", limit=100),
+    ]
+    seen: set[str] = set()
+    active = [pattern for pattern in active if not (pattern.id in seen or seen.add(pattern.id))]
     ranked = sorted(active, key=lambda pattern: pattern_rank(pattern, topic=topic), reverse=True)
     return ranked[:limit]
 
@@ -339,9 +345,17 @@ def parse_json_object(raw: str) -> dict[str, object] | None:
 
 
 def pattern_groups(store: SQLiteStore, *, limit: int = 5) -> dict[str, list[ViralPattern]]:
+    def visible(window: str) -> list[ViralPattern]:
+        patterns = [
+            *store.list_viral_patterns(status="active", window=window, limit=limit),
+            *store.list_viral_patterns(status="saved", window=window, limit=limit),
+        ]
+        seen: set[str] = set()
+        return [pattern for pattern in patterns if not (pattern.id in seen or seen.add(pattern.id))][:limit]
+
     return {
-        "daily": store.list_viral_patterns(status="active", window="daily", limit=limit),
-        "weekly": store.list_viral_patterns(status="active", window="weekly", limit=limit),
+        "daily": visible("daily"),
+        "weekly": visible("weekly"),
     }
 
 

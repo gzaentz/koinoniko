@@ -378,6 +378,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('data-create-post-field="post_type"', index_html)
         self.assertIn('id="createPostTopicMenu"', index_html)
         self.assertIn('id="createPostTypeMenu"', index_html)
+        self.assertNotIn('id="createPostQuality"', index_html)
+        self.assertNotIn('id="planQuality"', index_html)
         self.assertIn('id="reviewAddButton"', index_html)
         self.assertIn('id="reviewAddMenu"', index_html)
         self.assertIn('id="reviewAddPostButton"', index_html)
@@ -405,8 +407,6 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('id="savedTrendList"', index_html)
         self.assertEqual(index_html.count('id="trendList"'), 1)
         self.assertIn('id="assistantLauncher"', index_html)
-        self.assertIn('title="Ask Koinoniko"', index_html)
-        self.assertIn('class="assistant-launcher-icon"', index_html)
         self.assertIn('id="assistantDrawer"', index_html)
         self.assertIn('id="assistantStarterPrompts"', index_html)
         self.assertIn('id="assistantMessages"', index_html)
@@ -432,9 +432,13 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn('data-view="assistant"', index_html)
         self.assertIn("Use the structure, not the wording.", app_js)
         self.assertIn("usePatternInPost", app_js)
+        self.assertIn("savePattern", app_js)
         self.assertIn("renderDashboardPatterns", app_js)
         self.assertIn("/api/patterns/", app_js)
-        self.assertIn('id="createPostUsePatterns"', index_html)
+        self.assertIn('id="createPostTrend"', index_html)
+        self.assertIn('id="createPostPattern"', index_html)
+        self.assertNotIn('id="createPostUseTrends"', index_html)
+        self.assertNotIn('id="createPostUsePatterns"', index_html)
         self.assertIn('id="planUsePatterns"', index_html)
         self.assertNotIn('data-view="patterns"', index_html)
         self.assertNotIn("All X Posts", index_html)
@@ -498,7 +502,6 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn('id="testProviderButton"', index_html)
         self.assertNotIn("Reset to Env Defaults", index_html)
         self.assertNotIn("Test Provider", index_html)
-        self.assertIn('id="planQuality"', index_html)
         self.assertIn("Improve with AI", app_js)
         self.assertIn("Generate Best Version", app_js)
         self.assertIn("Make More Natural", app_js)
@@ -532,6 +535,9 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("setupCreatePostFieldCombo", app_js)
         self.assertIn("chooseCreatePostFieldOption", app_js)
         self.assertIn("createPostFieldOptionRows", app_js)
+        self.assertIn("closeTransientDropdowns", app_js)
+        self.assertIn("handleGlobalEscape", app_js)
+        self.assertGreaterEqual(app_js.count("best_version: true"), 2)
         self.assertNotIn("postVoiceTopic", app_js)
         self.assertNotIn("postVoicePostType", app_js)
         self.assertNotIn("postVoiceHook", app_js)
@@ -1122,6 +1128,47 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("User instruction: Write about why sales AI needs buyer timing", provider.prompts[0])
             store.close()
 
+    def test_create_post_x_uses_selected_trend_ids(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            selected = store.save_trend_item(
+                TrendItem(
+                    title="Selected buyer timing trend",
+                    source_type="web_daily",
+                    topic="Leadpoet",
+                    summary="Teams are choosing sales AI with better account timing.",
+                    why_it_matters="It supports the Leadpoet timing thesis.",
+                    leadpoet_angle="Buyer timing is the wedge.",
+                    date=utc_now(),
+                )
+            )
+            store.save_trend_item(
+                TrendItem(
+                    title="Unselected volume trend",
+                    source_type="web_daily",
+                    topic="Leadpoet",
+                    summary="A different trend should not be pulled in.",
+                    why_it_matters="Less relevant.",
+                    leadpoet_angle="Ignore this.",
+                    date=utc_now(),
+                )
+            )
+
+            result = create_post_x(
+                store,
+                SocialBrainGenerator(store, provider=FakeProvider(["Buyer timing is the real sales AI edge."])),
+                instruction="Use the selected trend.",
+                topic="Leadpoet",
+                post_type="founder_insight",
+                trend_ids=[selected.id],
+            )
+            saved_draft = store.get_generated_draft(result.item.draft_id)
+
+            self.assertEqual(result.item.trend_ids, [selected.id])
+            self.assertEqual(saved_draft.context_snapshot["selected_trends"][0]["id"], selected.id)
+            store.close()
+
     def test_create_post_x_warns_and_continues_without_trends(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -1627,6 +1674,17 @@ class SocialBrainTest(unittest.TestCase):
             db_path = Path(tmpdir) / "brain.sqlite3"
             store = SQLiteStore(db_path)
             store.seed_defaults()
+            trend = store.save_trend_item(
+                TrendItem(
+                    title="Buyer timing becomes the buying criterion",
+                    source_type="web_daily",
+                    topic="Leadpoet",
+                    summary="Teams are evaluating sales AI by account timing.",
+                    why_it_matters="It supports the Leadpoet wedge.",
+                    leadpoet_angle="Buyer timing beats generated email volume.",
+                    date=utc_now(),
+                )
+            )
             store.close()
 
             provider = FakeProvider(["Buyer timing is the real sales AI advantage. More email is not strategy."])
@@ -1640,6 +1698,8 @@ class SocialBrainTest(unittest.TestCase):
                             "topic": "Leadpoet",
                             "post_type": "founder_insight",
                             "scheduled_at": "2026-06-30T10:00",
+                            "use_trends": True,
+                            "trend_ids": [trend.id],
                             "best_version": False,
                         }
                     ),
@@ -1658,6 +1718,7 @@ class SocialBrainTest(unittest.TestCase):
             store = SQLiteStore(db_path)
             saved = store.get_content_queue_item(payload["queue_id"])
             self.assertEqual(saved.status, "needs_review")
+            self.assertEqual(saved.trend_ids, [trend.id])
             self.assertIsNone(saved.approved_at)
             store.close()
 
@@ -1749,6 +1810,7 @@ class SocialBrainTest(unittest.TestCase):
                 why_it_worked="It gives the reader a better model quickly.",
                 window="daily",
             )
+            store.mark_viral_pattern_status(pattern.id, "saved")
             store.close()
 
             status, payload = handle_api_request("GET", "/api/dashboard", db_path=db_path)
@@ -1761,6 +1823,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["trends"][0]["id"], trend.id)
             self.assertEqual(payload["trend_groups"]["daily"][0]["id"], trend.id)
             self.assertEqual(payload["pattern_groups"]["daily"][0]["id"], pattern.id)
+            self.assertEqual(payload["saved_patterns"][0]["id"], pattern.id)
             self.assertIn("analytics_hints", payload)
 
     def test_web_can_update_recent_post_topic(self):
@@ -2014,6 +2077,8 @@ class SocialBrainTest(unittest.TestCase):
 
             status, listed = handle_api_request("GET", "/api/patterns?window=daily", db_path=db_path)
             detail_status, detail = handle_api_request("GET", f"/api/patterns/{manual.id}", db_path=db_path)
+            save_status, saved = handle_api_request("POST", f"/api/patterns/{manual.id}/save", b"{}", db_path=db_path)
+            saved_list_status, saved_list = handle_api_request("GET", "/api/patterns?status=saved", db_path=db_path)
             archive_status, archived = handle_api_request("POST", f"/api/patterns/{manual.id}/archive", b"{}", db_path=db_path)
 
             self.assertEqual(batch.imported, 1)
@@ -2022,6 +2087,10 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(listed["items"][0]["id"], manual.id)
             self.assertEqual(detail_status, 200)
             self.assertEqual(detail["pattern"]["metrics"]["likes"], 120)
+            self.assertEqual(save_status, 200)
+            self.assertEqual(saved["pattern"]["status"], "saved")
+            self.assertEqual(saved_list_status, 200)
+            self.assertEqual(saved_list["items"][0]["id"], manual.id)
             self.assertEqual(archive_status, 200)
             self.assertEqual(archived["pattern"]["status"], "archived")
 

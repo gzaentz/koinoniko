@@ -617,8 +617,9 @@ def route_api(
         if not pattern:
             return 404, {"error": "Pattern not found."}
         return 200, {"pattern": pattern_payload(pattern)}
-    if method == "POST" and len(parts) == 4 and parts[:2] == ["api", "patterns"] and parts[3] in {"archive", "ignore"}:
-        pattern = store.mark_viral_pattern_status(parts[2], "archived" if parts[3] == "archive" else "ignored")
+    if method == "POST" and len(parts) == 4 and parts[:2] == ["api", "patterns"] and parts[3] in {"archive", "ignore", "save"}:
+        status_by_action = {"archive": "archived", "ignore": "ignored", "save": "saved"}
+        pattern = store.mark_viral_pattern_status(parts[2], status_by_action[parts[3]])
         if not pattern:
             return 404, {"error": "Pattern not found."}
         return 200, {"pattern": pattern_payload(pattern)}
@@ -697,6 +698,7 @@ def route_api(
             extra_context=clean_optional(payload.get("extra_context")),
             use_patterns=bool_from_payload(payload, "use_patterns", False),
             pattern_ids=string_list_payload(payload.get("pattern_ids")),
+            trend_ids=string_list_payload(payload.get("trend_ids")),
         )
         item_payload = queue_item_payload(store, result.item)
         return 200, {
@@ -1689,6 +1691,7 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
     trend_groups = web_trend_groups(store)
     trends = [*trend_groups.daily, *trend_groups.weekly]
     patterns = pattern_groups(store)
+    saved_patterns = store.list_viral_patterns(status="saved", limit=100)
     return {
         "status": status_payload(store),
         "queue_counts": counts,
@@ -1701,6 +1704,7 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
         "trends": [trend_payload(trend) for trend in trends],
         "trend_groups": trend_groups_payload(trend_groups),
         "pattern_groups": pattern_groups_payload(patterns),
+        "saved_patterns": [pattern_payload(pattern) for pattern in saved_patterns],
         "sync": account_sync_payload(store),
         "analytics_hints": analytics.hints,
         "best_examples": [post_payload(post) for post in analytics.best_examples[:5]],

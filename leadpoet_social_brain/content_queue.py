@@ -146,6 +146,7 @@ def create_post_x(
     extra_context: str | None = None,
     use_patterns: bool = False,
     pattern_ids: list[str] | None = None,
+    trend_ids: list[str] | None = None,
 ) -> CreatePostResult:
     instruction = instruction.strip()
     if not instruction:
@@ -155,7 +156,15 @@ def create_post_x(
     get_x_adapter().validate_post_type(post_type)
 
     warnings: list[str] = []
-    selected_trends = store.relevant_trends(topic=topic, angle=instruction, limit=3) if use_trends else []
+    selected_trends = [
+        trend for trend_id in trend_ids or []
+        if (trend := store.get_trend_item(trend_id)) is not None
+    ]
+    missing_trend_count = len(trend_ids or []) - len(selected_trends)
+    if missing_trend_count:
+        warnings.append("Some selected trends were not found and were skipped.")
+    if not selected_trends and use_trends:
+        selected_trends = store.relevant_trends(topic=topic, angle=instruction, limit=3)
     if use_trends and not selected_trends:
         warnings.append("No relevant unused trends found. Created an evergreen post instead.")
 

@@ -21,6 +21,7 @@ const state = {
   savedTrends: [],
   selectedTrendWindow: "daily",
   selectedPatternWindow: "daily",
+  selectedTrendForCreate: null,
   selectedPatternForCreate: null,
   patternDetail: null,
   draggedQueueId: "",
@@ -615,6 +616,7 @@ function postFieldControl(post, field, context = "row") {
 
 window.startPostFieldEdit = (event, id, field, context = "row") => {
   event.stopPropagation();
+  closeTransientDropdowns({ keepPostFieldEditor: true });
   const post = findRecentPost(id) || state.postDetail;
   const currentValue = field === "topic" ? (post?.topic || "uncategorized") : (post?.post_type || "");
   state.editingPostField = { postId: id, field, context, query: currentValue, dirty: false };
@@ -800,6 +802,7 @@ function renderCreatePostFieldMenu(field, filterOptions = false) {
 }
 
 function openCreatePostFieldMenu(field, filterOptions = false) {
+  closeTransientDropdowns({ exceptCreatePostField: field });
   renderCreatePostFieldMenu(field, filterOptions);
   const input = $(createPostFieldInputId(field));
   const menu = $(createPostFieldMenuId(field));
@@ -808,8 +811,10 @@ function openCreatePostFieldMenu(field, filterOptions = false) {
   input.setAttribute("aria-expanded", "true");
 }
 
-function closeCreatePostFieldMenus() {
+function closeCreatePostFieldMenus(exceptField = "") {
+  if (typeof exceptField !== "string") exceptField = "";
   ["topic", "post_type"].forEach((field) => {
+    if (field === exceptField) return;
     const input = $(createPostFieldInputId(field));
     const menu = $(createPostFieldMenuId(field));
     if (menu) menu.classList.add("hidden");
@@ -1016,10 +1021,18 @@ function patternCard(pattern) {
       <p>${escapeHtml(pattern.structure || pattern.source_summary || "")}</p>
       ${pattern.why_it_worked ? `<p><strong>Why this worked:</strong> ${escapeHtml(pattern.why_it_worked)}</p>` : ""}
       <div class="actions left">
+        ${patternSaveButton(pattern)}
         <button class="secondary" onclick='usePatternInPost(event, ${jsArg(pattern.id)})'>Use Pattern</button>
       </div>
     </article>
   `;
+}
+
+function patternSaveButton(pattern) {
+  if (pattern.status === "saved") {
+    return `<button class="secondary" type="button" disabled>Saved</button>`;
+  }
+  return `<button class="secondary" type="button" onclick='savePattern(event, ${jsArg(pattern.id)})'>Save</button>`;
 }
 
 window.openTrendDetailsFromKey = (event, id) => {
@@ -1063,16 +1076,16 @@ window.useTrendInPost = (event, id) => {
   event.stopPropagation();
   const trend = findTrendItem(id);
   if (!trend) return;
+  state.selectedTrendForCreate = trend;
   state.selectedPatternForCreate = null;
   $("createPostInstruction").value = trend.leadpoet_angle || trend.title || "";
   $("createPostTopic").value = trend.topic || "Leadpoet";
-  $("createPostUseTrends").checked = true;
-  $("createPostUsePatterns").checked = false;
   renderCreatePostPatternHint();
   openCreatePostModal();
 };
 
 function findTrendItem(id) {
+  if (!id) return null;
   const groups = state.dashboard?.trend_groups || {};
   return [
     ...(groups.daily || []),
@@ -1083,11 +1096,88 @@ function findTrendItem(id) {
 }
 
 function findPatternItem(id) {
+  if (!id) return null;
   const groups = state.dashboard?.pattern_groups || {};
   return [
     ...(groups.daily || []),
     ...(groups.weekly || []),
+    ...(state.dashboard?.saved_patterns || []),
   ].find((item) => item.id === id);
+}
+
+function allCreatePostTrends() {
+  const groups = state.dashboard?.trend_groups || {};
+  const trends = [
+    ...(groups.daily || []),
+    ...(groups.weekly || []),
+    ...(state.dashboard?.trends || []),
+    ...(state.savedTrends || []),
+  ];
+  return uniqueById(trends);
+}
+
+function savedCreatePostPatterns() {
+  return uniqueById([
+    ...(state.selectedPatternForCreate ? [state.selectedPatternForCreate] : []),
+    ...(state.dashboard?.saved_patterns || []),
+  ]);
+}
+
+function uniqueById(items) {
+  const seen = new Set();
+  return (items || []).filter((item) => {
+    if (!item?.id || seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+function optionHtml(value, text) {
+  return `<option value="${escapeAttr(value)}">${escapeHtml(text)}</option>`;
+}
+
+function renderCreatePostSourceSelectors() {
+  const trendSelect = $("createPostTrend");
+  const patternSelect = $("createPostPattern");
+  if (!trendSelect || !patternSelect) return;
+
+  const selectedTrendId = state.selectedTrendForCreate?.id || trendSelect.value || "";
+  const trends = allCreatePostTrends();
+  trendSelect.innerHTML = [
+    optionHtml("", trends.length ? "No trend" : "No loaded trends"),
+    ...trends.map((trend) => optionHtml(trend.id, trendDropdownLabel(trend))),
+  ].join("");
+  trendSelect.value = trends.some((trend) => trend.id === selectedTrendId) ? selectedTrendId : "";
+  trendSelect.disabled = !trends.length;
+
+  const selectedPatternId = state.selectedPatternForCreate?.id || patternSelect.value || "";
+  const patterns = savedCreatePostPatterns();
+  patternSelect.innerHTML = [
+    optionHtml("", patterns.length ? "No pattern" : "No saved patterns"),
+    ...patterns.map((pattern) => optionHtml(pattern.id, patternDropdownLabel(pattern))),
+  ].join("");
+  patternSelect.value = patterns.some((pattern) => pattern.id === selectedPatternId) ? selectedPatternId : "";
+  patternSelect.disabled = !patterns.length;
+
+  syncCreatePostSelectionsFromInputs();
+}
+
+function trendDropdownLabel(trend) {
+  const topic = topicLabel(trend.topic || "");
+  const title = trend.title || "Untitled trend";
+  return topic ? `${topic} - ${title}` : title;
+}
+
+function patternDropdownLabel(pattern) {
+  const name = pattern.pattern_name || "Saved pattern";
+  const topic = topicLabel(pattern.topic || "");
+  return topic ? `${topic} - ${name}` : name;
+}
+
+function syncCreatePostSelectionsFromInputs() {
+  state.selectedTrendForCreate = findTrendItem($("createPostTrend")?.value || "") || null;
+  state.selectedPatternForCreate = findPatternItem($("createPostPattern")?.value || "") || null;
+  renderCreatePostPatternHint();
 }
 
 window.openPatternDetailsFromKey = (event, id) => {
@@ -1140,6 +1230,7 @@ function renderPatternModal() {
       </ul>
     </section>
     <div class="actions left">
+      ${patternSaveButton(pattern)}
       <button onclick='usePatternInPost(event, ${jsArg(pattern.id)})'>Use Pattern</button>
       ${pattern.source_url ? `<a class="button-link secondary-link" href="${escapeAttr(pattern.source_url)}" target="_blank" rel="noreferrer">Open Source</a>` : ""}
       <button class="secondary" onclick='archivePattern(event, ${jsArg(pattern.id)})'>Archive</button>
@@ -1151,24 +1242,47 @@ function renderPatternModal() {
 function renderCreatePostPatternHint() {
   const hint = $("createPostPatternHint");
   if (!hint) return;
+  const trend = state.selectedTrendForCreate;
   const pattern = state.selectedPatternForCreate;
-  if (!pattern) {
+  const rows = [];
+  if (trend) {
+    rows.push(`
+      <div>
+        <strong>${escapeHtml(trend.title || "Selected trend")}</strong>
+        <span>${escapeHtml(trend.leadpoet_angle || trend.summary || "Current trend context")}</span>
+      </div>
+      <button class="quiet-button" type="button" onclick="clearSelectedTrend(event)">Remove</button>
+    `);
+  }
+  if (pattern) {
+    rows.push(`
+      <div>
+        <strong>${escapeHtml(pattern.pattern_name || "Selected pattern")}</strong>
+        <span>${escapeHtml(pattern.structure || pattern.adaptation_rule || "Use the structure, not the wording.")}</span>
+      </div>
+      <button class="quiet-button" type="button" onclick="clearSelectedPattern(event)">Remove</button>
+    `);
+  }
+  if (!rows.length) {
     hint.classList.add("hidden");
     hint.innerHTML = "";
     return;
   }
   hint.classList.remove("hidden");
-  hint.innerHTML = `
-    <strong>${escapeHtml(pattern.pattern_name || "Selected pattern")}</strong>
-    <span>${escapeHtml(pattern.structure || pattern.adaptation_rule || "Use the structure, not the wording.")}</span>
-    <button class="quiet-button" type="button" onclick="clearSelectedPattern(event)">Remove</button>
-  `;
+  hint.innerHTML = rows.map((row) => `<div class="selected-source-row">${row}</div>`).join("");
 }
+
+window.clearSelectedTrend = (event) => {
+  event?.stopPropagation();
+  state.selectedTrendForCreate = null;
+  if ($("createPostTrend")) $("createPostTrend").value = "";
+  renderCreatePostPatternHint();
+};
 
 window.clearSelectedPattern = (event) => {
   event?.stopPropagation();
   state.selectedPatternForCreate = null;
-  $("createPostUsePatterns").checked = false;
+  if ($("createPostPattern")) $("createPostPattern").value = "";
   renderCreatePostPatternHint();
 };
 
@@ -1177,7 +1291,6 @@ window.usePatternInPost = (event, id) => {
   const pattern = state.patternDetail?.id === id ? state.patternDetail : findPatternItem(id);
   if (!pattern) return;
   state.selectedPatternForCreate = pattern;
-  $("createPostUsePatterns").checked = true;
   $("createPostTopic").value = pattern.topic || $("createPostTopic").value || "Leadpoet";
   if (!$("createPostInstruction").value.trim()) {
     $("createPostInstruction").value = pattern.structure || pattern.pattern_name || "";
@@ -1191,12 +1304,22 @@ window.archivePattern = (event, id) => updatePatternStatus(event, id, "archive")
 
 window.ignorePattern = (event, id) => updatePatternStatus(event, id, "ignore");
 
+window.savePattern = (event, id) => updatePatternStatus(event, id, "save");
+
 function updatePatternStatus(event, id, action) {
+  event.preventDefault();
+  event.stopPropagation();
   runButton(event.currentTarget, "Saving...", async () => {
     await api(`/api/patterns/${encodeURIComponent(id)}/${action}`, { method: "POST", body: "{}" });
-    closeModal("patternModal");
-    showMessage(action === "archive" ? "Pattern archived." : "Pattern ignored.");
+    if (action !== "save") {
+      closeModal("patternModal");
+    }
+    showMessage(action === "archive" ? "Pattern archived." : action === "save" ? "Pattern saved to library." : "Pattern ignored.");
     await refresh();
+    if (action === "save" && state.patternDetail?.id === id) {
+      state.patternDetail = findPatternItem(id) || state.patternDetail;
+      renderPatternModal();
+    }
   });
 }
 
@@ -1358,14 +1481,21 @@ function renderQueueModal() {
   if (!item) return;
   const canUseAI = Boolean(state.status?.provider_configured);
   const canPost = item.status === "approved" && Boolean(state.status?.x_write_configured);
+  const scheduledValue = dateTimeLocalValue(item.scheduled_at);
   $("queueModalTitle").textContent = item.focus || summarize(item.text, 70);
   $("queueModalBody").innerHTML = `
     <label>Post text<textarea id="detailText" rows="8">${escapeHtml(item.text)}</textarea></label>
     <div class="form-grid">
       <label>Topic<input id="detailTopic" value="${escapeAttr(item.topic)}"></label>
       <label>Post type<input id="detailPostType" value="${escapeAttr(item.post_type)}"></label>
-      <label>Scheduled time<input id="detailScheduled" value="${escapeAttr(item.scheduled_at)}"></label>
+      <label>Scheduled time<input id="detailScheduled" type="datetime-local" value="${escapeAttr(scheduledValue)}"></label>
       <label>Status<input value="${escapeAttr(label(item.status))}" disabled></label>
+    </div>
+    <div class="schedule-shortcuts" aria-label="Schedule shortcuts">
+      <button class="secondary" type="button" onclick='setDetailSchedulePreset(event, "tomorrow_morning")'>Tomorrow AM</button>
+      <button class="secondary" type="button" onclick='setDetailSchedulePreset(event, "next_weekday_morning")'>Next Weekday AM</button>
+      <button class="secondary" type="button" onclick='setDetailSchedulePreset(event, "two_hours")'>+2 Hours</button>
+      <button class="quiet-button" type="button" onclick="clearDetailSchedule(event)">Clear</button>
     </div>
     <label>Reviewer notes<textarea id="detailNotes" rows="3">${escapeHtml(item.reviewer_notes || "")}</textarea></label>
     <div class="detail-grid">
@@ -1482,9 +1612,16 @@ window.acceptRevision = (event, queueId, versionId) => {
 window.approveQueue = (event, id) => {
   runButton(event.currentTarget, "Approving...", async () => {
     const item = findQueueItem(id) || state.queueDetail;
-    if (!item?.scheduled_at) {
-      const scheduledAt = window.prompt("Scheduled date/time", nextDefaultSchedule()) || "";
-      if (!scheduledAt.trim()) throw new Error("Schedule required before approval.");
+    const scheduledInput = $("detailScheduled");
+    const scheduledAt = scheduledInput?.value || dateTimeLocalValue(item?.scheduled_at);
+    if (!scheduledAt.trim()) {
+      if (scheduledInput) {
+        scheduledInput.value = schedulePresetValue("tomorrow_morning");
+        scheduledInput.focus();
+      }
+      throw new Error("Choose a scheduled time before approval.");
+    }
+    if (scheduledAt !== item?.scheduled_at) {
       await api(`/api/queue/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body: JSON.stringify({ scheduled_at: scheduledAt }),
@@ -1496,6 +1633,22 @@ window.approveQueue = (event, id) => {
     await refresh();
     if (!$("queueModal").classList.contains("hidden")) renderQueueModal();
   });
+};
+
+window.setDetailSchedulePreset = (event, preset) => {
+  event.preventDefault();
+  const input = $("detailScheduled");
+  if (!input) return;
+  input.value = schedulePresetValue(preset);
+  input.focus();
+};
+
+window.clearDetailSchedule = (event) => {
+  event.preventDefault();
+  const input = $("detailScheduled");
+  if (!input) return;
+  input.value = "";
+  input.focus();
 };
 
 window.moveToReview = (event, id) => {
@@ -1530,6 +1683,7 @@ window.postNow = (event, id) => {
 
 function openCreatePostModal() {
   $("createPostResult").innerHTML = "";
+  renderCreatePostSourceSelectors();
   renderCreatePostPatternHint();
   openModal("createPostModal");
   window.setTimeout(() => $("createPostInstruction").focus(), 0);
@@ -1538,16 +1692,20 @@ function openCreatePostModal() {
 async function createPost() {
   const instruction = $("createPostInstruction").value.trim();
   if (!instruction) throw new Error("Post idea / instruction is required.");
+  syncCreatePostSelectionsFromInputs();
+  const trendId = state.selectedTrendForCreate?.id || "";
+  const patternId = state.selectedPatternForCreate?.id || "";
   const payload = await api("/api/content/create-post", {
     method: "POST",
     body: JSON.stringify({
       instruction,
       topic: $("createPostTopic").value || "Leadpoet",
       post_type: $("createPostType").value || "founder_insight",
-      use_trends: $("createPostUseTrends").checked,
-      use_patterns: $("createPostUsePatterns").checked,
-      pattern_ids: state.selectedPatternForCreate ? [state.selectedPatternForCreate.id] : [],
-      best_version: $("createPostQuality").value === "best_version",
+      use_trends: Boolean(trendId),
+      trend_ids: trendId ? [trendId] : [],
+      use_patterns: Boolean(patternId),
+      pattern_ids: patternId ? [patternId] : [],
+      best_version: true,
       scheduled_at: $("createPostScheduled").value,
       extra_context: $("createPostExtra").value,
     }),
@@ -1561,11 +1719,11 @@ async function createPost() {
   $("createPostInstruction").value = "";
   $("createPostExtra").value = "";
   $("createPostScheduled").value = "";
-  $("createPostUseTrends").checked = false;
-  $("createPostUsePatterns").checked = false;
+  if ($("createPostTrend")) $("createPostTrend").value = "";
+  if ($("createPostPattern")) $("createPostPattern").value = "";
+  state.selectedTrendForCreate = null;
   state.selectedPatternForCreate = null;
   renderCreatePostPatternHint();
-  $("createPostQuality").value = "standard";
   await refresh();
   setView("reviewer");
 }
@@ -1583,7 +1741,7 @@ async function planWeek() {
       use_trends: $("planUseTrends").checked,
       use_patterns: $("planUsePatterns").checked,
       allow_evergreen: $("planAllowEvergreen").checked,
-      best_version: $("planQuality").value === "best_version",
+      best_version: true,
       instruction: $("planInstruction").value,
       variants_per_slot: 1,
     }),
@@ -2255,6 +2413,7 @@ async function testProvider() {
 }
 
 function openModal(id) {
+  closeTransientDropdowns();
   $(id).classList.remove("hidden");
   $(id).setAttribute("aria-hidden", "false");
 }
@@ -2262,6 +2421,7 @@ function openModal(id) {
 function closeModal(id) {
   $(id).classList.add("hidden");
   $(id).setAttribute("aria-hidden", "true");
+  closeCreatePostFieldMenus();
   if (id === "postModal") {
     state.postDetail = null;
     state.editingPostField = null;
@@ -2270,6 +2430,57 @@ function closeModal(id) {
 }
 
 window.closeModal = closeModal;
+
+function isOpenById(id) {
+  const node = $(id);
+  return Boolean(node && !node.classList.contains("hidden"));
+}
+
+function hasOpenCreatePostFieldMenu() {
+  return ["topic", "post_type"].some((field) => isOpenById(createPostFieldMenuId(field)));
+}
+
+function hasOpenTransientDropdown() {
+  return Boolean(
+    state.editingPostField ||
+      isOpenById("reviewAddMenu") ||
+      isOpenById("accountSyncMenu") ||
+      hasOpenCreatePostFieldMenu()
+  );
+}
+
+function closeTransientDropdowns({ exceptCreatePostField = "", keepPostFieldEditor = false } = {}) {
+  closeReviewAddMenu();
+  closeAccountSyncMenu();
+  closeCreatePostFieldMenus(exceptCreatePostField);
+  if (!keepPostFieldEditor) {
+    closePostFieldEditor();
+  }
+}
+
+function closeVisibleModal() {
+  const modal = Array.from(document.querySelectorAll(".modal:not(.hidden)")).pop();
+  if (!modal?.id) return false;
+  closeModal(modal.id);
+  return true;
+}
+
+function handleGlobalEscape(event) {
+  if (event.key !== "Escape" || event.defaultPrevented) return;
+  if (hasOpenTransientDropdown()) {
+    event.preventDefault();
+    closeTransientDropdowns();
+    return;
+  }
+  if (state.accountDetail.open) {
+    event.preventDefault();
+    closeAccountDetailDrawer();
+    return;
+  }
+  if (closeVisibleModal()) {
+    event.preventDefault();
+  }
+}
 
 window.openTrendsModal = async () => {
   openModal("trendsModal");
@@ -2296,7 +2507,9 @@ function setReviewAddMenuOpen(open) {
 function toggleReviewAddMenu(event) {
   event.stopPropagation();
   if ($("reviewAddButton").disabled) return;
-  setReviewAddMenuOpen($("reviewAddMenu").classList.contains("hidden"));
+  const shouldOpen = $("reviewAddMenu").classList.contains("hidden");
+  closeTransientDropdowns();
+  setReviewAddMenuOpen(shouldOpen);
 }
 
 function closeReviewAddMenu() {
@@ -2312,7 +2525,9 @@ function setAccountSyncMenuOpen(open) {
 function toggleAccountSyncMenu(event) {
   event.stopPropagation();
   if ($("accountSyncMenuButton").disabled) return;
-  setAccountSyncMenuOpen($("accountSyncMenu").classList.contains("hidden"));
+  const shouldOpen = $("accountSyncMenu").classList.contains("hidden");
+  closeTransientDropdowns();
+  setAccountSyncMenuOpen(shouldOpen);
 }
 
 function closeAccountSyncMenu() {
@@ -2704,6 +2919,32 @@ function nextDefaultSchedule() {
   return date.toISOString();
 }
 
+function dateTimeLocalValue(value) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return String(value).slice(0, 16);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000);
+  return local.toISOString().slice(0, 16);
+}
+
+function schedulePresetValue(preset) {
+  const date = new Date();
+  if (preset === "two_hours") {
+    date.setTime(Date.now() + 2 * 60 * 60 * 1000);
+    date.setMinutes(0, 0, 0);
+    if (date.getTime() <= Date.now()) date.setHours(date.getHours() + 1);
+    return dateTimeLocalValue(date);
+  }
+  date.setDate(date.getDate() + 1);
+  if (preset === "next_weekday_morning") {
+    while (date.getDay() === 0 || date.getDay() === 6) {
+      date.setDate(date.getDate() + 1);
+    }
+  }
+  date.setHours(9, 0, 0, 0);
+  return dateTimeLocalValue(date);
+}
+
 function latestDate(values) {
   const parsed = values
     .filter(Boolean)
@@ -2772,6 +3013,7 @@ function setup() {
   setupCreatePostFieldCombo("topic");
   setupCreatePostFieldCombo("post_type");
   document.addEventListener("click", closeCreatePostFieldMenus);
+  document.addEventListener("keydown", handleGlobalEscape);
   $("generatePostButton").addEventListener("click", (event) => runButton(event.currentTarget, "Generating...", createPost));
   $("planWeekButton").addEventListener("click", (event) => runButton(event.currentTarget, "Creating...", planWeek));
   $("trendDailyButton").addEventListener("click", () => {
@@ -2790,12 +3032,8 @@ function setup() {
     state.selectedPatternWindow = "weekly";
     renderDashboardPatterns();
   });
-  $("createPostUsePatterns").addEventListener("change", () => {
-    if (!$("createPostUsePatterns").checked) {
-      state.selectedPatternForCreate = null;
-    }
-    renderCreatePostPatternHint();
-  });
+  $("createPostTrend").addEventListener("change", syncCreatePostSelectionsFromInputs);
+  $("createPostPattern").addEventListener("change", syncCreatePostSelectionsFromInputs);
   $("loadTrendsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Loading...", loadTrends));
   $("saveAccountButton").addEventListener("click", (event) => runButton(event.currentTarget, "Saving...", saveAccount));
   $("accountSyncAllButton").addEventListener("click", (event) => runAccountSyncMenuAction(event, "Syncing...", syncAllXData));

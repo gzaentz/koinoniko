@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-sidebar-expand-account-modal">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-source-selectors-schedule">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -287,17 +287,17 @@
       <div class="account-detail-card" role="dialog" aria-modal="true" aria-labelledby="accountDetailTitle">
         <div class="account-detail-header">
           <div>
-            <h2 id="accountDetailTitle">Account details</h2>
+            <h2 id="accountDetailTitle">Account</h2>
             <p id="accountDetailSubtitle">Manage account settings.</p>
           </div>
           <button class="icon-button" id="accountDetailCloseButton" type="button" aria-label="Close account details">x</button>
         </div>
 
-        <section class="account-detail-panel hidden" data-account-panel="connections" id="accountConnectionsPanel">
+        <section class="account-detail-panel" id="accountConnectionsPanel" data-account-panel="connections">
           <div class="connection-list" id="accountStatusGrid"></div>
         </section>
 
-        <section class="account-detail-panel hidden" data-account-panel="models" id="accountModelsPanel">
+        <section class="account-detail-panel" id="accountModelsPanel" data-account-panel="models">
           <div class="settings-form">
             <label>
               Default model
@@ -321,7 +321,7 @@
           </div>
         </section>
 
-        <section class="account-detail-panel hidden" data-account-panel="sync" id="accountSyncPanel">
+        <section class="account-detail-panel" id="accountSyncPanel" data-account-panel="sync">
           <div class="account-detail-actions">
             <div class="add-menu-wrap sync-menu-wrap">
               <button id="accountSyncMenuButton" type="button" aria-haspopup="true" aria-expanded="false">Sync now</button>
@@ -337,7 +337,7 @@
           <div class="sync-table" id="accountSyncGrid"></div>
         </section>
 
-        <section class="account-detail-panel hidden" data-account-panel="profile" id="accountProfilePanel">
+        <section class="account-detail-panel" id="accountProfilePanel" data-account-panel="profile">
           <div class="account-security" id="accountSecurityBlock"></div>
         </section>
       </div>
@@ -427,17 +427,15 @@
               <div class="field-combo-menu hidden" id="createPostTypeMenu" role="listbox"></div>
             </div>
           </label>
-          <label>Quality
-            <select id="createPostQuality">
-              <option value="standard">Standard</option>
-              <option value="best_version">Best Version</option>
-            </select>
-          </label>
           <label>Schedule time<input id="createPostScheduled" type="datetime-local"></label>
         </div>
-        <div class="option-row">
-          <label class="inline-check"><input id="createPostUseTrends" type="checkbox"> Use trends</label>
-          <label class="inline-check"><input id="createPostUsePatterns" type="checkbox"> Use patterns</label>
+        <div class="form-grid">
+          <label>Trend to build from
+            <select id="createPostTrend"></select>
+          </label>
+          <label>Pattern to use
+            <select id="createPostPattern"></select>
+          </label>
         </div>
         <div id="createPostPatternHint" class="selected-pattern-hint hidden"></div>
         <label>Extra instruction<textarea id="createPostExtra" rows="3"></textarea></label>
@@ -468,12 +466,6 @@
             <select id="planCadence">
               <option value="weekday_mornings">Weekday mornings</option>
               <option value="daily_mornings">Daily mornings</option>
-            </select>
-          </label>
-          <label>Quality
-            <select id="planQuality">
-              <option value="standard">Standard</option>
-              <option value="best_version">Best Version</option>
             </select>
           </label>
         </div>
@@ -556,6 +548,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260627-account-modal"></script>
+    <script src="/static/app.js?v=20260627-source-selectors"></script>
   </body>
 </html>
