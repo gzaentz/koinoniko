@@ -1421,6 +1421,16 @@ function cleanString(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
+function queueCardPostTitle(item) {
+  return summarize(cleanString(item.text) || item.focus || item.angle, 88);
+}
+
+function queueCardPrompt(item, title) {
+  const normalizedTitle = cleanString(title).toLowerCase();
+  const value = cleanString(item.angle);
+  return value && value.toLowerCase() !== normalizedTitle ? summarize(value, 150) : "";
+}
+
 function renderReviewer() {
   closeReviewAddMenu();
   $("reviewCount").textContent = String(state.reviewItems.length);
@@ -1435,42 +1445,23 @@ function renderReviewer() {
 
 function queueCard(item, column) {
   const scheduled = item.scheduled_at ? formatDateTime(item.scheduled_at) : "";
-  const title = item.focus || summarize(item.angle || item.text, 88);
-  if (column === "review") {
-    return `
-      <article class="queue-card review-queue-card" draggable="true" ondragstart='dragQueue(event, ${jsArg(item.id)})'>
-        <button class="card-open" onclick='openQueueDetail(${jsArg(item.id)})'>
-          <h3>${escapeHtml(title)}</h3>
-          <div class="schedule-line">${escapeHtml(scheduled ? `Scheduled ${scheduled}` : "Scheduled not set")}</div>
-        </button>
-        <div class="card-actions">
-          <button onclick='openQueueDetail(${jsArg(item.id)})'>Edit</button>
-          <button class="secondary" onclick='skipQueue(event, ${jsArg(item.id)})'>Deny</button>
-        </div>
-      </article>
-    `;
-  }
+  const title = queueCardPostTitle(item);
+  const prompt = queueCardPrompt(item, title);
   const canPost = item.status === "approved" && state.status?.x_write_configured;
-  const quality = qualityLabel(item.quality_mode);
-  const trend = trendSummary(item);
+  const postNowTitle = state.status?.x_write_configured ? "" : "X write auth is not connected.";
+  const secondaryAction = column === "scheduled"
+    ? `<button class="secondary" onclick='postNow(event, ${jsArg(item.id)})' ${canPost ? "" : "disabled"} title="${escapeAttr(postNowTitle)}">Post now</button>`
+    : `<button class="secondary" onclick='skipQueue(event, ${jsArg(item.id)})'>Deny</button>`;
   return `
     <article class="queue-card" draggable="true" ondragstart='dragQueue(event, ${jsArg(item.id)})'>
       <button class="card-open" onclick='openQueueDetail(${jsArg(item.id)})'>
-        <div class="meta-row">
-          <span class="tag">${escapeHtml(label(item.status))}</span>
-          <span>${escapeHtml(topicLabel(item.topic || "No topic"))}</span>
-          <span>${escapeHtml(label(item.post_type || "post"))}</span>
-          ${quality ? `<span>${escapeHtml(quality)}</span>` : ""}
-          ${trend ? `<span>${escapeHtml(trend)}</span>` : ""}
-        </div>
         <h3>${escapeHtml(title)}</h3>
-        <p>${escapeHtml(summarize(item.text, 150))}</p>
-        <div class="schedule-line">${escapeHtml(scheduled ? `Scheduled ${scheduled}` : "Not scheduled")}</div>
+        ${prompt ? `<p>${escapeHtml(prompt)}</p>` : ""}
+        <div class="schedule-line">${escapeHtml(scheduled ? `Scheduled ${scheduled}` : "Scheduled not set")}</div>
       </button>
       <div class="card-actions">
         <button onclick='openQueueDetail(${jsArg(item.id)})'>Edit</button>
-        ${item.status === "approved" ? `<button class="secondary" onclick='postNow(event, ${jsArg(item.id)})' ${canPost ? "" : "disabled"} title="${state.status?.x_write_configured ? "" : "X write auth is not connected."}">Post now</button>` : ""}
-        ${column === "scheduled" ? `<button class="quiet-button" onclick='moveToReview(event, ${jsArg(item.id)})'>Move to review</button>` : `<button class="quiet-button" onclick='skipQueue(event, ${jsArg(item.id)})'>Skip</button>`}
+        ${secondaryAction}
       </div>
     </article>
   `;

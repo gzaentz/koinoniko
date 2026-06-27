@@ -39,7 +39,7 @@ Koinoniko currently supports:
 - selecting a trend or saved Pattern Scout mechanic when creating a post
 - asking Koinoniko questions about posts, Voice, trends, patterns, queue quality, and what is working
 - showing Account connection status without exposing secret values
-- running protected Railway Cron tasks for post sync, metrics sync, trend refresh, and pattern refresh
+- running protected Railway Cron tasks for publishing due posts, post sync, metrics sync, trend refresh, and pattern refresh
 
 Generation requires a provider. There is no demo or template fallback.
 
@@ -433,7 +433,7 @@ Required Railway setup:
 9. Set `SCRAPINGDOG_API_KEY` or `SCRAPING_DOG_API_KEY` for live trend refresh.
 10. Set `TASK_SECRET` for protected Railway Cron tasks.
 11. Set X write credentials only if you want approved posts to post from Railway.
-12. Optional: set `SOCIAL_BRAIN_TASK_TOKEN` only if an external scheduler will call older `/api/tasks/*` endpoints such as hosted due-post publishing.
+12. Optional: set `SOCIAL_BRAIN_TASK_TOKEN` only if an external scheduler will call older `/api/tasks/*` endpoints.
 
 SQLite notes:
 
@@ -465,6 +465,7 @@ POST /tasks/sync-x-posts
 POST /tasks/sync-x-metrics
 POST /tasks/sync-x-all
 POST /tasks/sync-x-daily
+POST /tasks/publish-due-x
 POST /tasks/refresh-trends
 POST /tasks/refresh-patterns
 POST /tasks/refresh-patterns-weekly
@@ -483,6 +484,7 @@ Railway cron expressions are UTC.
 ```text
 X post sync:       every 30 minutes       */30 * * * *
 X metrics sync:    every 2 hours           15 */2 * * *
+Publish due posts: every 5 minutes        */5 * * * *
 Trend refresh:     daily, 06:25 UTC        25 6 * * *
 Pattern refresh:   weekly, Mon 06:40 UTC   40 6 * * 1
 ```
@@ -492,11 +494,12 @@ Create Railway Cron services that run and exit:
 ```bash
 python -m leadpoet_social_brain.web.task_client sync-x-posts
 python -m leadpoet_social_brain.web.task_client sync-x-metrics
+python -m leadpoet_social_brain.web.task_client publish-due-x
 python -m leadpoet_social_brain.web.task_client refresh-trends
 python -m leadpoet_social_brain.web.task_client refresh-patterns-weekly
 ```
 
-`sync-x-posts` is incremental by default: after the first import, it asks X only for posts newer than the latest stored X post. The `refresh-patterns-weekly` task refreshes both weekly and monthly Pattern Scout windows, 5 examples each by default. The default cron payloads also keep post and metric limits modest to avoid repeated backfills.
+`publish-due-x` checks approved queue items and posts anything whose scheduled time has passed. Railway Cron has a 5-minute minimum interval, so approved posts can go out up to a few minutes after their scheduled time. `sync-x-posts` is incremental by default: after the first import, it asks X only for posts newer than the latest stored X post. The `refresh-patterns-weekly` task refreshes both weekly and monthly Pattern Scout windows, 5 examples each by default. The default cron payloads also keep post and metric limits modest to avoid repeated backfills.
 
 Set these variables on each Cron service:
 
@@ -517,16 +520,16 @@ Daily sync remains available:
 python -m leadpoet_social_brain.web.task_client sync-x-daily
 ```
 
-Approved scheduled posts still need a trigger to publish. Run `publish-due-x` locally, or call the older hosted endpoint from an external scheduler:
+Approved scheduled posts still need a trigger to publish. Use the Railway Cron `publish-due-x` task above, run it locally, or call the protected hosted endpoint directly:
 
 ```bash
-curl -X POST "$SOCIAL_BRAIN_URL/api/tasks/publish-due-x" \
-  -H "Authorization: Bearer $SOCIAL_BRAIN_TASK_TOKEN" \
+curl -X POST "$SOCIAL_BRAIN_URL/tasks/publish-due-x" \
+  -H "Authorization: Bearer $TASK_SECRET" \
   -H "Content-Type: application/json" \
   -d '{"limit":20}'
 ```
 
-That older `/api/tasks/*` route requires `SOCIAL_BRAIN_TASK_TOKEN`. The newer `/tasks/*` sync and trend routes use `TASK_SECRET`.
+The legacy `/api/tasks/publish-due-x` route remains available for external schedulers that still use `SOCIAL_BRAIN_TASK_TOKEN`.
 
 ## Hosted Security
 

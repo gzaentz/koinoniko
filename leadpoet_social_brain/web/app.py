@@ -574,6 +574,8 @@ def route_api(
         return 200, sync_x_all_task_payload(store, payload)
     if method == "POST" and parts == ["tasks", "sync-x-daily"]:
         return 200, sync_x_daily_payload(store, payload)
+    if method == "POST" and parts == ["tasks", "publish-due-x"]:
+        return 200, publish_due_payload(store, payload)
     if method == "POST" and parts == ["tasks", "refresh-trends"]:
         return 200, refresh_trends_task_payload(store, payload)
     if method == "POST" and parts == ["tasks", "refresh-patterns"]:

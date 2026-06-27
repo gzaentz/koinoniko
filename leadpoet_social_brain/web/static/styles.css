@@ -1028,10 +1028,6 @@ main {
   gap: 12px;
 }
 
-.review-queue-card {
-  gap: 14px;
-}
-
 .queue-card:active {
   cursor: grabbing;
 }
@@ -1051,10 +1047,6 @@ main {
 .card-open p {
   color: var(--muted);
   font-size: 13px;
-}
-
-.review-queue-card .card-open {
-  gap: 8px;
 }
 
 .schedule-line {

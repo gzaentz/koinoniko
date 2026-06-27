@@ -439,9 +439,13 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('id="recentPostsTable"', index_html)
         self.assertNotIn("window.prompt", app_js)
         self.assertNotIn("Scheduled date/time", app_js)
-        self.assertIn("review-queue-card", app_js)
+        self.assertIn("queueCardPostTitle", app_js)
+        self.assertIn("queueCardPrompt", app_js)
+        self.assertNotIn("review-queue-card", app_js)
         self.assertIn(">Edit</button>", app_js)
         self.assertIn(">Deny</button>", app_js)
+        self.assertIn(">Post now</button>", app_js)
+        self.assertIn("cleanString(item.angle)", app_js)
         self.assertIn("Scheduled not set", app_js)
         self.assertNotIn("Review / Edit", app_js)
         self.assertIn('id="postVoiceFilter"', index_html)
@@ -3361,6 +3365,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(TASK_DEFAULTS["sync-x-posts"], {"limit": 25})
         self.assertEqual(TASK_DEFAULTS["sync-x-metrics"]["since_days"], 30)
         self.assertEqual(TASK_DEFAULTS["sync-x-metrics"]["limit"], 250)
+        self.assertEqual(TASK_DEFAULTS["publish-due-x"], {"limit": 20})
         self.assertEqual(TASK_DEFAULTS["refresh-trends"], {"limit": 5})
         self.assertEqual(TASK_DEFAULTS["refresh-patterns"], {"limit": 5, "window": "weekly"})
         self.assertEqual(TASK_DEFAULTS["refresh-patterns-weekly"], {"limit": 5, "windows": ["weekly", "monthly"]})
@@ -3554,6 +3559,52 @@ class SocialBrainTest(unittest.TestCase):
 
             self.assertEqual(status, 400)
             self.assertEqual(payload["error"], MISSING_X_WRITE_CREDENTIALS_MESSAGE)
+
+    def test_task_publish_due_x_posts_due_approved_items(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            due = store.save_content_queue_item(
+                ContentQueueItem(
+                    text="Due approved post.",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-06-27T23:35:00+00:00",
+                    status="approved",
+                    approved_at=utc_now(),
+                )
+            )
+            future = store.save_content_queue_item(
+                ContentQueueItem(
+                    text="Future approved post.",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-06-28T23:35:00+00:00",
+                    status="approved",
+                    approved_at=utc_now(),
+                )
+            )
+            store.close()
+
+            fake_client = FakeXWriteClient()
+            with patch("leadpoet_social_brain.web.app.XWriteClient.from_env", return_value=fake_client):
+                status, payload = handle_api_request(
+                    "POST",
+                    "/tasks/publish-due-x",
+                    json.dumps({"now": "2026-06-27T23:36:00+00:00", "limit": 20}),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(len(payload["results"]), 1)
+            self.assertTrue(payload["results"][0]["posted"])
+            self.assertEqual(payload["results"][0]["queue_item"]["id"], due.id)
+            self.assertEqual(fake_client.posts, ["Due approved post."])
+
+            store = SQLiteStore(db_path)
+            self.assertEqual(store.get_content_queue_item(due.id).status, "posted")
+            self.assertEqual(store.get_content_queue_item(future.id).status, "approved")
+            store.close()
 
     def test_post_queue_item_requires_approval_and_creates_published_post(self):
         with tempfile.TemporaryDirectory() as tmpdir:
