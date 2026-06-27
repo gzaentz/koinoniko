@@ -1445,14 +1445,22 @@ main {
   width: min(980px, 100%);
 }
 
+.assistant-pill-button {
+  min-height: 38px;
+  border-radius: 999px;
+  padding: 9px 16px;
+  border-color: var(--black);
+  background: var(--black);
+  color: var(--white);
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .assistant-launcher {
   position: fixed;
   right: 24px;
   bottom: 24px;
   z-index: 24;
-  min-height: 38px;
-  border-radius: 999px;
-  padding: 9px 16px;
   box-shadow: 0 14px 38px rgba(0, 0, 0, 0.14);
 }
 
@@ -1492,9 +1500,8 @@ main {
 }
 
 .assistant-expand-button {
-  min-height: 34px;
-  padding: 6px 10px;
-  font-size: 13px;
+  min-width: 82px;
+  box-shadow: none;
 }
 
 .assistant-header h2 {
