@@ -405,7 +405,7 @@ main {
 }
 
 .sidebar-collapsed .nav-badge.muted-badge {
-  display: none;
+  display: inline-flex;
 }
 
 .sidebar-collapsed .sidebar-footer {

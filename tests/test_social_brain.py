@@ -375,6 +375,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn("<h2>Suggested Voice Examples</h2>", index_html)
         self.assertNotIn("<h2>Queue</h2>", index_html)
         self.assertIn('id="reviewNavBadge"', index_html)
+        self.assertIn(".sidebar-collapsed .nav-badge.muted-badge", styles_css)
+        self.assertNotIn(".sidebar-collapsed .nav-badge.muted-badge {\n  display: none;", styles_css)
         self.assertIn('data-view="account"', index_html)
         self.assertIn('<span class="nav-label">Account</span>', index_html)
         self.assertIn('id="accountView"', index_html)
