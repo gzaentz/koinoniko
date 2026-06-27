@@ -32,7 +32,10 @@ Koinoniko currently supports:
 - editing, revising, approving, scheduling, and posting approved queue items
 - storing draft-to-post linkage and generation influences
 - refreshing AI, sales, and lead generation trends through ScrapingDog
+- showing compact trend cards with a short "what happened" summary and deeper source details in the modal
 - storing optional Pattern Scout examples for reusable post mechanics
+- selecting a trend or saved Pattern Scout mechanic when creating a post
+- asking Koinoniko questions about posts, Voice, trends, patterns, queue quality, and what is working
 - showing Account connection status without exposing secret values
 - running protected Railway Cron tasks for post sync, metrics sync, trend refresh, and pattern refresh
 
@@ -181,8 +184,10 @@ The UI has four main areas:
 
 - `Dashboard`: daily/weekly trends, daily/weekly patterns, and the full X posts table
 - `Queue`: review, edit, AI revise, approve, schedule, and post approved content
-- `Voice`: compact Voice status, current Koinoniko Voice, selected Voice Examples, and collapsed suggested examples
+- `Voice`: compact status chips, current Koinoniko Voice, selected Voice Examples, and collapsed suggested examples
 - `Account`: connection status, data sync actions, model routing, and account/security controls
+
+The Dashboard keeps trend and pattern cards compact. Trend cards show the topic/source, title, and a short summary of what happened. Clicking a trend opens the full detail modal with `What happened`, `Why it matters`, `Leadpoet angle`, suggested hooks, source link, and source details.
 
 Account uses polished status rows for:
 
@@ -194,6 +199,22 @@ Account uses polished status rows for:
 - Daily Sync
 
 The Account page shows `Connected`, `Not connected`, or `Not configured`. It does not show API keys, tokens, or secret values.
+
+## Ask Koinoniko
+
+Ask Koinoniko is a global assistant opened from the icon launcher in the lower-right corner.
+
+It can answer questions about:
+
+- which posts are strongest as Voice Examples
+- which topics, hooks, structures, and formats are working
+- what Gavin should post about next
+- which queued or scheduled posts feel weak
+- recent trends and Pattern Scout mechanics
+
+The drawer starts with a few starter prompts. After a prompt is used, the starter list disappears so the chat stays focused. The composer stays pinned to the bottom, responses render formatted headings/lists/quotes instead of raw markdown, and the expand/narrow control uses the same chevron button style as the sidebar.
+
+Ask Koinoniko is provider-backed and read-only by default. Suggested actions are labeled as confirmation-required; it should not silently mutate posts, Voice Examples, queue items, or settings.
 
 ## Voice Workflow
 
@@ -351,6 +372,7 @@ In the web UI, open `Account` and use:
 - `Sync X Metrics`: appends fresh public metric snapshots for stored posts
 - `Sync All X Data`: runs post sync first, then metric sync
 - `Refresh Trends`: updates live trend context when ScrapingDog is connected
+- `Sync Patterns`: refreshes Pattern Scout examples when ScrapingDog and the provider are connected
 
 Default X post sync behavior:
 
@@ -373,6 +395,8 @@ Sync metadata is stored under simple keys:
 
 Only timestamps, status, JSON summaries, and errors are stored.
 
+In the Account detail modal, the Sync button opens a small action menu with Posts, Metrics, Trends, Patterns, and All. The menu opens upward inside the modal so the options remain visible on smaller screens.
+
 ## Railway Deployment
 
 This repo includes `railway.toml`:
@@ -386,6 +410,8 @@ startCommand = "python -m leadpoet_social_brain.web.app --host 0.0.0.0"
 ```
 
 Railway provides `PORT` automatically. The app listens on that port in production.
+
+All product data lives in SQLite. On Railway, that means X posts, metric snapshots, Voice Examples, Koinoniko Voice, trends, Pattern Scout examples, drafts, queue items, sync metadata, model routing, and the web login persist only when the SQLite file is on the mounted volume.
 
 Required Railway setup:
 
@@ -538,13 +564,14 @@ The normal web-first loop:
 5. Open Voice and click `Update Voice`.
 6. Refresh Trends.
 7. Optionally add or refresh Patterns if there are post mechanics worth adapting.
-8. Create a weekly plan.
-9. Review and edit queued posts.
-10. Use AI revisions only when useful.
-11. Approve posts you are ready to publish.
-12. Publish approved items manually or with `publish-due-x`.
-13. Sync metrics after posting.
-14. Review analytics and repeat.
+8. Create an individual post from a selected Trend/Pattern or create a weekly plan.
+9. Use Ask Koinoniko when you want a quick read on what is working or what feels weak.
+10. Review and edit queued posts.
+11. Use AI revisions only when useful.
+12. Approve posts you are ready to publish.
+13. Publish approved items manually or with `publish-due-x`.
+14. Sync metrics after posting.
+15. Review analytics and repeat.
 
 CLI equivalent:
 
@@ -764,6 +791,16 @@ Generation uses:
 
 Drafts store structured influence metadata instead of relying on one giant prompt as the source of truth.
 
+In the web UI, `Create Post` includes:
+
+- topic and post type combo inputs
+- optional schedule time
+- `Trend to build from`
+- `Pattern to use`
+- selected source chips that can be removed before generation
+
+`Use in Post` on a trend or `Use Pattern` on a pattern opens Create Post with that source preselected. Generated output still enters the review queue; it does not publish automatically.
+
 ## Weekly Content Queue
 
 Create a reviewable weekly queue:
@@ -813,6 +850,30 @@ python3 -m leadpoet_social_brain.cli publish-due-x
 
 Trend Scout stores timely context for generation and planning.
 
+The Dashboard trend cards are intentionally compact:
+
+- topic/source metadata
+- title
+- short "what happened" summary clamped to two lines
+- `Use in Post`
+
+Clicking a trend opens the full detail modal. The modal keeps the richer context:
+
+- What happened
+- Why it matters
+- Leadpoet angle
+- Suggested hook
+- Source link
+- Source details and enrichment status
+
+Trend refresh summaries can include:
+
+- `daily`: daily trends stored
+- `weekly`: weekly trends stored
+- `enriched`: trends with full LLM-enriched context
+- `partial`: trends saved with basic/source context but not full enrichment
+- `failed`: trends that could not be saved or enriched
+
 Refresh live trends through ScrapingDog:
 
 ```bash
@@ -861,7 +922,7 @@ The rule is:
 Use the structure, not the wording.
 ```
 
-The Dashboard shows daily and weekly Pattern cards next to Trends. Clicking a Pattern opens its source text, structure, why it worked, adaptation rule, source link, and Archive/Ignore actions. `Use Pattern` opens Create Post with that pattern selected; generated output still goes to Queue as `needs_review`.
+The Dashboard shows daily and weekly Pattern cards next to Trends. Pattern cards stay compact and use sensible placeholders when a field is missing. Clicking a Pattern opens its source text, structure, why it worked, adaptation rule, source link, and Archive/Ignore actions. `Use Pattern` opens Create Post with that pattern selected; generated output still goes to Queue as `needs_review`.
 
 Manual add:
 
@@ -1051,6 +1112,16 @@ GET /api/taxonomy/topics
 GET /api/taxonomy/post-types
 PATCH /api/posts/:id
 POST /api/posts/:id/voice
+GET /api/account/status
+POST /api/account/sync-x-posts
+POST /api/account/sync-x-metrics
+POST /api/account/sync-x-all
+GET /api/assistant/starter-prompts
+POST /api/assistant/chat
+GET /api/trends
+POST /api/trends
+GET /api/trends/:id
+POST /api/trends/refresh
 GET /api/patterns
 POST /api/patterns
 GET /api/patterns/:id
@@ -1137,7 +1208,9 @@ Current tests cover:
 - Voice Example note workflows
 - Voice updates from selected examples
 - Voice page and post detail drawer UI expectations
+- Ask Koinoniko context, starter prompts, read-only chat behavior, source display, and drawer UI expectations
 - topic and post type option endpoints
+- Create Post source selectors for trends and patterns
 - skill loading and prompt assembly
 - provider-required generation
 - OpenRouter provider behavior
@@ -1145,6 +1218,7 @@ Current tests cover:
 - trend storage, refresh, and ScrapingDog behavior
 - web login and signed sessions
 - Account status and sync endpoints
+- Account sync menu placement inside the detail modal
 - protected task endpoints
 - weekly planning and content queue workflow
 - X write credential safety
