@@ -1881,13 +1881,7 @@ async function loadVoice() {
 }
 
 function renderVoice() {
-  const voice = state.voice || {};
-  const status = voice.status || {};
-  const examplesCount = Number(status.examples_count ?? voice.examples?.length ?? 0);
-  $("voiceStatusLabel").textContent = status.label || "Loading";
-  $("voiceExampleCount").textContent = String(examplesCount);
-  $("voiceContextCount").textContent = String(examplesCount);
-  $("voiceLastUpdated").textContent = status.last_updated_at ? formatDateTime(status.last_updated_at) : "Never";
+  const status = state.voice?.status || {};
   $("updateVoiceButton").disabled = status.status === "needs_examples";
   renderCurrentVoice();
   renderVoiceTopicOptions();

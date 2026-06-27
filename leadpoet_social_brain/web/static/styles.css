@@ -499,6 +499,14 @@ main {
   gap: 18px;
 }
 
+.modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .dashboard-grid,
 .dashboard-top-grid {
   display: grid;
@@ -1300,48 +1308,8 @@ main {
 
 .voice-layout {
   display: grid;
-  gap: 18px;
-  grid-template-rows: auto minmax(150px, 1fr);
   height: 100%;
   min-height: 0;
-}
-
-.voice-status-panel {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 18px;
-  align-items: center;
-}
-
-.voice-status-main {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-}
-
-.voice-status-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.voice-status-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 4px 9px;
-  background: var(--soft);
-  white-space: nowrap;
-}
-
-.voice-status-row strong {
-  color: var(--ink);
 }
 
 .voice-summary,
@@ -1355,14 +1323,10 @@ main {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
-.voice-current-panel,
-.voice-context-control {
-  display: flex;
-  min-height: 0;
-}
-
 .voice-current-panel {
+  display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .voice-current-panel .voice-summary {
@@ -1372,39 +1336,17 @@ main {
   padding-right: 4px;
 }
 
-.voice-context-control {
+.voice-panel-header {
+  display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  max-width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 6px;
-  background: var(--soft);
-}
-
-.voice-context-button {
-  display: inline-flex;
   justify-content: space-between;
   gap: 18px;
-  flex: 1 1 210px;
-  min-width: 210px;
-  min-height: 44px;
-  background: var(--white);
+  flex-wrap: wrap;
+  margin-bottom: 18px;
 }
 
-.voice-context-button span:last-child {
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.voice-context-button strong {
-  color: var(--ink);
-}
-
-.voice-context-control #updateVoiceButton {
-  flex: 0 0 auto;
-  min-height: 44px;
+.voice-panel-header #voiceContextButton,
+.modal-header-actions #updateVoiceButton {
   white-space: nowrap;
 }
 
@@ -2147,13 +2089,8 @@ main {
   .dashboard-grid,
   .dashboard-top-grid,
   .board,
-  .voice-status-panel,
   .two-column {
     grid-template-columns: 1fr;
-  }
-
-  .voice-context-control {
-    justify-self: start;
   }
 
   #dashboardView.view.active {
