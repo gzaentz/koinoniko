@@ -1597,9 +1597,13 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("technical depth", topic_values)
             self.assertIn("Leadpoet", topic_values)
             self.assertIn("Bittensor", topic_values)
+            self.assertIn("founder/company", topic_values)
+            self.assertIn("uncategorized", topic_values)
             self.assertIn("founder_insight", type_values)
             self.assertIn("technical_explanation", type_values)
             self.assertIn("quote_tweet", type_values)
+            self.assertIn("launch", type_values)
+            self.assertIn("investor_facing", type_values)
 
     def test_web_can_update_post_topic_and_type_without_clearing_voice_note(self):
         with tempfile.TemporaryDirectory() as tmpdir:

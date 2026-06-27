@@ -638,60 +638,8 @@ main {
   min-width: 150px;
 }
 
-.topic-button {
-  min-height: auto;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  padding: 0;
-  border-radius: 0;
-  font-weight: 600;
-  text-align: left;
-  text-decoration: underline;
-  text-decoration-color: transparent;
-  text-underline-offset: 3px;
-}
-
-.topic-button:hover,
-.topic-button:focus-visible {
-  color: var(--black);
-  text-decoration-color: currentColor;
-}
-
-.topic-button.is-uncategorized {
-  color: var(--muted);
-}
-
-.topic-editor {
-  display: grid;
-  grid-template-columns: minmax(118px, 1fr) auto auto;
-  gap: 6px;
-  align-items: center;
-  min-width: 260px;
-}
-
-.detail-item .topic-editor {
-  min-width: 0;
-}
-
-.topic-editor input {
-  min-height: 34px;
-  padding: 7px 9px;
-}
-
-.topic-editor button {
-  min-height: 34px;
-  padding: 6px 10px;
-}
-
-.topic-save-button {
-  background: var(--white);
-  color: var(--black);
-  border-color: var(--line);
-}
-
-.topic-cancel-button {
-  font-size: 13px;
+.post-type-cell {
+  min-width: 160px;
 }
 
 .empty-cell {
@@ -1398,18 +1346,72 @@ main {
   color: var(--muted);
 }
 
-.inline-field-editor {
-  display: grid;
-  grid-template-columns: minmax(110px, 1fr) auto auto;
-  gap: 6px;
-  align-items: center;
+.field-combo {
+  position: relative;
+  width: min(260px, 100%);
+  z-index: 6;
 }
 
-.inline-field-editor input,
-.inline-field-editor button {
-  min-height: 32px;
-  padding: 6px 9px;
+.field-combo-input {
+  min-height: 34px;
+  padding: 7px 10px;
   font-size: 13px;
+  font-weight: 650;
+}
+
+.field-combo-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  width: min(320px, 80vw);
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--white);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.14);
+  padding: 6px;
+}
+
+.field-combo-option {
+  width: 100%;
+  min-height: 42px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  display: grid;
+  justify-items: start;
+  gap: 1px;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.field-combo-option:hover,
+.field-combo-option:focus-visible {
+  background: var(--soft);
+}
+
+.field-combo-option strong {
+  font-size: 13px;
+}
+
+.field-combo-option span,
+.field-combo-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.field-combo-option.create-option {
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 6px 6px;
+  margin-top: 6px;
+  padding-top: 10px;
+}
+
+.field-combo-empty {
+  padding: 10px 8px;
 }
 
 .revision-box {

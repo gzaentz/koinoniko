@@ -94,12 +94,18 @@ DEFAULT_TOPIC_OPTIONS = [
     "AI SDRs",
     "lead generation",
     "GTM",
+    "AI",
+    "founder/company",
+    "uncategorized",
 ]
 DEFAULT_POST_TYPE_OPTIONS = [
     "founder_insight",
     "product_update",
+    "bittensor",
     "bittensor_update",
+    "investor_facing",
     "quote_tweet",
+    "launch",
     "technical_explanation",
     "light_funny",
 ]

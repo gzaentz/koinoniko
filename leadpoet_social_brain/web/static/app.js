@@ -14,18 +14,31 @@ const state = {
   draggedQueueId: "",
   queueDetail: null,
   postDetail: null,
-  editingTopicPostId: "",
   editingPostField: null,
   taxonomy: { topics: [], postTypes: [] },
   recentPostsSort: { key: "date", direction: "desc" },
 };
 
-const DEFAULT_TOPIC_OPTIONS = ["Leadpoet", "sales LLMs", "Bittensor", "product", "AI SDRs", "lead generation", "GTM"];
+const DEFAULT_TOPIC_OPTIONS = [
+  "Leadpoet",
+  "sales LLMs",
+  "Bittensor",
+  "product",
+  "AI SDRs",
+  "lead generation",
+  "GTM",
+  "AI",
+  "founder/company",
+  "uncategorized",
+];
 const DEFAULT_POST_TYPE_OPTIONS = [
   "founder_insight",
   "product_update",
+  "bittensor",
   "bittensor_update",
+  "investor_facing",
   "quote_tweet",
+  "launch",
   "technical_explanation",
   "light_funny",
 ];
@@ -152,8 +165,6 @@ async function loadTaxonomy() {
     topics: (topics.items || []).map((item) => item.value).filter(Boolean),
     postTypes: (postTypes.items || []).map((item) => item.value).filter(Boolean),
   };
-  renderTopicOptions();
-  renderPostTypeOptions();
 }
 
 function escapeHtml(value) {
@@ -166,6 +177,10 @@ function escapeHtml(value) {
 
 function escapeAttr(value) {
   return escapeHtml(value).replaceAll("'", "&#39;");
+}
+
+function cssAttr(value) {
+  return String(value ?? "").replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
 
 function jsArg(value) {
@@ -267,7 +282,6 @@ function renderDashboard() {
 function renderRecentPosts() {
   const tbody = $("recentPostsTable");
   renderRecentPostSortHeaders();
-  renderTopicOptions();
   const posts = filteredRecentPosts();
   if (!posts.length) {
     tbody.innerHTML = `
@@ -374,8 +388,8 @@ function recentPostRow(post) {
     <tr onclick='openPostDetails(${jsArg(post.id)})'>
       <td>${escapeHtml(formatDate(post.published_at))}</td>
       <td class="post-summary"><span>${escapeHtml(post.summary || summarize(post.text))}</span>${voiceBadge}</td>
-      <td class="topic-cell">${topicControl(post, "row")}</td>
-      <td>${escapeHtml(label(post.post_type))}</td>
+      <td class="topic-cell">${postFieldControl(post, "topic", "row")}</td>
+      <td class="post-type-cell">${postFieldControl(post, "post_type", "row")}</td>
       <td>${metric(metrics.likes)}</td>
       <td>${metric(metrics.replies)}</td>
       <td>${metric(metrics.reposts)}</td>
@@ -386,46 +400,6 @@ function recentPostRow(post) {
       <td>${post.url ? `<a href="${escapeAttr(post.url)}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">Open</a>` : ""}</td>
     </tr>
   `;
-}
-
-function topicControl(post, context) {
-  const currentTopic = post.topic || "uncategorized";
-  if (state.editingTopicPostId === post.id) {
-    return `
-      <form class="topic-editor" onsubmit="savePostTopic(event, ${jsArg(post.id)})" onclick="event.stopPropagation()">
-        <input value="${escapeAttr(currentTopic)}" list="topicOptions" placeholder="Topic" aria-label="Topic" autofocus>
-        <button class="secondary topic-save-button" type="submit">Save</button>
-        <button class="quiet-button topic-cancel-button" type="button" onclick="cancelPostTopicEdit(event)">Cancel</button>
-      </form>
-    `;
-  }
-  const uncategorized = currentTopic.trim().toLowerCase() === "uncategorized";
-  return `
-    <button
-      class="topic-button${uncategorized ? " is-uncategorized" : ""}"
-      type="button"
-      title="Change topic"
-      onclick="startPostTopicEdit(event, ${jsArg(post.id)}, ${jsArg(context)})"
-    >
-      ${escapeHtml(topicLabel(currentTopic))}
-    </button>
-  `;
-}
-
-function renderTopicOptions() {
-  const list = $("topicOptions");
-  if (!list) return;
-  list.innerHTML = topicOptions()
-    .map((topic) => `<option value="${escapeAttr(topic)}" label="${escapeAttr(topicLabel(topic))}"></option>`)
-    .join("");
-}
-
-function renderPostTypeOptions() {
-  const list = $("postTypeOptions");
-  if (!list) return;
-  list.innerHTML = postTypeOptions()
-    .map((type) => `<option value="${escapeAttr(type)}" label="${escapeAttr(label(type))}"></option>`)
-    .join("");
 }
 
 function topicOptions() {
@@ -478,66 +452,15 @@ function topicLabel(value) {
     .join("/");
 }
 
-window.startPostTopicEdit = (event, id) => {
-  event.stopPropagation();
-  state.editingTopicPostId = id;
-  renderRecentPosts();
-  if (state.postDetail?.id === id && !$("postModal").classList.contains("hidden")) {
-    renderPostModal();
-  }
-};
-
-window.cancelPostTopicEdit = (event) => {
-  event.stopPropagation();
-  state.editingTopicPostId = "";
-  renderRecentPosts();
-  if (state.postDetail && !$("postModal").classList.contains("hidden")) {
-    renderPostModal();
-  }
-};
-
-window.savePostTopic = async (event, id) => {
-  event.preventDefault();
-  event.stopPropagation();
-  const form = event.currentTarget;
-  const input = form.querySelector("input");
-  const topic = input?.value.trim() || "";
-  if (!topic) {
-    showMessage("Topic is required.", true);
-    return;
-  }
-  form.querySelectorAll("button, input").forEach((node) => {
-    node.disabled = true;
-  });
-  try {
-    const payload = await api(`/api/posts/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      body: JSON.stringify({ topic }),
-    });
-    updateRecentPost(payload.post);
-    if (state.postDetail?.id === id) {
-      state.postDetail = payload.post;
-    }
-    state.editingTopicPostId = "";
-    await loadTaxonomy();
-    renderRecentPosts();
-    if (state.postDetail?.id === id && !$("postModal").classList.contains("hidden")) {
-      renderPostModal();
-    }
-    showMessage("Topic updated.");
-  } catch (error) {
-    showMessage(error.message, true);
-    form.querySelectorAll("button, input").forEach((node) => {
-      node.disabled = false;
-    });
-  }
-};
-
 function updateRecentPost(updatedPost) {
   if (!updatedPost || !state.dashboard?.recent_posts) return;
   state.dashboard.recent_posts = state.dashboard.recent_posts.map((post) =>
     post.id === updatedPost.id ? updatedPost : post
   );
+}
+
+function findRecentPost(id) {
+  return (state.dashboard?.recent_posts || []).find((post) => post.id === id);
 }
 
 window.openPostDetails = (id) => {
@@ -565,8 +488,8 @@ function renderPostModal() {
     </div>
     <div class="compact-meta-row">
       ${compactMeta("Date", formatDateTime(post.published_at))}
-      ${compactMetaHtml("Topic", postFieldControl(post, "topic"))}
-      ${compactMetaHtml("Post type", postFieldControl(post, "post_type"))}
+      ${compactMetaHtml("Topic", postFieldControl(post, "topic", "modal"))}
+      ${compactMetaHtml("Post type", postFieldControl(post, "post_type", "modal"))}
       ${compactMeta("Engagement rate", formatRate(metrics.engagement_rate))}
     </div>
     <div class="compact-metrics-row" aria-label="Post metrics">
@@ -629,18 +552,36 @@ function compactMetric(labelText, value) {
   return `<span><strong>${metric(value)}</strong> ${escapeHtml(labelText)}</span>`;
 }
 
-function postFieldControl(post, field) {
-  const isEditing = state.editingPostField?.postId === post.id && state.editingPostField?.field === field;
+function postFieldControl(post, field, context = "row") {
+  const isEditing =
+    state.editingPostField?.postId === post.id &&
+    state.editingPostField?.field === field &&
+    state.editingPostField?.context === context;
   const currentValue = field === "topic" ? (post.topic || "uncategorized") : (post.post_type || "");
+  const query = isEditing ? state.editingPostField.query ?? currentValue : currentValue;
   const displayValue = field === "topic" ? topicLabel(currentValue) : label(currentValue);
   const fieldName = field === "topic" ? "Topic" : "Post type";
   if (isEditing) {
     return `
-      <form class="inline-field-editor" onsubmit='savePostField(event, ${jsArg(post.id)}, ${jsArg(field)})' onclick="event.stopPropagation()">
-        <input value="${escapeAttr(currentValue)}" list="${field === "topic" ? "topicOptions" : "postTypeOptions"}" placeholder="${escapeAttr(fieldName)}" aria-label="${escapeAttr(fieldName)}" autofocus>
-        <button class="secondary" type="submit">Save</button>
-        <button class="quiet-button" type="button" onclick="cancelPostFieldEdit(event)">Cancel</button>
-      </form>
+      <div class="field-combo" onclick="event.stopPropagation()" data-field-editor-post="${escapeAttr(post.id)}" data-field-editor-field="${escapeAttr(field)}" data-field-editor-context="${escapeAttr(context)}">
+        <input
+          class="field-combo-input"
+          value="${escapeAttr(query)}"
+          placeholder="${escapeAttr(fieldName)}"
+          aria-label="${escapeAttr(fieldName)}"
+          aria-expanded="true"
+          aria-controls="${escapeAttr(fieldMenuId(post.id, field, context))}"
+          data-field-editor-input
+          data-field-editor-post="${escapeAttr(post.id)}"
+          data-field-editor-field="${escapeAttr(field)}"
+          data-field-editor-context="${escapeAttr(context)}"
+          oninput='updatePostFieldQuery(event, ${jsArg(post.id)}, ${jsArg(field)}, ${jsArg(context)})'
+          onkeydown='handlePostFieldKeydown(event, ${jsArg(post.id)}, ${jsArg(field)}, ${jsArg(context)})'
+        >
+        <div class="field-combo-menu" id="${escapeAttr(fieldMenuId(post.id, field, context))}" role="listbox">
+          ${postFieldOptionRows(post.id, field, query, Boolean(state.editingPostField?.dirty), context)}
+        </div>
+      </div>
     `;
   }
   return `
@@ -648,39 +589,72 @@ function postFieldControl(post, field) {
       class="inline-field-chip${field === "topic" && currentValue.toLowerCase() === "uncategorized" ? " is-uncategorized" : ""}"
       type="button"
       title="Edit ${escapeAttr(fieldName)}"
-      onclick='startPostFieldEdit(event, ${jsArg(post.id)}, ${jsArg(field)})'
+      onclick='startPostFieldEdit(event, ${jsArg(post.id)}, ${jsArg(field)}, ${jsArg(context)})'
     >
       ${escapeHtml(displayValue || "Unset")}
     </button>
   `;
 }
 
-window.startPostFieldEdit = (event, id, field) => {
+window.startPostFieldEdit = (event, id, field, context = "row") => {
   event.stopPropagation();
-  state.editingPostField = { postId: id, field };
-  state.editingTopicPostId = "";
+  const post = findRecentPost(id) || state.postDetail;
+  const currentValue = field === "topic" ? (post?.topic || "uncategorized") : (post?.post_type || "");
+  state.editingPostField = { postId: id, field, context, query: currentValue, dirty: false };
+  renderRecentPosts();
   renderPostModal();
+  focusPostFieldEditor(id, field, context);
 };
 
 window.cancelPostFieldEdit = (event) => {
-  event.stopPropagation();
+  event?.stopPropagation?.();
   state.editingPostField = null;
+  renderRecentPosts();
   renderPostModal();
 };
 
-window.savePostField = async (event, id, field) => {
+window.updatePostFieldQuery = (event, id, field, context = "row") => {
+  event.stopPropagation();
+  if (
+    !state.editingPostField ||
+    state.editingPostField.postId !== id ||
+    state.editingPostField.field !== field ||
+    state.editingPostField.context !== context
+  ) {
+    return;
+  }
+  state.editingPostField = { ...state.editingPostField, query: event.currentTarget.value, dirty: true };
+  const menu = $(fieldMenuId(id, field, context));
+  if (menu) {
+    menu.innerHTML = postFieldOptionRows(id, field, event.currentTarget.value, true, context);
+  }
+};
+
+window.handlePostFieldKeydown = (event, id, field, context = "row") => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    window.cancelPostFieldEdit(event);
+    return;
+  }
+  if (event.key !== "Enter") return;
   event.preventDefault();
   event.stopPropagation();
-  const form = event.currentTarget;
-  const input = form.querySelector("input");
-  const value = input?.value.trim() || "";
+  savePostFieldValue(id, field, event.currentTarget.value, context);
+};
+
+window.choosePostFieldOption = (event, id, field, value, context = "row") => {
+  event.preventDefault();
+  event.stopPropagation();
+  savePostFieldValue(id, field, value, context);
+};
+
+async function savePostFieldValue(id, field, rawValue, context = "row") {
+  const value = String(rawValue || "").trim();
   if (!value) {
     showMessage(field === "topic" ? "Topic is required." : "Post type is required.", true);
     return;
   }
-  form.querySelectorAll("button, input").forEach((node) => {
-    node.disabled = true;
-  });
+  setPostFieldEditorDisabled(id, field, context, true);
   try {
     const payload = await api(`/api/posts/${encodeURIComponent(id)}`, {
       method: "PATCH",
@@ -697,11 +671,93 @@ window.savePostField = async (event, id, field) => {
     showMessage(field === "topic" ? "Topic updated." : "Post type updated.");
   } catch (error) {
     showMessage(error.message, true);
-    form.querySelectorAll("button, input").forEach((node) => {
-      node.disabled = false;
-    });
+    setPostFieldEditorDisabled(id, field, context, false);
   }
-};
+}
+
+function postFieldOptionRows(id, field, query, filterOptions, context = "row") {
+  const typed = String(query || "").trim();
+  const normalizedQuery = typed.toLowerCase();
+  const options = postFieldOptions(field).filter((option) => {
+    if (!filterOptions || !normalizedQuery) return true;
+    return option.value.toLowerCase().includes(normalizedQuery) || option.label.toLowerCase().includes(normalizedQuery);
+  });
+  const rows = options.map((option) => postFieldOptionRow(id, field, option, context));
+  if (typed) {
+    rows.push(`
+      <button
+        class="field-combo-option create-option"
+        type="button"
+        role="option"
+        onmousedown="event.preventDefault()"
+        onclick="choosePostFieldOption(event, ${escapeAttr(jsArg(id))}, ${escapeAttr(jsArg(field))}, ${escapeAttr(jsArg(typed))}, ${escapeAttr(jsArg(context))})"
+      >
+        <strong>Use "${escapeHtml(typed)}"</strong>
+        <span>Save exact text</span>
+      </button>
+    `);
+  }
+  if (!rows.length) {
+    return `<div class="field-combo-empty">Type to create a new ${field === "topic" ? "topic" : "post type"}.</div>`;
+  }
+  return rows.join("");
+}
+
+function postFieldOptionRow(id, field, option, context = "row") {
+  const subtitle = option.label === option.value ? "" : option.value;
+  return `
+    <button
+      class="field-combo-option"
+      type="button"
+      role="option"
+      onmousedown="event.preventDefault()"
+      onclick="choosePostFieldOption(event, ${escapeAttr(jsArg(id))}, ${escapeAttr(jsArg(field))}, ${escapeAttr(jsArg(option.value))}, ${escapeAttr(jsArg(context))})"
+    >
+      <strong>${escapeHtml(option.label)}</strong>
+      ${subtitle ? `<span>${escapeHtml(subtitle)}</span>` : ""}
+    </button>
+  `;
+}
+
+function postFieldOptions(field) {
+  const values = field === "topic" ? topicOptions() : postTypeOptions();
+  return values.map((value) => ({
+    value,
+    label: field === "topic" ? topicLabel(value) : label(value),
+  }));
+}
+
+function fieldMenuId(id, field, context = "row") {
+  return `field-menu-${id}-${field}-${context}`;
+}
+
+function focusPostFieldEditor(id, field, context = "row") {
+  window.requestAnimationFrame(() => {
+    const input = document.querySelector(
+      `[data-field-editor-input][data-field-editor-post="${cssAttr(id)}"][data-field-editor-field="${cssAttr(field)}"][data-field-editor-context="${cssAttr(context)}"]`
+    );
+    if (!input) return;
+    input.focus();
+    input.select();
+  });
+}
+
+function setPostFieldEditorDisabled(id, field, context = "row", disabled) {
+  document
+    .querySelectorAll(`[data-field-editor-post="${cssAttr(id)}"][data-field-editor-field="${cssAttr(field)}"][data-field-editor-context="${cssAttr(context)}"] input, [data-field-editor-post="${cssAttr(id)}"][data-field-editor-field="${cssAttr(field)}"][data-field-editor-context="${cssAttr(context)}"] button`)
+    .forEach((node) => {
+      node.disabled = disabled;
+    });
+}
+
+function closePostFieldEditor() {
+  if (!state.editingPostField) return;
+  state.editingPostField = null;
+  renderRecentPosts();
+  if (state.postDetail && !$("postModal").classList.contains("hidden")) {
+    renderPostModal();
+  }
+}
 
 window.savePostVoice = (event) => {
   runButton(event.currentTarget, "Saving...", async () => {
@@ -1746,7 +1802,6 @@ function closeModal(id) {
   $(id).setAttribute("aria-hidden", "true");
   if (id === "postModal") {
     state.postDetail = null;
-    state.editingTopicPostId = "";
     state.editingPostField = null;
     renderRecentPosts();
   }
@@ -1930,6 +1985,7 @@ function setup() {
     openModal("planModal");
   });
   document.addEventListener("click", closeReviewAddMenu);
+  document.addEventListener("click", closePostFieldEditor);
   $("generatePostButton").addEventListener("click", (event) => runButton(event.currentTarget, "Generating...", createPost));
   $("planWeekButton").addEventListener("click", (event) => runButton(event.currentTarget, "Creating...", planWeek));
   $("loadTrendsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Loading...", loadTrends));
