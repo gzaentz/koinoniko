@@ -411,8 +411,11 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('id="trendDailyButton"', index_html)
         self.assertIn('id="trendWeeklyButton"', index_html)
         self.assertIn('id="patternList"', index_html)
-        self.assertIn('id="patternDailyButton"', index_html)
         self.assertIn('id="patternWeeklyButton"', index_html)
+        self.assertIn('id="patternMonthlyButton"', index_html)
+        self.assertNotIn('id="patternDailyButton"', index_html)
+        self.assertIn('selectedPatternWindow: "weekly"', app_js)
+        self.assertNotIn('selectedPatternWindow: "daily"', app_js)
         self.assertIn('id="patternModal"', index_html)
         self.assertIn('id="savedTrendList"', index_html)
         self.assertEqual(index_html.count('id="trendList"'), 1)
@@ -450,6 +453,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("Use the structure, not the wording.", app_js)
         self.assertIn("usePatternInPost", app_js)
         self.assertIn("savePattern", app_js)
+        self.assertIn("patternCardSummary", app_js)
         self.assertIn("renderDashboardPatterns", app_js)
         self.assertIn("/api/patterns/", app_js)
         self.assertIn('id="createPostTrend"', index_html)
@@ -1836,7 +1840,7 @@ class SocialBrainTest(unittest.TestCase):
                 pattern_name="Weak default teardown",
                 structure="weak default, sharper replacement",
                 why_it_worked="It gives the reader a better model quickly.",
-                window="daily",
+                window="weekly",
             )
             store.mark_viral_pattern_status(pattern.id, "saved")
             store.close()
@@ -1850,7 +1854,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["recent_posts"][0]["metrics"]["impressions"], 2500)
             self.assertEqual(payload["trends"][0]["id"], trend.id)
             self.assertEqual(payload["trend_groups"]["daily"][0]["id"], trend.id)
-            self.assertEqual(payload["pattern_groups"]["daily"][0]["id"], pattern.id)
+            self.assertEqual(payload["pattern_groups"]["weekly"][0]["id"], pattern.id)
             self.assertEqual(payload["saved_patterns"][0]["id"], pattern.id)
             self.assertIn("analytics_hints", payload)
 
@@ -2228,7 +2232,7 @@ class SocialBrainTest(unittest.TestCase):
                     source_text="Howard Lindzon (@howardlindzon) / Posts / X",
                     source_summary="Howard Lindzon (@howardlindzon) / Posts / X",
                     collected_at=f"2026-06-27T12:0{index}:00+00:00",
-                    window="daily",
+                    window="weekly",
                 )
             specific = add_pattern_example(
                 store,
@@ -2239,12 +2243,12 @@ class SocialBrainTest(unittest.TestCase):
                 structure="weak claim, concrete counterexample, useful rule",
                 why_it_worked="It makes a familiar AI mistake feel obvious.",
                 collected_at="2026-06-20T12:00:00+00:00",
-                window="daily",
+                window="weekly",
             )
 
             groups = pattern_groups(store)
 
-            self.assertEqual([pattern.id for pattern in groups["daily"]], [specific.id])
+            self.assertEqual([pattern.id for pattern in groups["weekly"]], [specific.id])
             store.close()
 
     def test_refresh_trends_task_saves_daily_and_weekly_metadata(self):
@@ -2991,7 +2995,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(TASK_DEFAULTS["sync-x-metrics"]["since_days"], 30)
         self.assertEqual(TASK_DEFAULTS["sync-x-metrics"]["limit"], 250)
         self.assertEqual(TASK_DEFAULTS["refresh-trends"], {"limit": 5})
-        self.assertEqual(TASK_DEFAULTS["refresh-patterns"], {"limit": 5, "window": "daily"})
+        self.assertEqual(TASK_DEFAULTS["refresh-patterns"], {"limit": 5, "window": "weekly"})
+        self.assertEqual(TASK_DEFAULTS["refresh-patterns-weekly"], {"limit": 5, "window": "weekly"})
         with patch(
             "leadpoet_social_brain.web.task_client.post_task",
             return_value={"ok": True, "errors": []},

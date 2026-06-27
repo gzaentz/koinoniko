@@ -172,7 +172,7 @@ def refresh_patterns(
     provider: DraftProvider | None,
     *,
     limit: int = 5,
-    window: str = "daily",
+    window: str = "weekly",
     fetch_candidates: PatternCandidateFetcher | None = None,
 ) -> PatternRefreshResult:
     if provider is None:
@@ -367,8 +367,8 @@ def pattern_groups(store: SQLiteStore, *, limit: int = 5) -> dict[str, list[Vira
         ][:limit]
 
     return {
-        "daily": visible("daily"),
         "weekly": visible("weekly"),
+        "monthly": visible("monthly"),
     }
 
 

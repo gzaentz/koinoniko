@@ -20,7 +20,7 @@ const state = {
   scheduledItems: [],
   savedTrends: [],
   selectedTrendWindow: "daily",
-  selectedPatternWindow: "daily",
+  selectedPatternWindow: "weekly",
   selectedTrendForCreate: null,
   selectedPatternForCreate: null,
   patternDetail: null,
@@ -1025,8 +1025,8 @@ function trendRelevanceText(item) {
 
 function renderDashboardPatterns() {
   const groups = state.dashboard?.pattern_groups || {};
-  $("patternDailyButton").classList.toggle("active", state.selectedPatternWindow === "daily");
   $("patternWeeklyButton").classList.toggle("active", state.selectedPatternWindow === "weekly");
+  $("patternMonthlyButton").classList.toggle("active", state.selectedPatternWindow === "monthly");
   const patterns = groups[state.selectedPatternWindow] || [];
   $("patternList").innerHTML = patterns.length
     ? patterns.slice(0, 5).map(patternCard).join("")
@@ -1034,22 +1034,29 @@ function renderDashboardPatterns() {
 }
 
 function patternCard(pattern) {
+  const summary = patternCardSummary(pattern);
   return `
     <article class="pattern-card" role="button" tabindex="0" onclick='openPatternDetails(${jsArg(pattern.id)})' onkeydown='openPatternDetailsFromKey(event, ${jsArg(pattern.id)})'>
       <div class="meta-row">
         <span>${escapeHtml(label(pattern.category || "other"))}</span>
         <span>${escapeHtml(topicLabel(pattern.topic || "No topic"))}</span>
-        <span>${escapeHtml(patternSignal(pattern))}</span>
+        ${pattern.source_url ? `<a href="${escapeAttr(pattern.source_url)}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">Source</a>` : ""}
       </div>
       <h3>${escapeHtml(pattern.pattern_name || "Observed pattern")}</h3>
-      <p>${escapeHtml(pattern.structure || pattern.source_summary || "")}</p>
-      ${pattern.why_it_worked ? `<p><strong>Why this worked:</strong> ${escapeHtml(pattern.why_it_worked)}</p>` : ""}
+      ${summary ? `<p class="pattern-summary">${escapeHtml(summary)}</p>` : ""}
       <div class="actions left">
         ${patternSaveButton(pattern)}
         <button class="secondary" onclick='usePatternInPost(event, ${jsArg(pattern.id)})'>Use Pattern</button>
       </div>
     </article>
   `;
+}
+
+function patternCardSummary(pattern) {
+  return cleanString(pattern.source_summary)
+    || cleanString(pattern.structure)
+    || cleanString(pattern.why_it_worked)
+    || cleanString(pattern.adaptation_rule);
 }
 
 function patternSaveButton(pattern) {
@@ -1844,7 +1851,7 @@ async function refreshTrendsFromAccount() {
 async function refreshPatternsFromAccount() {
   const payload = await api("/api/patterns/refresh", {
     method: "POST",
-    body: JSON.stringify({ limit: 5, window: "daily" }),
+    body: JSON.stringify({ limit: 5, window: "weekly" }),
   });
   showMessage(`Patterns refreshed. Stored ${payload.stored || 0}; skipped ${payload.skipped || 0}.`);
   await refreshAfterAccountAction();
@@ -2073,11 +2080,10 @@ function voicePerformanceSignal(post) {
 }
 
 async function updateVoice() {
-  const payload = await api("/api/voice/update", {
+  await api("/api/voice/update", {
     method: "POST",
     body: "{}",
   });
-  showMessage(`${payload.message || "Voice updated from selected examples."} Used ${payload.examples_used || 0} Voice Context posts.`);
   await loadVoice();
 }
 
@@ -3050,12 +3056,12 @@ function setup() {
     state.selectedTrendWindow = "weekly";
     renderDashboardTrends();
   });
-  $("patternDailyButton").addEventListener("click", () => {
-    state.selectedPatternWindow = "daily";
-    renderDashboardPatterns();
-  });
   $("patternWeeklyButton").addEventListener("click", () => {
     state.selectedPatternWindow = "weekly";
+    renderDashboardPatterns();
+  });
+  $("patternMonthlyButton").addEventListener("click", () => {
+    state.selectedPatternWindow = "monthly";
     renderDashboardPatterns();
   });
   $("createPostTrend").addEventListener("change", syncCreatePostSelectionsFromInputs);

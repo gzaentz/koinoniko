@@ -434,6 +434,7 @@ POST /tasks/sync-x-all
 POST /tasks/sync-x-daily
 POST /tasks/refresh-trends
 POST /tasks/refresh-patterns
+POST /tasks/refresh-patterns-weekly
 ```
 
 They require:
@@ -448,7 +449,7 @@ Recommended cron setup:
 X post sync:       every 30 minutes    */30 * * * *
 X metrics sync:    every 2 hours        15 */2 * * *
 Trend refresh:     daily                25 6 * * *
-Pattern refresh:   daily or weekly      40 6 * * *
+Pattern refresh:   weekly               40 6 * * 1
 ```
 
 Create Railway Cron services that run and exit:
@@ -457,7 +458,7 @@ Create Railway Cron services that run and exit:
 python -m leadpoet_social_brain.web.task_client sync-x-posts
 python -m leadpoet_social_brain.web.task_client sync-x-metrics
 python -m leadpoet_social_brain.web.task_client refresh-trends
-python -m leadpoet_social_brain.web.task_client refresh-patterns
+python -m leadpoet_social_brain.web.task_client refresh-patterns-weekly
 ```
 
 `sync-x-posts` is incremental by default: after the first import, it asks X only for posts newer than the latest stored X post. The default cron payloads also keep post and metric limits modest to avoid repeated backfills.
@@ -894,8 +895,8 @@ source_url,source_author,source_text,source_summary,topic,category,pattern_name,
 List or refresh:
 
 ```bash
-python3 -m leadpoet_social_brain.cli list-patterns --window daily
-python3 -m leadpoet_social_brain.cli refresh-patterns --window daily --limit 5
+python3 -m leadpoet_social_brain.cli list-patterns --window weekly
+python3 -m leadpoet_social_brain.cli refresh-patterns --window weekly --limit 5
 ```
 
 `refresh-patterns` requires both ScrapingDog and an LLM provider. If ScrapingDog is missing, it fails clearly and manual add/import still work.
