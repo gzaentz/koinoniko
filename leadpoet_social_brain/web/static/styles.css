@@ -1306,6 +1306,7 @@ main {
 
 .voice-layout {
   display: grid;
+  gap: 18px;
   min-height: 0;
 }
 
@@ -1321,7 +1322,7 @@ main {
   align-items: start;
 }
 
-.voice-current-panel {
+.voice-section-panel {
   display: grid;
   gap: 18px;
   min-height: auto;
@@ -1345,21 +1346,14 @@ main {
   font-size: 21px;
 }
 
-.voice-examples-button {
-  min-height: 34px;
-  padding: 7px 12px;
-  font-size: 14px;
-}
-
-.voice-panel-header #voiceContextButton,
 .modal-header-actions #updateVoiceButton {
   white-space: nowrap;
 }
 
 .voice-context-modal-card {
   grid-template-rows: auto auto minmax(0, 1fr) auto;
-  width: min(1080px, 100%);
-  max-height: min(820px, calc(100vh - 48px));
+  width: min(1320px, calc(100vw - 48px));
+  max-height: min(900px, calc(100vh - 40px));
   overflow: hidden;
 }
 
@@ -1453,12 +1447,7 @@ main {
   font-weight: 650;
 }
 
-.voice-coverage-recommendation {
-  margin: 0;
-  color: var(--muted);
-  font-size: 14px;
-}
-
+.voice-context-card,
 .voice-rules-card {
   width: 100%;
   min-height: 78px;
@@ -1474,13 +1463,20 @@ main {
   text-align: left;
 }
 
+.voice-context-card:hover,
 .voice-rules-card:hover {
   background: var(--soft);
 }
 
+.voice-context-card > span,
 .voice-rules-card > span {
   display: grid;
   gap: 4px;
+}
+
+.voice-context-card > strong,
+.voice-rules-card > strong {
+  white-space: nowrap;
 }
 
 .voice-rules-card small {
@@ -1515,12 +1511,6 @@ main {
 .voice-rule-group-heading h3 {
   margin: 0;
   font-size: 16px;
-}
-
-.voice-rule-group-heading p {
-  margin: 3px 0 0;
-  color: var(--muted);
-  font-size: 14px;
 }
 
 .voice-rule-group-heading span {

@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-editable-writing-rules">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-voice-blocks">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -184,32 +184,32 @@
 
       <section class="view" id="voiceView">
         <div class="voice-layout">
-          <section class="panel voice-current-panel">
+          <section class="panel voice-section-panel voice-current-panel">
             <div class="voice-panel-header">
-              <h2>Current Voice</h2>
-              <button class="secondary voice-examples-button" id="voiceContextButton" type="button">Voice Examples</button>
+              <h2>Voice</h2>
             </div>
             <div id="currentVoiceSummary" class="voice-summary"></div>
-            <section class="voice-compact-section" aria-labelledby="voiceCoverageTitle">
-              <div class="voice-section-heading">
-                <h3 id="voiceCoverageTitle">Voice Coverage</h3>
-              </div>
-              <div id="voiceCoverageGrid" class="voice-coverage-block"></div>
-              <p id="voiceCoverageRecommendation" class="voice-coverage-recommendation">Add a few Voice Examples to see coverage.</p>
-            </section>
-            <section class="voice-compact-section" aria-labelledby="voiceRulesTitle">
-              <div class="voice-section-heading">
-                <h3 id="voiceRulesTitle">Active Writing Rules</h3>
-                <p>Positioning, Voice, and review rules Koinoniko uses when writing.</p>
-              </div>
-              <button class="voice-rules-card" id="voiceRulesButton" type="button">
-                <span>
-                  <strong id="voiceRulesCount">Loading rules</strong>
-                  <small id="voiceRulesSummary">Positioning, Voice, Review Filters, and Writing Guardrails</small>
-                </span>
-                <strong>View Rules</strong>
-              </button>
-            </section>
+          </section>
+          <section class="panel voice-section-panel voice-context-panel">
+            <div class="voice-panel-header">
+              <h2>Context</h2>
+            </div>
+            <button class="voice-context-card" id="voiceContextButton" type="button" aria-label="Open Voice Examples">
+              <span id="voiceCoverageGrid" class="voice-coverage-block"></span>
+              <strong>Voice Examples</strong>
+            </button>
+          </section>
+          <section class="panel voice-section-panel voice-rules-panel">
+            <div class="voice-panel-header">
+              <h2 id="voiceRulesTitle">Rules</h2>
+            </div>
+            <button class="voice-rules-card" id="voiceRulesButton" type="button">
+              <span>
+                <strong id="voiceRulesCount">Loading rules</strong>
+                <small id="voiceRulesSummary">Positioning, Voice, Review Filters, and Writing Guardrails</small>
+              </span>
+              <strong>View Rules</strong>
+            </button>
           </section>
         </div>
       </section>
@@ -327,7 +327,6 @@
       <div class="modal-card wide voice-context-modal-card">
         <div class="modal-header">
           <div>
-            <span class="eyebrow">Voice</span>
             <h2>Voice Examples</h2>
           </div>
           <div class="modal-header-actions">
@@ -356,7 +355,6 @@
       <div class="modal-card wide voice-rules-modal-card">
         <div class="modal-header">
           <div>
-            <span class="eyebrow">Voice</span>
             <h2>Active Writing Rules</h2>
           </div>
           <button class="icon-button" data-close-modal="voiceRulesModal" aria-label="Close">x</button>
@@ -368,10 +366,7 @@
         </div>
         <section class="voice-rule-group voice-rule-editor" aria-labelledby="voiceAvoidTitle">
           <div class="voice-rule-group-heading">
-            <div>
-              <h3 id="voiceAvoidTitle">Writing Guardrails</h3>
-              <p>Words and habits Koinoniko should write around.</p>
-            </div>
+            <h3 id="voiceAvoidTitle">Writing Guardrails</h3>
           </div>
           <div id="voiceAvoidPhraseList" class="phrase-chip-list"></div>
           <div class="phrase-editor">
@@ -606,6 +601,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260627-editable-writing-rules"></script>
+    <script src="/static/app.js?v=20260627-voice-blocks"></script>
   </body>
 </html>

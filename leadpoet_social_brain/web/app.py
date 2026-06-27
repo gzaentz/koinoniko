@@ -1704,21 +1704,18 @@ def voice_rules_payload(store: SQLiteStore) -> dict[str, Any]:
         {
             "key": "positioning_rules",
             "title": "Positioning Rules",
-            "description": "How Koinoniko should frame Leadpoet in every post.",
             "items": load_positioning_rules(store),
             "editable": True,
         },
         {
             "key": "voice_rules",
             "title": "Voice Rules",
-            "description": "How Gavin's writing should feel.",
             "items": current_voice_rules(store),
             "editable": True,
         },
         {
             "key": "review_rules",
             "title": "Review Filters",
-            "description": "Final checks before a draft is saved.",
             "items": review_rules,
             "editable": True,
         },

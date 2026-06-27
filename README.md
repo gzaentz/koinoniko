@@ -243,6 +243,8 @@ The Voice page shows:
 
 Positioning rules include the core Leadpoet framing: Leadpoet is the intent layer for proprietary buyer context, timing signals, and account-level intent. Other tools, agents, or case studies should be treated as market proof that intent matters, then brought back to Leadpoet's wedge. Editing these rules in the Voice modal updates the active generation/review prompts; positioning edits also update the reusable Leadpoet context section.
 
+Voice UI rule: each section should have one visible title only. Do not add eyebrow labels, mini titles, or descriptive subtitles above/below section titles unless the user explicitly asks for them.
+
 Each Voice Example can use `Suggest why this worked` to draft a concise note from the post text, metrics, topic, post type, and current Voice. The suggestion is only placed into the field for review; it is not saved until you click Save.
 
 The Dashboard recent posts table can filter to `Voice Examples`. Clicking a post opens a clean post detail drawer with:

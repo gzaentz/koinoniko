@@ -1979,10 +1979,7 @@ function renderVoiceRules() {
     ? groups.map((group) => `
       <section class="voice-rule-group">
         <div class="voice-rule-group-heading">
-          <div>
-            <h3>${escapeHtml(group.title || "Rules")}</h3>
-            <p>${escapeHtml(group.description || "")}</p>
-          </div>
+          <h3>${escapeHtml(group.title || "Rules")}</h3>
           <span>${metric((group.items || []).length)}</span>
         </div>
         <textarea
