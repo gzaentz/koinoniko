@@ -1461,7 +1461,32 @@ main {
   right: 24px;
   bottom: 24px;
   z-index: 24;
-  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.14);
+  width: 42px;
+  min-height: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--black);
+  border-color: var(--black);
+  color: var(--white);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+}
+
+.assistant-launcher:hover,
+.assistant-launcher:focus-visible {
+  background: var(--ink);
+  border-color: var(--ink);
+  outline: 0;
+}
+
+.assistant-launcher-icon {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .assistant-drawer {
@@ -1695,6 +1720,8 @@ main {
 .assistant-form textarea {
   min-height: 44px;
   max-height: 140px;
+  font-size: 14px;
+  line-height: 1.35;
   resize: vertical;
 }
 
@@ -1702,6 +1729,8 @@ main {
   align-self: end;
   min-height: 44px;
   height: 44px;
+  font-size: 14px;
+  font-weight: 700;
   padding-inline: 16px;
 }
 
@@ -2113,6 +2142,9 @@ main {
   .assistant-launcher {
     right: 16px;
     bottom: 16px;
+    width: 40px;
+    min-height: 40px;
+    height: 40px;
   }
 
   .account-detail-drawer {

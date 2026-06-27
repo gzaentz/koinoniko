@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-sidebar-toggle-field-combos">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-ask-launcher">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -517,8 +517,12 @@
       </div>
     </section>
 
-    <button class="assistant-pill-button assistant-launcher" id="assistantLauncher" type="button" aria-controls="assistantDrawer" aria-expanded="false">
-      Ask Koinoniko
+    <button class="assistant-launcher" id="assistantLauncher" type="button" aria-label="Ask Koinoniko" title="Ask Koinoniko" aria-controls="assistantDrawer" aria-expanded="false">
+      <svg class="assistant-launcher-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"></path>
+        <path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"></path>
+        <path d="M5 14l.7 1.6L7.5 16l-1.8.4L5 18l-.7-1.6L2.5 16l1.8-.4L5 14z"></path>
+      </svg>
     </button>
 
     <aside class="assistant-drawer hidden" id="assistantDrawer" aria-hidden="true" aria-label="Ask Koinoniko">
