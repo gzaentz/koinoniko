@@ -12,6 +12,9 @@
   --font-display: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-ui: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-accent: "Newsreader", Georgia, "Times New Roman", serif;
+  --page-block-pad: 28px;
+  --page-inline-pad: 38px;
+  --section-pad: 22px;
 }
 
 * {
@@ -432,7 +435,7 @@ main {
 
 .view {
   display: none;
-  padding: 28px 38px 56px;
+  padding: var(--page-block-pad) var(--page-inline-pad) 56px;
 }
 
 .view.active {
@@ -440,7 +443,7 @@ main {
 }
 
 .message {
-  margin: 28px 38px 0;
+  margin: var(--page-block-pad) var(--page-inline-pad) 0;
   padding: 11px 13px;
   border: 1px solid var(--line);
   background: var(--soft);
@@ -486,7 +489,7 @@ main {
 }
 
 .panel {
-  padding: 22px;
+  padding: var(--section-pad);
 }
 
 .panel-header,
@@ -918,7 +921,7 @@ main {
   gap: 16px;
   height: 100dvh;
   overflow: hidden;
-  padding: 28px 38px;
+  padding: var(--page-block-pad) var(--page-inline-pad);
 }
 
 .reviewer-intro {
@@ -934,7 +937,7 @@ main {
 }
 
 .board-column {
-  padding: 18px;
+  padding: var(--section-pad);
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -954,7 +957,7 @@ main {
 #reviewerView.view.active {
   height: 100dvh;
   overflow: hidden;
-  padding: 28px 38px;
+  padding: var(--page-block-pad) var(--page-inline-pad);
 }
 
 #reviewerView .board {
@@ -970,7 +973,7 @@ main {
 }
 
 #voiceView.view.active {
-  padding: 28px 38px;
+  padding: var(--page-block-pad) var(--page-inline-pad);
 }
 
 .add-menu-wrap {
@@ -1340,10 +1343,6 @@ main {
   justify-content: space-between;
   gap: 18px;
   flex-wrap: wrap;
-}
-
-.voice-panel-header h2 {
-  font-size: 21px;
 }
 
 .modal-header-actions #updateVoiceButton {
