@@ -1289,7 +1289,21 @@ main {
   border-top: 1px solid var(--line);
   padding-top: 16px;
   display: grid;
-  gap: 13px;
+  gap: 12px;
+}
+
+.voice-reason-field {
+  max-width: 760px;
+}
+
+.inline-save-status {
+  min-height: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.inline-save-status.error {
+  color: var(--ink);
 }
 
 .advanced-fields {
@@ -1305,6 +1319,14 @@ main {
 }
 
 .advanced-fields .form-grid {
+  margin-top: 12px;
+}
+
+.voice-example-fields {
+  background: var(--soft);
+}
+
+.voice-example-fields .actions {
   margin-top: 12px;
 }
 
@@ -1710,6 +1732,10 @@ main {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
+}
+
+.form-grid .full-span {
+  grid-column: 1 / -1;
 }
 
 .inline-check {
