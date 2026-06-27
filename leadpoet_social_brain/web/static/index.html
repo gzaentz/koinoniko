@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260626-voice-drawer">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-minimal-shell">
   </head>
   <body>
     <aside class="sidebar">
@@ -33,15 +33,9 @@
     </aside>
 
     <main>
-      <header class="topbar">
-        <div>
-          <h1 id="viewTitle">Dashboard</h1>
-          <p id="viewMeta">What needs attention, what is scheduled, and what is working.</p>
-        </div>
-        <div class="actions">
-          <button class="secondary icon-button topbar-refresh" id="refreshButton" aria-label="Sync X posts and metrics" title="Sync X posts and metrics">&#8635;</button>
-        </div>
-      </header>
+      <div class="top-actions" aria-label="Page actions">
+        <button class="secondary icon-button topbar-refresh" id="refreshButton" aria-label="Sync X posts and metrics" title="Sync X posts and metrics">&#8635;</button>
+      </div>
 
       <section id="message" class="message hidden"></section>
 
@@ -98,7 +92,6 @@
               <tbody id="recentPostsTable"></tbody>
             </table>
           </div>
-          <p class="sync-line" id="dashboardSyncLine">Last X sync: never</p>
         </section>
       </section>
 
@@ -392,6 +385,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260626-voice-drawer"></script>
+    <script src="/static/app.js?v=20260627-minimal-shell"></script>
   </body>
 </html>

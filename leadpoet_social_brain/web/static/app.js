@@ -92,25 +92,6 @@ const RECENT_POST_SORT_COLUMNS = {
   },
 };
 
-const views = {
-  dashboard: {
-    title: "Dashboard",
-    meta: "What has been posted, what is current, and what is working.",
-  },
-  reviewer: {
-    title: "Queue",
-    meta: "Review, improve, approve, and schedule X posts.",
-  },
-  voice: {
-    title: "Voice",
-    meta: "Teach Koinoniko what Gavin's best posts sound like.",
-  },
-  account: {
-    title: "Account",
-    meta: "Settings, model choice, and connection status.",
-  },
-};
-
 const $ = (id) => document.getElementById(id);
 
 async function api(path, options = {}) {
@@ -197,8 +178,6 @@ function setView(view) {
     node.classList.toggle("active", node.dataset.view === view);
   });
   $(`${view}View`).classList.add("active");
-  $("viewTitle").textContent = views[view].title;
-  $("viewMeta").textContent = views[view].meta;
   renderCurrentView();
 }
 
@@ -258,7 +237,6 @@ function updateGlobalControls() {
 function renderDashboard() {
   renderRecentPosts();
   renderDashboardTrends();
-  renderDashboardSyncLine();
 }
 
 function renderRecentPosts() {
@@ -862,14 +840,6 @@ function providerLabel(value) {
 
 function cleanString(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
-}
-
-function renderDashboardSyncLine() {
-  const sync = state.dashboard?.sync || {};
-  const postsSync = sync.x_posts_sync || {};
-  const metricsSync = sync.x_metrics_sync || {};
-  const latest = latestDate([postsSync.last_completed_at, metricsSync.last_completed_at]);
-  $("dashboardSyncLine").textContent = `Last X sync: ${latest ? formatDateTime(latest) : "never"}`;
 }
 
 function renderReviewer() {
