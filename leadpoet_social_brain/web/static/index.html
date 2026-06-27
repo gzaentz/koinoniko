@@ -4,30 +4,80 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Koinoniko</title>
+    <script>
+      try {
+        if (window.localStorage.getItem("koinonikoSidebarCollapsed") === "true") {
+          document.documentElement.classList.add("sidebar-collapsed");
+        }
+      } catch (_) {}
+    </script>
     <link rel="icon" type="image/svg+xml" href="/static/koinoniko-favicon.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-minimal-shell">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-collapsible-sidebar">
   </head>
   <body>
-    <aside class="sidebar">
-      <div class="brand" aria-label="Koinoniko">
-        <img src="/static/koinoniko-logo.png" alt="" class="brand-logo" width="34" height="34">
-        <strong>Koinoniko</strong>
+    <aside class="sidebar" id="sidebar">
+      <div class="brand-row">
+        <div class="brand" aria-label="Koinoniko">
+          <img src="/static/koinoniko-logo.png" alt="" class="brand-logo" width="34" height="34">
+          <strong>Koinoniko</strong>
+        </div>
+        <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar">
+          <span class="sidebar-toggle-icon" aria-hidden="true">&#8249;</span>
+        </button>
       </div>
-      <nav>
-        <button class="nav-button active" data-view="dashboard">Dashboard</button>
-        <button class="nav-button nav-with-badge" data-view="reviewer">
-          <span>Queue</span>
+      <nav aria-label="Primary">
+        <button class="nav-button active" type="button" data-view="dashboard" aria-label="Dashboard" title="Dashboard">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+            <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+            <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+            <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+          </svg>
+          <span class="nav-label">Dashboard</span>
+        </button>
+        <button class="nav-button nav-with-badge" type="button" data-view="reviewer" aria-label="Queue" title="Queue">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 6h12"></path>
+            <path d="M8 12h12"></path>
+            <path d="M8 18h12"></path>
+            <path d="M3.5 6l1 1 2-2"></path>
+            <path d="M3.5 12l1 1 2-2"></path>
+            <path d="M3.5 18l1 1 2-2"></path>
+          </svg>
+          <span class="nav-label">Queue</span>
           <span id="reviewNavBadge" class="nav-badge">0</span>
         </button>
-        <button class="nav-button" data-view="voice">Voice</button>
+        <button class="nav-button" type="button" data-view="voice" aria-label="Voice" title="Voice">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 10v4"></path>
+            <path d="M8 7v10"></path>
+            <path d="M12 4v16"></path>
+            <path d="M16 7v10"></path>
+            <path d="M20 10v4"></path>
+          </svg>
+          <span class="nav-label">Voice</span>
+        </button>
       </nav>
       <div class="sidebar-footer">
-        <button class="nav-button" data-view="account">Account</button>
+        <button class="nav-button" type="button" data-view="account" aria-label="Account" title="Account">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="8" r="4"></circle>
+            <path d="M4 21a8 8 0 0 1 16 0"></path>
+          </svg>
+          <span class="nav-label">Account</span>
+        </button>
         <form class="logout-form" method="post" action="/logout">
-          <button class="nav-button" type="submit">Log Out</button>
+          <button class="nav-button" type="submit" aria-label="Log Out" title="Log Out">
+            <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M10 17l5-5-5-5"></path>
+              <path d="M15 12H3"></path>
+              <path d="M14 5h5v14h-5"></path>
+            </svg>
+            <span class="nav-label">Log Out</span>
+          </button>
         </form>
       </div>
     </aside>
@@ -385,6 +435,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260627-minimal-shell"></script>
+    <script src="/static/app.js?v=20260627-collapsible-sidebar"></script>
   </body>
 </html>

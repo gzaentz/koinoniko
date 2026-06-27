@@ -1,4 +1,5 @@
 const DEFAULT_SYNC_USERNAME = "gavinzaentz";
+const SIDEBAR_COLLAPSED_KEY = "koinonikoSidebarCollapsed";
 
 const state = {
   view: "dashboard",
@@ -179,6 +180,30 @@ function setView(view) {
   });
   $(`${view}View`).classList.add("active");
   renderCurrentView();
+}
+
+function isSidebarCollapsed() {
+  return document.documentElement.classList.contains("sidebar-collapsed");
+}
+
+function setSidebarCollapsed(collapsed) {
+  document.documentElement.classList.toggle("sidebar-collapsed", collapsed);
+  const button = $("sidebarToggle");
+  if (button) {
+    button.setAttribute("aria-expanded", String(!collapsed));
+    button.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+    button.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+  }
+  try {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
+  } catch (_) {}
+}
+
+function setupSidebar() {
+  setSidebarCollapsed(isSidebarCollapsed());
+  $("sidebarToggle")?.addEventListener("click", () => {
+    setSidebarCollapsed(!isSidebarCollapsed());
+  });
 }
 
 async function refresh() {
@@ -1876,6 +1901,7 @@ function latestDate(values) {
 }
 
 function setup() {
+  setupSidebar();
   document.querySelectorAll(".nav-button[data-view]").forEach((button) => {
     button.addEventListener("click", () => setView(button.dataset.view));
   });
