@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-ask-launcher">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-account-modal">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -244,7 +244,6 @@
                 <p id="accountConnectionsSummary">Checking connected services...</p>
               </div>
               <div class="settings-row-actions">
-                <span class="status-badge" id="accountConnectionsPill">Checking</span>
                 <button class="settings-row-button icon-only" id="accountConnectionsManageButton" type="button" aria-label="Manage connections">&rsaquo;</button>
               </div>
             </article>
@@ -255,7 +254,7 @@
                 <p id="accountModelSummary">Checking model routing...</p>
               </div>
               <div class="settings-row-actions">
-                <button class="settings-row-button" id="accountModelsManageButton" type="button" aria-label="Manage model routing">Manage</button>
+                <button class="settings-row-button icon-only" id="accountModelsManageButton" type="button" aria-label="Manage model routing">&rsaquo;</button>
               </div>
             </article>
 
@@ -265,16 +264,6 @@
                 <p id="accountSyncSummary">Checking sync status...</p>
               </div>
               <div class="settings-row-actions">
-                <div class="add-menu-wrap sync-menu-wrap">
-                  <button id="accountSyncMenuButton" type="button" aria-haspopup="true" aria-expanded="false">Sync now</button>
-                  <div class="action-menu sync-menu hidden" id="accountSyncMenu">
-                    <button id="accountSyncAllButton" type="button">Sync All</button>
-                    <button class="secondary" id="accountSyncPostsButton" type="button">Sync Posts</button>
-                    <button class="secondary" id="accountSyncMetricsButton" type="button">Sync Engagement</button>
-                    <button class="secondary" id="accountRefreshTrendsButton" type="button">Sync Trends</button>
-                    <button class="secondary" id="accountRefreshPatternsButton" type="button">Sync Patterns</button>
-                  </div>
-                </div>
                 <button class="settings-row-button icon-only" id="accountSyncManageButton" type="button" aria-label="View sync details">&rsaquo;</button>
               </div>
             </article>
@@ -293,45 +282,64 @@
       </section>
     </main>
 
-    <aside class="account-detail-drawer hidden" id="accountDetailDrawer" aria-hidden="true" aria-labelledby="accountDetailTitle">
-      <div class="account-detail-header">
-        <div>
-          <h2 id="accountDetailTitle">Account details</h2>
-          <p id="accountDetailSubtitle">Manage account settings.</p>
-        </div>
-        <button class="icon-button" id="accountDetailCloseButton" type="button" aria-label="Close account details">x</button>
-      </div>
-      <div class="account-detail-panel hidden" data-account-panel="connections" id="accountConnectionsPanel">
-        <div class="connection-list" id="accountStatusGrid"></div>
-      </div>
-      <div class="account-detail-panel hidden" data-account-panel="models" id="accountModelsPanel">
-        <div class="settings-form">
-          <label>
-            Default model
-            <input id="accountModel" placeholder="anthropic/claude-sonnet-4.5">
-          </label>
-          <label>
-            Strategist model
-            <input id="accountStrategistModel" placeholder="optional">
-          </label>
-          <label>
-            Natural writer model
-            <input id="accountNaturalWriterModel" placeholder="optional">
-          </label>
-          <label>
-            Evaluator model
-            <input id="accountEvaluatorModel" placeholder="optional">
-          </label>
-          <div class="actions left">
-            <button id="saveAccountButton" type="button">Save Model Settings</button>
+    <aside class="account-detail-modal hidden" id="accountDetailDrawer" aria-hidden="true" aria-labelledby="accountDetailTitle">
+      <div class="account-detail-backdrop" id="accountDetailBackdrop"></div>
+      <div class="account-detail-card" role="dialog" aria-modal="true" aria-labelledby="accountDetailTitle">
+        <div class="account-detail-header">
+          <div>
+            <h2 id="accountDetailTitle">Account details</h2>
+            <p id="accountDetailSubtitle">Manage account settings.</p>
           </div>
+          <button class="icon-button" id="accountDetailCloseButton" type="button" aria-label="Close account details">x</button>
         </div>
-      </div>
-      <div class="account-detail-panel hidden" data-account-panel="sync" id="accountSyncPanel">
-        <div class="sync-table" id="accountSyncGrid"></div>
-      </div>
-      <div class="account-detail-panel hidden" data-account-panel="profile" id="accountProfilePanel">
-        <div class="account-security" id="accountSecurityBlock"></div>
+
+        <section class="account-detail-panel hidden" data-account-panel="connections" id="accountConnectionsPanel">
+          <div class="connection-list" id="accountStatusGrid"></div>
+        </section>
+
+        <section class="account-detail-panel hidden" data-account-panel="models" id="accountModelsPanel">
+          <div class="settings-form">
+            <label>
+              Default model
+              <input id="accountModel" placeholder="anthropic/claude-sonnet-4.5">
+            </label>
+            <label>
+              Strategist model
+              <input id="accountStrategistModel" placeholder="optional">
+            </label>
+            <label>
+              Natural writer model
+              <input id="accountNaturalWriterModel" placeholder="optional">
+            </label>
+            <label>
+              Evaluator model
+              <input id="accountEvaluatorModel" placeholder="optional">
+            </label>
+            <div class="actions left">
+              <button id="saveAccountButton" type="button">Save Model Settings</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="account-detail-panel hidden" data-account-panel="sync" id="accountSyncPanel">
+          <div class="account-detail-actions">
+            <div class="add-menu-wrap sync-menu-wrap">
+              <button id="accountSyncMenuButton" type="button" aria-haspopup="true" aria-expanded="false">Sync now</button>
+              <div class="action-menu sync-menu hidden" id="accountSyncMenu">
+                <button id="accountSyncAllButton" type="button">Sync All</button>
+                <button class="secondary" id="accountSyncPostsButton" type="button">Sync Posts</button>
+                <button class="secondary" id="accountSyncMetricsButton" type="button">Sync Engagement</button>
+                <button class="secondary" id="accountRefreshTrendsButton" type="button">Sync Trends</button>
+                <button class="secondary" id="accountRefreshPatternsButton" type="button">Sync Patterns</button>
+              </div>
+            </div>
+          </div>
+          <div class="sync-table" id="accountSyncGrid"></div>
+        </section>
+
+        <section class="account-detail-panel hidden" data-account-panel="profile" id="accountProfilePanel">
+          <div class="account-security" id="accountSecurityBlock"></div>
+        </section>
       </div>
     </aside>
 
@@ -546,6 +554,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260627-create-post-field-combos"></script>
+    <script src="/static/app.js?v=20260627-account-modal"></script>
   </body>
 </html>

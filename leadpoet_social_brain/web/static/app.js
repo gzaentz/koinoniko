@@ -2007,8 +2007,6 @@ function renderAccount() {
   const connectionEntries = accountConnectionEntries(connections);
   const connectedCount = connectionEntries.filter(([, connection]) => connectionStatus(connection) === "connected").length;
   $("accountConnectionsSummary").textContent = `${connectedCount} connected`;
-  $("accountConnectionsPill").textContent = connectedCount === connectionEntries.length ? "Connected" : `${connectedCount}/${connectionEntries.length}`;
-  $("accountConnectionsPill").className = `status-badge ${connectedCount === connectionEntries.length ? "connected" : "not_connected"}`;
   $("accountStatusGrid").innerHTML = connectionEntries.map(([key, connection]) => connectionRow(key, connection)).join("");
   $("accountSyncGrid").innerHTML = [
     syncRow("Last X post sync", sync.x_posts_sync, "New posts imported from X"),
@@ -2343,6 +2341,7 @@ function openAccountDetailDrawer(panel = "connections") {
 }
 
 function closeAccountDetailDrawer() {
+  closeAccountSyncMenu();
   state.accountDetail.open = false;
   renderAccountDetailDrawer();
 }
@@ -2755,6 +2754,7 @@ function setup() {
     openAccountDetailDrawer("sync");
   });
   $("accountDetailCloseButton").addEventListener("click", closeAccountDetailDrawer);
+  $("accountDetailBackdrop").addEventListener("click", closeAccountDetailDrawer);
   $("accountSyncMenuButton").addEventListener("click", toggleAccountSyncMenu);
   $("accountSyncMenu").addEventListener("click", (event) => event.stopPropagation());
   document.addEventListener("click", closePostFieldEditor);

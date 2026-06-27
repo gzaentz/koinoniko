@@ -1016,7 +1016,8 @@ main {
 }
 
 .account-hub {
-  max-width: 980px;
+  width: 100%;
+  max-width: none;
 }
 
 .account-settings-list {
@@ -1176,15 +1177,28 @@ main {
   border-radius: 8px;
 }
 
-.account-detail-drawer {
+.account-detail-modal {
   position: fixed;
-  top: 18px;
-  right: 18px;
-  bottom: 74px;
-  z-index: 23;
+  inset: 0;
+  z-index: 28;
   display: grid;
-  grid-template-rows: auto 1fr;
-  width: min(480px, calc(100vw - 36px));
+  place-items: center;
+  padding: 32px;
+}
+
+.account-detail-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.account-detail-card {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(920px, calc(100vw - 64px));
+  max-height: min(760px, calc(100vh - 64px));
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -1208,12 +1222,22 @@ main {
 
 .account-detail-panel {
   overflow: auto;
-  padding: 16px;
+  padding: 24px;
 }
 
-.account-detail-drawer .settings-form {
+.account-detail-card .settings-form {
   grid-template-columns: 1fr;
   gap: 14px;
+}
+
+.account-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+.account-detail-actions .sync-menu-wrap {
+  width: 168px;
 }
 
 .voice-layout {
@@ -2147,9 +2171,13 @@ main {
     height: 40px;
   }
 
-  .account-detail-drawer {
-    inset: 10px 10px 70px;
-    width: auto;
+  .account-detail-modal {
+    padding: 10px;
+  }
+
+  .account-detail-card {
+    width: 100%;
+    max-height: calc(100vh - 20px);
   }
 
   .assistant-drawer {
