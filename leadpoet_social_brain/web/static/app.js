@@ -705,7 +705,6 @@ function postFieldOptionRows(id, field, query, filterOptions, context = "row") {
 }
 
 function postFieldOptionRow(id, field, option, context = "row") {
-  const subtitle = option.label === option.value ? "" : option.value;
   return `
     <button
       class="field-combo-option"
@@ -715,7 +714,6 @@ function postFieldOptionRow(id, field, option, context = "row") {
       onclick="choosePostFieldOption(event, ${escapeAttr(jsArg(id))}, ${escapeAttr(jsArg(field))}, ${escapeAttr(jsArg(option.value))}, ${escapeAttr(jsArg(context))})"
     >
       <strong>${escapeHtml(option.label)}</strong>
-      ${subtitle ? `<span>${escapeHtml(subtitle)}</span>` : ""}
     </button>
   `;
 }
