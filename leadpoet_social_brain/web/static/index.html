@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-ask-koinoniko-expand">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-create-post-field-combos">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -236,77 +236,106 @@
       </section>
 
       <section class="view" id="accountView">
-        <div class="account-layout">
-          <section class="panel account-section">
-            <div class="panel-header">
+        <div class="account-hub">
+          <section class="account-settings-list" aria-label="Account settings">
+            <article class="settings-row" id="accountConnectionsRow" role="button" tabindex="0" aria-controls="accountDetailDrawer">
               <div>
                 <h2>Connections</h2>
+                <p id="accountConnectionsSummary">Loading connections.</p>
               </div>
-            </div>
-            <div class="connection-list" id="accountStatusGrid"></div>
-          </section>
+              <div class="settings-row-actions">
+                <span id="accountConnectionsPill" class="status-badge">Loading</span>
+                <button class="settings-row-button" id="accountConnectionsManageButton" type="button" aria-label="Manage connections">Manage</button>
+              </div>
+            </article>
 
-          <section class="panel account-section">
-            <div class="panel-header">
-              <div>
-                <h2>Sync</h2>
-              </div>
-            </div>
-            <div class="sync-actions">
-              <div class="add-menu-wrap sync-menu-wrap">
-                <button id="accountSyncMenuButton" type="button" aria-haspopup="true" aria-expanded="false">Sync</button>
-                <div class="action-menu sync-menu hidden" id="accountSyncMenu">
-                  <button id="accountSyncAllButton" type="button">Sync All</button>
-                  <button class="secondary" id="accountSyncPostsButton" type="button">Sync Posts</button>
-                  <button class="secondary" id="accountSyncMetricsButton" type="button">Sync Engagement</button>
-                  <button class="secondary" id="accountRefreshTrendsButton" type="button">Sync Trends</button>
-                  <button class="secondary" id="accountRefreshPatternsButton" type="button">Sync Patterns</button>
-                </div>
-              </div>
-            </div>
-            <div class="sync-table" id="accountSyncGrid"></div>
-          </section>
-
-          <section class="panel account-section account-model-section">
-            <div class="panel-header">
+            <article class="settings-row" id="accountModelsRow" role="button" tabindex="0" aria-controls="accountDetailDrawer">
               <div>
                 <h2>Model Routing</h2>
+                <p id="accountModelSummary">Loading model routing.</p>
               </div>
-            </div>
-            <div class="settings-form">
-              <label>
-                Default model
-                <input id="accountModel" placeholder="anthropic/claude-sonnet-4.5">
-              </label>
-              <label>
-                Strategist model
-                <input id="accountStrategistModel" placeholder="optional">
-              </label>
-              <label>
-                Natural writer model
-                <input id="accountNaturalWriterModel" placeholder="optional">
-              </label>
-              <label>
-                Evaluator model
-                <input id="accountEvaluatorModel" placeholder="optional">
-              </label>
-              <div class="actions left">
-                <button id="saveAccountButton">Save Model Settings</button>
-              </div>
-            </div>
-          </section>
+              <button class="settings-row-button" id="accountModelsManageButton" type="button" aria-label="Manage model routing">Manage</button>
+            </article>
 
-          <section class="panel account-section account-security-section">
-            <div class="panel-header">
+            <article class="settings-row settings-row-sync" id="accountSyncRow" role="button" tabindex="0" aria-controls="accountDetailDrawer">
+              <div>
+                <h2>Sync</h2>
+                <p id="accountSyncSummary">Loading sync status.</p>
+              </div>
+              <div class="settings-row-actions">
+                <div class="add-menu-wrap sync-menu-wrap">
+                  <button id="accountSyncMenuButton" type="button" aria-haspopup="true" aria-expanded="false">Sync now</button>
+                  <div class="action-menu sync-menu hidden" id="accountSyncMenu">
+                    <button id="accountSyncAllButton" type="button">Sync All</button>
+                    <button class="secondary" id="accountSyncPostsButton" type="button">Sync Posts</button>
+                    <button class="secondary" id="accountSyncMetricsButton" type="button">Sync Engagement</button>
+                    <button class="secondary" id="accountRefreshTrendsButton" type="button">Sync Trends</button>
+                    <button class="secondary" id="accountRefreshPatternsButton" type="button">Sync Patterns</button>
+                  </div>
+                </div>
+                <button class="settings-row-button icon-only" id="accountSyncManageButton" type="button" aria-label="View sync details">›</button>
+              </div>
+            </article>
+
+            <article class="settings-row settings-row-account" id="accountProfileRow" role="button" tabindex="0" aria-controls="accountDetailDrawer">
               <div>
                 <h2>Account</h2>
+                <p id="accountUserSummary">Signed in.</p>
               </div>
-            </div>
-            <div class="account-security" id="accountSecurityBlock"></div>
+              <form method="post" action="/logout">
+                <button class="secondary subtle-button" type="submit">Log out</button>
+              </form>
+            </article>
           </section>
         </div>
       </section>
     </main>
+
+    <aside class="account-detail-drawer hidden" id="accountDetailDrawer" aria-hidden="true" aria-label="Account details">
+      <div class="account-detail-header">
+        <div>
+          <h2 id="accountDetailTitle">Account</h2>
+          <p id="accountDetailSubtitle">Manage account settings.</p>
+        </div>
+        <button class="icon-button" id="accountDetailCloseButton" type="button" aria-label="Close account details">x</button>
+      </div>
+
+      <section class="account-detail-panel" id="accountConnectionsPanel" data-account-panel="connections">
+        <div class="connection-list" id="accountStatusGrid"></div>
+      </section>
+
+      <section class="account-detail-panel" id="accountModelsPanel" data-account-panel="models">
+        <div class="settings-form">
+          <label>
+            Default model
+            <input id="accountModel" placeholder="anthropic/claude-sonnet-4.5">
+          </label>
+          <label>
+            Strategist model
+            <input id="accountStrategistModel" placeholder="optional">
+          </label>
+          <label>
+            Natural writer model
+            <input id="accountNaturalWriterModel" placeholder="optional">
+          </label>
+          <label>
+            Evaluator model
+            <input id="accountEvaluatorModel" placeholder="optional">
+          </label>
+          <div class="actions left">
+            <button id="saveAccountButton">Save Model Settings</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="account-detail-panel" id="accountSyncPanel" data-account-panel="sync">
+        <div class="sync-table" id="accountSyncGrid"></div>
+      </section>
+
+      <section class="account-detail-panel" id="accountProfilePanel" data-account-panel="profile">
+        <div class="account-security" id="accountSecurityBlock"></div>
+      </section>
+    </aside>
 
     <section class="modal hidden" id="postModal" aria-hidden="true">
       <div class="modal-backdrop" data-close-modal="postModal"></div>
@@ -364,8 +393,34 @@
           <textarea id="createPostInstruction" rows="4" required placeholder="Write about why sales AI needs buyer timing, not just more generated emails."></textarea>
         </label>
         <div class="form-grid">
-          <label>Topic<input id="createPostTopic" value="Leadpoet"></label>
-          <label>Post type<input id="createPostType" value="founder_insight"></label>
+          <label>Topic
+            <div class="field-combo create-post-field-combo" data-create-post-field="topic">
+              <input
+                id="createPostTopic"
+                class="field-combo-input"
+                value="Leadpoet"
+                autocomplete="off"
+                role="combobox"
+                aria-expanded="false"
+                aria-controls="createPostTopicMenu"
+              >
+              <div class="field-combo-menu hidden" id="createPostTopicMenu" role="listbox"></div>
+            </div>
+          </label>
+          <label>Post type
+            <div class="field-combo create-post-field-combo" data-create-post-field="post_type">
+              <input
+                id="createPostType"
+                class="field-combo-input"
+                value="founder_insight"
+                autocomplete="off"
+                role="combobox"
+                aria-expanded="false"
+                aria-controls="createPostTypeMenu"
+              >
+              <div class="field-combo-menu hidden" id="createPostTypeMenu" role="listbox"></div>
+            </div>
+          </label>
           <label>Quality
             <select id="createPostQuality">
               <option value="standard">Standard</option>
@@ -489,6 +544,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260627-ask-koinoniko-expand"></script>
+    <script src="/static/app.js?v=20260627-create-post-field-combos"></script>
   </body>
 </html>

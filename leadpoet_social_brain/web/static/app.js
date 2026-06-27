@@ -37,6 +37,10 @@ const state = {
     loading: false,
     conversationId: "",
   },
+  accountDetail: {
+    open: false,
+    panel: "connections",
+  },
 };
 
 const DEFAULT_TOPIC_OPTIONS = [
@@ -209,6 +213,7 @@ function jsArg(value) {
 
 function setView(view) {
   state.view = view;
+  if (view !== "account") closeAccountDetailDrawer();
   document.querySelectorAll(".view").forEach((node) => node.classList.remove("active"));
   document.querySelectorAll(".nav-button[data-view]").forEach((node) => {
     node.classList.toggle("active", node.dataset.view === view);
@@ -724,6 +729,132 @@ function postFieldOptions(field) {
     value,
     label: field === "topic" ? topicLabel(value) : label(value),
   }));
+}
+
+function createPostFieldInputId(field) {
+  return field === "topic" ? "createPostTopic" : "createPostType";
+}
+
+function createPostFieldMenuId(field) {
+  return field === "topic" ? "createPostTopicMenu" : "createPostTypeMenu";
+}
+
+function createPostFieldName(field) {
+  return field === "topic" ? "topic" : "post type";
+}
+
+function createPostFieldOptionRows(field, query, filterOptions) {
+  const typed = String(query || "").trim();
+  const normalizedQuery = typed.toLowerCase();
+  const options = postFieldOptions(field).filter((option) => {
+    if (!filterOptions || !normalizedQuery) return true;
+    return option.value.toLowerCase().includes(normalizedQuery) || option.label.toLowerCase().includes(normalizedQuery);
+  });
+  const rows = options.map((option) => `
+    <button
+      class="field-combo-option"
+      type="button"
+      role="option"
+      onmousedown="event.preventDefault()"
+      onclick="chooseCreatePostFieldOption(event, ${escapeAttr(jsArg(field))}, ${escapeAttr(jsArg(option.value))})"
+    >
+      <strong>${escapeHtml(option.label)}</strong>
+    </button>
+  `);
+  if (typed) {
+    rows.push(`
+      <button
+        class="field-combo-option create-option"
+        type="button"
+        role="option"
+        onmousedown="event.preventDefault()"
+        onclick="chooseCreatePostFieldOption(event, ${escapeAttr(jsArg(field))}, ${escapeAttr(jsArg(typed))})"
+      >
+        <strong>Use "${escapeHtml(typed)}"</strong>
+        <span>Use exact text</span>
+      </button>
+    `);
+  }
+  if (!rows.length) {
+    return `<div class="field-combo-empty">Type to create a new ${createPostFieldName(field)}.</div>`;
+  }
+  return rows.join("");
+}
+
+function renderCreatePostFieldMenu(field, filterOptions = false) {
+  const input = $(createPostFieldInputId(field));
+  const menu = $(createPostFieldMenuId(field));
+  if (!input || !menu) return;
+  menu.innerHTML = createPostFieldOptionRows(field, input.value, filterOptions);
+}
+
+function openCreatePostFieldMenu(field, filterOptions = false) {
+  renderCreatePostFieldMenu(field, filterOptions);
+  const input = $(createPostFieldInputId(field));
+  const menu = $(createPostFieldMenuId(field));
+  if (!input || !menu) return;
+  menu.classList.remove("hidden");
+  input.setAttribute("aria-expanded", "true");
+}
+
+function closeCreatePostFieldMenus() {
+  ["topic", "post_type"].forEach((field) => {
+    const input = $(createPostFieldInputId(field));
+    const menu = $(createPostFieldMenuId(field));
+    if (menu) menu.classList.add("hidden");
+    if (input) input.setAttribute("aria-expanded", "false");
+  });
+}
+
+function setCreatePostFieldValue(field, rawValue) {
+  const value = String(rawValue || "").trim();
+  if (!value) {
+    showMessage(field === "topic" ? "Topic is required." : "Post type is required.", true);
+    return;
+  }
+  $(createPostFieldInputId(field)).value = value;
+  closeCreatePostFieldMenus();
+}
+
+window.chooseCreatePostFieldOption = (event, field, value) => {
+  event.preventDefault();
+  event.stopPropagation();
+  setCreatePostFieldValue(field, value);
+};
+
+function updateCreatePostFieldQuery(event, field) {
+  event.stopPropagation();
+  openCreatePostFieldMenu(field, true);
+}
+
+function handleCreatePostFieldKeydown(event, field) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    closeCreatePostFieldMenus();
+    return;
+  }
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  event.stopPropagation();
+  setCreatePostFieldValue(field, event.currentTarget.value);
+}
+
+function setupCreatePostFieldCombo(field) {
+  const input = $(createPostFieldInputId(field));
+  const combo = document.querySelector(`[data-create-post-field="${cssAttr(field)}"]`);
+  if (!input || !combo) return;
+  combo.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openCreatePostFieldMenu(field, false);
+    if (event.target !== input) input.focus();
+  });
+  input.addEventListener("focus", (event) => {
+    event.stopPropagation();
+    openCreatePostFieldMenu(field, false);
+  });
+  input.addEventListener("input", (event) => updateCreatePostFieldQuery(event, field));
+  input.addEventListener("keydown", (event) => handleCreatePostFieldKeydown(event, field));
 }
 
 function fieldMenuId(id, field, context = "row") {
@@ -1873,22 +2004,17 @@ function renderAccount() {
   const syncStatus = account.sync_status || {};
   const stats = account.stats || {};
   const connections = account.connections || status.connections || fallbackConnections(status);
-  $("accountStatusGrid").innerHTML = [
-    connectionRow("provider", connections.provider),
-    connectionRow("openrouter", connections.openrouter),
-    connectionRow("x_read", connections.x_read),
-    connectionRow("x_write", connections.x_write),
-    connectionRow("scrapingdog", connections.scrapingdog),
-    connectionRow("daily_sync", connections.daily_sync),
-  ].join("");
+  const connectionEntries = accountConnectionEntries(connections);
+  const connectedCount = connectionEntries.filter(([, connection]) => connectionStatus(connection) === "connected").length;
+  $("accountConnectionsSummary").textContent = `${connectedCount} connected`;
+  $("accountConnectionsPill").textContent = connectedCount === connectionEntries.length ? "Connected" : `${connectedCount}/${connectionEntries.length}`;
+  $("accountConnectionsPill").className = `status-badge ${connectedCount === connectionEntries.length ? "connected" : "not_connected"}`;
+  $("accountStatusGrid").innerHTML = connectionEntries.map(([key, connection]) => connectionRow(key, connection)).join("");
   $("accountSyncGrid").innerHTML = [
     syncRow("Last X post sync", sync.x_posts_sync, "New posts imported from X"),
     syncRow("Last X metrics sync", sync.x_metrics_sync, "Fresh public metric snapshots"),
     syncRow("Last trend refresh", sync.trends_sync, "Daily and weekly trend context"),
     syncRow("Last pattern refresh", sync.patterns_sync, "Reusable post mechanics from Pattern Scout"),
-    syncPlainRow("Total X posts stored", String(stats.total_x_posts_stored || 0), "Stored authored X posts"),
-    syncPlainRow("Latest imported X post", stats.latest_imported_x_post_date ? formatDateTime(stats.latest_imported_x_post_date) : "None yet", "Newest stored X post"),
-    syncPlainRow("Latest sync error", syncStatus.latest_error || latestSyncError(sync) || "None", "Most recent sync issue"),
   ].join("");
   const models = settings.models || {};
   const effectiveModels = settings.effective_models || {};
@@ -1897,7 +2023,10 @@ function renderAccount() {
   setModelInput("accountStrategistModel", models.strategist, effectiveModels.strategist || defaultModel);
   setModelInput("accountNaturalWriterModel", models.natural_writer, effectiveModels.natural_writer || defaultModel);
   setModelInput("accountEvaluatorModel", models.evaluator, effectiveModels.evaluator || defaultModel);
+  $("accountModelSummary").textContent = modelRoutingSummary(models, effectiveModels, defaultModel);
+  $("accountSyncSummary").textContent = syncSummary(sync, syncStatus, stats);
   const security = account.security || {};
+  $("accountUserSummary").textContent = `Signed in as ${security.username || "configured user"}`;
   $("accountSecurityBlock").innerHTML = `
     <div class="security-row">
       <div>
@@ -1908,7 +2037,6 @@ function renderAccount() {
         <button class="secondary" type="submit">Log Out</button>
       </form>
     </div>
-    <p class="muted">Change password from the CLI with <code>set-web-login</code>.</p>
   `;
   const trendsButton = $("accountRefreshTrendsButton");
   const patternsButton = $("accountRefreshPatternsButton");
@@ -1926,6 +2054,52 @@ function renderAccount() {
   patternsButton.title = patternsButton.disabled ? "Connect ScrapingDog and the LLM provider to refresh patterns." : "Refresh Pattern Scout.";
   syncMenuButton.disabled = !xReadConfigured && trendsButton.disabled && patternsButton.disabled;
   syncMenuButton.title = syncMenuButton.disabled ? "Connect at least one sync source to run syncs." : "Choose a sync action.";
+  renderAccountDetailDrawer();
+}
+
+function accountConnectionEntries(connections) {
+  return [
+    ["provider", connections.provider],
+    ["openrouter", connections.openrouter],
+    ["x_read", connections.x_read],
+    ["x_write", connections.x_write],
+    ["scrapingdog", connections.scrapingdog],
+    ["daily_sync", connections.daily_sync],
+  ];
+}
+
+function modelRoutingSummary(models, effectiveModels, defaultModel) {
+  const fallback = defaultModel || effectiveModels.default || models.default || "Unset";
+  return [
+    `Default: ${modelDisplayName(effectiveModels.default || models.default || fallback)}`,
+    `Strategist: ${modelDisplayName(effectiveModels.strategist || models.strategist || fallback)}`,
+  ].join(" · ");
+}
+
+function modelDisplayName(value) {
+  const model = String(value || "").trim();
+  if (!model) return "Unset";
+  return label(model.split("/").pop())
+    .replace(/\bAi\b/g, "AI")
+    .replace(/\bGpt\b/g, "GPT")
+    .replace(/\bLlm\b/g, "LLM");
+}
+
+function syncSummary(sync, syncStatus, stats) {
+  const postSync = sync?.x_posts_sync?.last_completed_at || "";
+  const metricSync = sync?.x_metrics_sync?.last_completed_at || "";
+  const latest = latestDate([postSync, metricSync]);
+  if (latest) return `Posts and metrics last synced ${formatDateTime(latest)}.`;
+  if (stats?.latest_imported_x_post_date) return `Latest imported post ${formatDateTime(stats.latest_imported_x_post_date)}.`;
+  const error = syncStatus?.latest_error || latestSyncError(sync);
+  if (error) return "Sync needs attention.";
+  return "Posts and metrics have not synced yet.";
+}
+
+function latestDate(values) {
+  return values
+    .filter(Boolean)
+    .sort((first, second) => Date.parse(second) - Date.parse(first))[0] || "";
 }
 
 function setModelInput(id, savedValue, effectiveValue) {
@@ -2029,18 +2203,6 @@ function syncRow(title, sync, description = "") {
         <p>${escapeHtml(description)}</p>
       </div>
       <span>${escapeHtml(detail)}</span>
-    </article>
-  `;
-}
-
-function syncPlainRow(title, value, description = "") {
-  return `
-    <article class="sync-row">
-      <div>
-        <strong>${escapeHtml(title)}</strong>
-        <p>${escapeHtml(description)}</p>
-      </div>
-      <span>${escapeHtml(value)}</span>
     </article>
   `;
 }
@@ -2153,6 +2315,62 @@ function runAccountSyncMenuAction(event, loadingText, work) {
   event.stopPropagation();
   closeAccountSyncMenu();
   runButton($("accountSyncMenuButton"), loadingText, work);
+}
+
+const ACCOUNT_DETAIL_CONTENT = {
+  connections: {
+    title: "Connections",
+    subtitle: "Service status and what each integration powers.",
+  },
+  models: {
+    title: "Model Routing",
+    subtitle: "Choose the models used for strategy, writing, and evaluation.",
+  },
+  sync: {
+    title: "Sync",
+    subtitle: "Last successful runs for imports, metrics, trends, and patterns.",
+  },
+  profile: {
+    title: "Account",
+    subtitle: "Current session and sign-out controls.",
+  },
+};
+
+function openAccountDetailDrawer(panel = "connections") {
+  state.accountDetail = { open: true, panel };
+  renderAccountDetailDrawer();
+  window.setTimeout(() => $("accountDetailCloseButton")?.focus(), 0);
+}
+
+function closeAccountDetailDrawer() {
+  state.accountDetail.open = false;
+  renderAccountDetailDrawer();
+}
+
+function renderAccountDetailDrawer() {
+  const drawer = $("accountDetailDrawer");
+  if (!drawer) return;
+  const activePanel = state.accountDetail.panel || "connections";
+  const content = ACCOUNT_DETAIL_CONTENT[activePanel] || ACCOUNT_DETAIL_CONTENT.connections;
+  drawer.classList.toggle("hidden", !state.accountDetail.open);
+  drawer.setAttribute("aria-hidden", state.accountDetail.open ? "false" : "true");
+  $("accountDetailTitle").textContent = content.title;
+  $("accountDetailSubtitle").textContent = content.subtitle;
+  document.querySelectorAll("[data-account-panel]").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.accountPanel !== activePanel);
+  });
+}
+
+function openAccountDetailFromRow(event, panel) {
+  if (event.target.closest("button, a, input, select, textarea, form, .action-menu")) return;
+  openAccountDetailDrawer(panel);
+}
+
+function handleAccountDetailRowKeydown(event, panel) {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  if (event.target !== event.currentTarget) return;
+  event.preventDefault();
+  openAccountDetailDrawer(panel);
 }
 
 function setAssistantOpen(open) {
@@ -2512,9 +2730,34 @@ function setup() {
     openModal("planModal");
   });
   document.addEventListener("click", closeReviewAddMenu);
+  [
+    ["accountConnectionsRow", "connections"],
+    ["accountModelsRow", "models"],
+    ["accountSyncRow", "sync"],
+    ["accountProfileRow", "profile"],
+  ].forEach(([id, panel]) => {
+    $(id).addEventListener("click", (event) => openAccountDetailFromRow(event, panel));
+    $(id).addEventListener("keydown", (event) => handleAccountDetailRowKeydown(event, panel));
+  });
+  $("accountConnectionsManageButton").addEventListener("click", (event) => {
+    event.stopPropagation();
+    openAccountDetailDrawer("connections");
+  });
+  $("accountModelsManageButton").addEventListener("click", (event) => {
+    event.stopPropagation();
+    openAccountDetailDrawer("models");
+  });
+  $("accountSyncManageButton").addEventListener("click", (event) => {
+    event.stopPropagation();
+    openAccountDetailDrawer("sync");
+  });
+  $("accountDetailCloseButton").addEventListener("click", closeAccountDetailDrawer);
   $("accountSyncMenuButton").addEventListener("click", toggleAccountSyncMenu);
   $("accountSyncMenu").addEventListener("click", (event) => event.stopPropagation());
   document.addEventListener("click", closePostFieldEditor);
+  setupCreatePostFieldCombo("topic");
+  setupCreatePostFieldCombo("post_type");
+  document.addEventListener("click", closeCreatePostFieldMenus);
   $("generatePostButton").addEventListener("click", (event) => runButton(event.currentTarget, "Generating...", createPost));
   $("planWeekButton").addEventListener("click", (event) => runButton(event.currentTarget, "Creating...", planWeek));
   $("trendDailyButton").addEventListener("click", () => {
