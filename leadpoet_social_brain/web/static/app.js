@@ -1947,7 +1947,6 @@ function renderVoiceCoverage() {
   const coverage = state.voice?.coverage || {};
   const topics = coverage.topics || [];
   const postTypes = coverage.post_types || [];
-  $("voiceCoverageRecommendation").textContent = coverage.recommendation || "Voice coverage looks balanced enough for now.";
   $("voiceCoverageGrid").innerHTML = (topics.length || postTypes.length)
     ? [
         voiceCoverageLine("Topics covered", topics),
