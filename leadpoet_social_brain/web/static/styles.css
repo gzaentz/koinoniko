@@ -1670,13 +1670,13 @@ main {
 
 .assistant-launcher-icon {
   display: block;
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   color: var(--white);
   fill: none;
   overflow: visible;
   stroke: currentColor;
-  stroke-width: 1.6;
+  stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -1709,7 +1709,7 @@ main {
 }
 
 .assistant-drawer.expanded {
-  width: min(50vw, calc(100vw - 36px));
+  width: min(760px, calc(100vw - 36px));
 }
 
 .assistant-header {
@@ -1728,6 +1728,42 @@ main {
 
 .assistant-expand-button {
   flex: 0 0 34px;
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
+  border-radius: 8px;
+  border-color: var(--line);
+  background: var(--white);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.assistant-expand-button:hover,
+.assistant-expand-button:focus-visible {
+  background: var(--soft);
+  outline: 0;
+}
+
+.assistant-expand-icon {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.assistant-expand-icon-close {
+  display: none;
+}
+
+.assistant-drawer.expanded .assistant-expand-icon-open {
+  display: none;
+}
+
+.assistant-drawer.expanded .assistant-expand-icon-close {
+  display: block;
 }
 
 .assistant-header h2 {

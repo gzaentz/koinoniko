@@ -2755,10 +2755,10 @@ function renderAssistantDrawer() {
   drawer.setAttribute("aria-hidden", state.assistant.open ? "false" : "true");
   launcher.setAttribute("aria-expanded", state.assistant.open ? "true" : "false");
   const expandButton = $("assistantExpandButton");
-  const expandLabel = state.assistant.expanded ? "Narrow Ask Koinoniko" : "Expand Ask Koinoniko";
+  const expandLabel = state.assistant.expanded ? "Compress Ask Koinoniko" : "Expand Ask Koinoniko";
   expandButton.setAttribute("aria-label", expandLabel);
+  expandButton.setAttribute("aria-expanded", state.assistant.expanded ? "true" : "false");
   expandButton.title = expandLabel;
-  expandButton.querySelector(".assistant-expand-icon").innerHTML = state.assistant.expanded ? "&#8250;" : "&#8249;";
   const starters = $("assistantStarterPrompts");
   starters.classList.toggle("hidden", !shouldShowAssistantStarters());
   if (shouldShowAssistantStarters()) {
