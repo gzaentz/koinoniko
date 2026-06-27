@@ -1874,7 +1874,6 @@ function renderVoice() {
   const voice = state.voice || {};
   const status = voice.status || {};
   $("voiceStatusLabel").textContent = status.label || "Loading";
-  $("voiceStatusDescription").textContent = status.description || "";
   $("voiceExampleCount").textContent = String(status.examples_count || 0);
   $("voiceLastUpdated").textContent = status.last_updated_at ? formatDateTime(status.last_updated_at) : "Never";
   $("updateVoiceButton").disabled = status.status === "needs_examples";

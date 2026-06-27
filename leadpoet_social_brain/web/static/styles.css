@@ -1267,18 +1267,36 @@ main {
 
 .voice-status-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.5fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 18px;
   align-items: center;
+}
+
+.voice-status-main {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
 }
 
 .voice-status-row {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 8px;
   flex-wrap: wrap;
   color: var(--muted);
   font-size: 13px;
+}
+
+.voice-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: var(--soft);
+  white-space: nowrap;
 }
 
 .voice-status-row strong {

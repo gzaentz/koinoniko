@@ -185,15 +185,13 @@
       <section class="view" id="voiceView">
         <div class="voice-layout">
           <section class="panel voice-status-panel">
-            <div>
-              <span class="eyebrow">Koinoniko Voice</span>
+            <div class="voice-status-main">
               <h2>Voice Status</h2>
-              <p id="voiceStatusDescription" class="muted">Loading Voice status.</p>
-            </div>
-            <div class="voice-status-row">
-              <span class="status-badge" id="voiceStatusLabel">Loading</span>
-              <span><strong id="voiceExampleCount">0</strong> Voice Examples</span>
-              <span>Last updated <strong id="voiceLastUpdated">Never</strong></span>
+              <div class="voice-status-row">
+                <span class="status-badge" id="voiceStatusLabel">Loading</span>
+                <span class="voice-status-chip"><strong id="voiceExampleCount">0</strong> Voice Examples</span>
+                <span class="voice-status-chip">Updated <strong id="voiceLastUpdated">Never</strong></span>
+              </div>
             </div>
             <div class="actions left">
               <button id="updateVoiceButton">Update Voice</button>
