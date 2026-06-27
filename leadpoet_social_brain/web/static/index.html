@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-ask-koinoniko">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-ask-koinoniko-expand">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -474,7 +474,10 @@
           <h2>Ask Koinoniko</h2>
           <p>Ask about posts, trends, Voice, and what is working.</p>
         </div>
-        <button class="icon-button" id="assistantCloseButton" type="button" aria-label="Close Ask Koinoniko">x</button>
+        <div class="assistant-header-actions">
+          <button class="secondary assistant-expand-button" id="assistantExpandButton" type="button" aria-label="Expand Ask Koinoniko">Expand</button>
+          <button class="icon-button" id="assistantCloseButton" type="button" aria-label="Close Ask Koinoniko">x</button>
+        </div>
       </div>
       <div class="assistant-starters" id="assistantStarterPrompts"></div>
       <div class="assistant-messages" id="assistantMessages" aria-live="polite"></div>
@@ -486,6 +489,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260627-ask-koinoniko"></script>
+    <script src="/static/app.js?v=20260627-ask-koinoniko-expand"></script>
   </body>
 </html>

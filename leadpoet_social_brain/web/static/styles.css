@@ -1381,12 +1381,28 @@ main {
   overflow: hidden;
 }
 
+.assistant-drawer.expanded {
+  width: min(50vw, calc(100vw - 36px));
+}
+
 .assistant-header {
   display: flex;
   justify-content: space-between;
   gap: 18px;
   padding: 18px;
   border-bottom: 1px solid var(--line);
+}
+
+.assistant-header-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.assistant-expand-button {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 13px;
 }
 
 .assistant-header h2 {
@@ -1904,6 +1920,10 @@ main {
 
   .assistant-drawer {
     inset: 10px;
+    width: auto;
+  }
+
+  .assistant-drawer.expanded {
     width: auto;
   }
 

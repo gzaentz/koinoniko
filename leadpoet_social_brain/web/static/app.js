@@ -31,6 +31,7 @@ const state = {
   recentPostsSort: { key: "date", direction: "desc" },
   assistant: {
     open: false,
+    expanded: false,
     prompts: [],
     messages: [],
     loading: false,
@@ -2096,12 +2097,24 @@ function renderAssistantDrawer() {
   const launcher = $("assistantLauncher");
   if (!drawer || !launcher) return;
   drawer.classList.toggle("hidden", !state.assistant.open);
+  drawer.classList.toggle("expanded", state.assistant.expanded);
   drawer.setAttribute("aria-hidden", state.assistant.open ? "false" : "true");
   launcher.setAttribute("aria-expanded", state.assistant.open ? "true" : "false");
-  const prompts = state.assistant.prompts.length ? state.assistant.prompts : ASSISTANT_FALLBACK_STARTERS;
-  $("assistantStarterPrompts").innerHTML = prompts
-    .map((prompt) => `<button class="assistant-starter" type="button" data-prompt="${escapeAttr(prompt)}">${escapeHtml(prompt)}</button>`)
-    .join("");
+  $("assistantExpandButton").textContent = state.assistant.expanded ? "Narrow" : "Expand";
+  $("assistantExpandButton").setAttribute(
+    "aria-label",
+    state.assistant.expanded ? "Narrow Ask Koinoniko" : "Expand Ask Koinoniko"
+  );
+  const starters = $("assistantStarterPrompts");
+  starters.classList.toggle("hidden", !shouldShowAssistantStarters());
+  if (shouldShowAssistantStarters()) {
+    const prompts = state.assistant.prompts.length ? state.assistant.prompts : ASSISTANT_FALLBACK_STARTERS;
+    starters.innerHTML = prompts
+      .map((prompt) => `<button class="assistant-starter" type="button" data-prompt="${escapeAttr(prompt)}">${escapeHtml(prompt)}</button>`)
+      .join("");
+  } else {
+    starters.innerHTML = "";
+  }
   const messages = state.assistant.messages.map(assistantMessageHtml);
   if (state.assistant.loading) {
     messages.push(`<div class="assistant-message assistant"><span class="assistant-loading">Thinking...</span></div>`);
@@ -2113,10 +2126,19 @@ function renderAssistantDrawer() {
   scrollAssistantToBottom();
 }
 
+function shouldShowAssistantStarters() {
+  return state.assistant.open && state.assistant.messages.length === 0 && !state.assistant.loading;
+}
+
 async function loadAssistantStarterPrompts() {
   if (state.assistant.prompts.length) return;
   const payload = await api("/api/assistant/starter-prompts");
   state.assistant.prompts = (payload.items || []).filter(Boolean);
+  renderAssistantDrawer();
+}
+
+function toggleAssistantExpanded() {
+  state.assistant.expanded = !state.assistant.expanded;
   renderAssistantDrawer();
 }
 
@@ -2386,6 +2408,7 @@ function setup() {
   document.addEventListener("click", closeAccountSyncMenu);
   $("updateVoiceButton").addEventListener("click", (event) => runButton(event.currentTarget, "Updating...", updateVoice));
   $("assistantLauncher").addEventListener("click", () => setAssistantOpen(true));
+  $("assistantExpandButton").addEventListener("click", toggleAssistantExpanded);
   $("assistantCloseButton").addEventListener("click", () => setAssistantOpen(false));
   $("assistantStarterPrompts").addEventListener("click", (event) => {
     const button = event.target.closest("[data-prompt]");
