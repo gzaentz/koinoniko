@@ -150,6 +150,10 @@ def _group_named_pattern_performance(
                 influence.metadata.get("source") == "draft.selected_patterns"
                 and influence.metadata.get("source_field") == "pattern"
             )
+            or (
+                influence.metadata.get("source") == "draft.selected_viral_patterns"
+                and influence.metadata.get("source_field") in {None, "pattern"}
+            )
             or influence.metadata.get("source") is None
         )
     ]

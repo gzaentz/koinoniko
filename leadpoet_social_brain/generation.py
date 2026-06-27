@@ -4,7 +4,8 @@ import json
 import re
 
 from leadpoet_social_brain.context import ContextManager
-from leadpoet_social_brain.core.models import ContextBundle, DraftRequest, GeneratedDraft, TrendItem
+from leadpoet_social_brain.core.models import ContextBundle, DraftRequest, GeneratedDraft, TrendItem, ViralPattern
+from leadpoet_social_brain.pattern_scout import select_relevant_patterns
 from leadpoet_social_brain.platforms.x import get_x_adapter
 from leadpoet_social_brain.providers import DraftProvider, ModelRouting, generate_with_provider, resolve_model_routing
 from leadpoet_social_brain.skills import SkillAsset, generation_skills
@@ -40,6 +41,7 @@ class SocialBrainGenerator:
             post_type=request.post_type,
         )
         trends = self._trends_for(request)
+        patterns = self._patterns_for(request)
         skills = generation_skills(platform=request.platform, post_type=request.post_type)
         if not self.provider:
             raise ValueError(MISSING_PROVIDER_MESSAGE)
@@ -51,13 +53,14 @@ class SocialBrainGenerator:
                 bundle,
                 skills=skills,
                 trends=trends,
+                patterns=patterns,
                 max_chars=max_chars,
                 provider_name=provider_name,
                 model_routing=model_routing,
                 save=save,
             )
 
-        prompt = build_generation_prompt(request, bundle, skills=skills, trends=trends, max_chars=max_chars)
+        prompt = build_generation_prompt(request, bundle, skills=skills, trends=trends, patterns=patterns, max_chars=max_chars)
         raw_texts = generate_with_provider(
             self.provider,
             prompt,
@@ -76,13 +79,14 @@ class SocialBrainGenerator:
             draft = GeneratedDraft(
                 text=text,
                 request=request,
-                explanation=explain_influence(bundle, trends=trends),
-                influences=build_influence_labels(bundle, trends=trends),
+                explanation=explain_influence(bundle, trends=trends, patterns=patterns),
+                influences=build_influence_labels(bundle, trends=trends, patterns=patterns),
                 context_snapshot=build_context_snapshot(
                     request,
                     bundle,
                     skills=skills,
                     trends=trends,
+                    patterns=patterns,
                     quality_notes=quality_notes,
                     provider_name=provider_name,
                     quality_mode="standard",
@@ -102,6 +106,7 @@ class SocialBrainGenerator:
         *,
         skills: list[SkillAsset],
         trends: list[TrendItem],
+        patterns: list[ViralPattern],
         max_chars: int,
         provider_name: str,
         model_routing: ModelRouting,
@@ -109,7 +114,7 @@ class SocialBrainGenerator:
     ) -> list[GeneratedDraft]:
         assert self.provider is not None
         adapter = self._adapter_for(request.platform)
-        strategy_prompt = build_strategy_prompt(request, bundle, trends=trends)
+        strategy_prompt = build_strategy_prompt(request, bundle, trends=trends, patterns=patterns)
         strategy_raw = generate_with_provider(
             self.provider,
             strategy_prompt,
@@ -122,6 +127,7 @@ class SocialBrainGenerator:
             bundle,
             skills=skills,
             trends=trends,
+            patterns=patterns,
             strategy_summary=strategy_summary,
             max_chars=max_chars,
         )
@@ -154,13 +160,14 @@ class SocialBrainGenerator:
         draft = GeneratedDraft(
             text=text,
             request=request,
-            explanation=explain_influence(bundle, trends=trends),
-            influences=build_influence_labels(bundle, trends=trends),
+            explanation=explain_influence(bundle, trends=trends, patterns=patterns),
+            influences=build_influence_labels(bundle, trends=trends, patterns=patterns),
             context_snapshot=build_context_snapshot(
                 request,
                 bundle,
                 skills=skills,
                 trends=trends,
+                patterns=patterns,
                 quality_notes=notes,
                 provider_name=provider_name,
                 quality_mode="best_version",
@@ -188,8 +195,9 @@ class SocialBrainGenerator:
             post_type=request.post_type,
         )
         trends = self._trends_for(request)
+        patterns = self._patterns_for(request)
         skills = generation_skills(platform=request.platform, post_type=request.post_type)
-        return build_generation_prompt(request, bundle, skills=skills, trends=trends, max_chars=max_chars)
+        return build_generation_prompt(request, bundle, skills=skills, trends=trends, patterns=patterns, max_chars=max_chars)
 
     def _adapter_for(self, platform: str):
         if platform == "x":
@@ -206,6 +214,16 @@ class SocialBrainGenerator:
             return []
         return self.store.relevant_trends(topic=request.topic, angle=request.angle, limit=3)
 
+    def _patterns_for(self, request: DraftRequest) -> list[ViralPattern]:
+        if not request.use_patterns and not request.pattern_ids:
+            return []
+        return select_relevant_patterns(
+            self.store,
+            topic=request.topic,
+            pattern_ids=request.pattern_ids,
+            limit=3,
+        )
+
 
 def build_generation_prompt(
     request: DraftRequest,
@@ -213,6 +231,7 @@ def build_generation_prompt(
     *,
     skills: list[SkillAsset],
     trends: list[TrendItem],
+    patterns: list[ViralPattern],
     max_chars: int,
 ) -> str:
     skill_text = "\n\n".join(
@@ -229,9 +248,11 @@ def build_generation_prompt(
     if not examples_text:
         examples_text = "No examples yet. Lean on Leadpoet context and write naturally."
     trends_text = "\n\n".join(_format_trend(trend) for trend in trends)
+    patterns_text = "\n\n".join(_format_viral_pattern(pattern) for pattern in patterns)
     analytics = "\n".join(f"- {hint}" for hint in bundle.analytics_hints)
     analytics_section = f"\n\nUseful performance guidance:\n{analytics}" if analytics else ""
     trend_section = f"\n\nTimely market context:\n{trends_text}" if trends_text else ""
+    pattern_section = f"\n\nPattern mechanics to adapt:\n{patterns_text}" if patterns_text else ""
     return f"""Write {request.platform.upper()} posts for Leadpoet.
 
 Study these Gavin/Leadpoet examples first:
@@ -243,6 +264,7 @@ Leadpoet context:
 Koinoniko Voice:
 {voice or "- No Koinoniko Voice profile yet."}
 {trend_section}
+{pattern_section}
 {analytics_section}
 
 Request:
@@ -258,6 +280,9 @@ Request:
 Writing and review instructions:
 {skill_text or "- No skill files found. Use retrieved context and keep the post natural."}
 
+Priority order: Koinoniko Voice, Leadpoet context, current trend/topic, Pattern mechanics, then platform rules.
+Pattern safety: Use the structure, not the wording. Do not copy source post wording, claims, examples, or framing directly. If a Pattern conflicts with Voice, Voice wins.
+
 Return only draft post text variants, no commentary. Do not write a bland news summary. Make the post timely, specific, and founder-led."""
 
 
@@ -266,10 +291,12 @@ def build_strategy_prompt(
     bundle: ContextBundle,
     *,
     trends: list[TrendItem],
+    patterns: list[ViralPattern],
 ) -> str:
     context = "\n".join(f"- {section.kind}/{section.name}: {section.content}" for section in bundle.positioning_sections)
     examples_text = "\n\n".join(_format_example(post, bundle) for post in bundle.examples)
     trends_text = "\n\n".join(_format_trend(trend) for trend in trends)
+    patterns_text = "\n\n".join(_format_viral_pattern(pattern) for pattern in patterns)
     analytics = "\n".join(f"- {hint}" for hint in bundle.analytics_hints)
     return f"""You are helping Gavin decide the strongest X post angle for Leadpoet.
 
@@ -291,6 +318,9 @@ Gavin examples and worked-reason notes:
 Trend context:
 {trends_text or "No timely trends selected."}
 
+Pattern mechanics:
+{patterns_text or "No Pattern Scout examples selected."}
+
 Analytics hints:
 {analytics or "- No analytics hints available."}
 
@@ -304,6 +334,7 @@ def build_best_writer_prompt(
     *,
     skills: list[SkillAsset],
     trends: list[TrendItem],
+    patterns: list[ViralPattern],
     strategy_summary: dict[str, object],
     max_chars: int,
 ) -> str:
@@ -311,6 +342,7 @@ def build_best_writer_prompt(
     examples_text = "\n\n".join(_format_example(post, bundle) for post in bundle.examples)
     context = "\n".join(f"- {section.kind}/{section.name}: {section.content}" for section in bundle.positioning_sections)
     trends_text = "\n\n".join(_format_trend(trend) for trend in trends)
+    patterns_text = "\n\n".join(_format_viral_pattern(pattern) for pattern in patterns)
     analytics = "\n".join(f"- {hint}" for hint in bundle.analytics_hints)
     return f"""Write 3 X draft options for Gavin.
 
@@ -336,6 +368,9 @@ Leadpoet context:
 Trend context:
 {trends_text or "No timely trends selected."}
 
+Pattern mechanics:
+{patterns_text or "No Pattern Scout examples selected."}
+
 Performance hints:
 {analytics or "- No analytics hints available."}
 
@@ -343,6 +378,7 @@ Writing and review instructions:
 {skill_text}
 
 Avoid corporate thought leadership, generic hype, fake profundity, em dashes, overly symmetrical phrasing, LinkedIn-style moral lessons, and "not just X, but Y" framing.
+Use Pattern mechanics only as structure. Do not copy source post wording or make the post feel derivative. Make it specific to Gavin/Leadpoet.
 
 Return only draft post text variants. Separate variants with a line containing only ---."""
 
@@ -385,6 +421,7 @@ def build_context_snapshot(
     *,
     skills: list[SkillAsset],
     trends: list[TrendItem],
+    patterns: list[ViralPattern],
     quality_notes: str,
     provider_name: str,
     quality_mode: str,
@@ -437,6 +474,25 @@ def build_context_snapshot(
         ],
         "selected_examples": examples,
         "selected_patterns": _selected_pattern_refs(bundle),
+        "selected_viral_patterns": [
+            {
+                "id": pattern.id,
+                "pattern_name": pattern.pattern_name,
+                "category": pattern.category,
+                "topic": pattern.topic,
+                "source_url": pattern.source_url,
+                "source_author": pattern.source_author,
+                "source_summary": pattern.source_summary,
+                "hook_style": pattern.hook_style,
+                "structure": pattern.structure,
+                "pacing": pattern.pacing,
+                "tone": pattern.tone,
+                "formatting": pattern.formatting,
+                "why_it_worked": pattern.why_it_worked,
+                "adaptation_rule": pattern.adaptation_rule,
+            }
+            for pattern in patterns
+        ],
         "selected_context_sections": [
             {
                 "id": section.id,
@@ -507,12 +563,13 @@ def provider_name_for(provider: DraftProvider) -> str:
     return f"{provider_class.__module__}.{provider_class.__name__}"
 
 
-def build_influence_labels(bundle: ContextBundle, *, trends: list[TrendItem]) -> list[str]:
+def build_influence_labels(bundle: ContextBundle, *, trends: list[TrendItem], patterns: list[ViralPattern]) -> list[str]:
     labels: list[str] = []
     labels.extend(f"voice:{section.name}" for section in bundle.style_sections)
     labels.extend(f"context:{section.name}" for section in bundle.positioning_sections)
     labels.extend(f"example:{post.id}" for post in bundle.examples)
     labels.extend(f"pattern:{pattern['name']}" for pattern in _selected_pattern_refs(bundle))
+    labels.extend(f"pattern:{pattern.pattern_name}" for pattern in patterns if pattern.pattern_name)
     labels.extend(f"analytics:{hint}" for hint in bundle.analytics_hints)
     labels.extend(f"trend:{trend.id}" for trend in trends)
     return labels
@@ -570,12 +627,14 @@ def clean_generated_text(text: str, *, max_chars: int) -> str:
     return f"{trimmed}."
 
 
-def explain_influence(bundle: ContextBundle, *, trends: list[TrendItem]) -> str:
+def explain_influence(bundle: ContextBundle, *, trends: list[TrendItem], patterns: list[ViralPattern]) -> str:
     parts: list[str] = []
     if bundle.examples:
         parts.append(f"{len(bundle.examples)} high-performing X example(s)")
     if _selected_pattern_refs(bundle):
         parts.append("patterns observed in selected examples")
+    if patterns:
+        parts.append(f"{len(patterns)} Pattern Scout mechanic(s)")
     if bundle.positioning_sections:
         kinds = sorted({section.kind for section in bundle.positioning_sections})
         parts.append(f"Leadpoet context: {', '.join(kinds)}")
@@ -634,6 +693,24 @@ def _format_trend(trend: TrendItem) -> str:
     if trend.suggested_hooks:
         parts.extend(["", "Possible hooks:", trend.suggested_hooks])
     return "\n".join(parts)
+
+
+def _format_viral_pattern(pattern: ViralPattern) -> str:
+    return "\n".join(
+        [
+            "Pattern:",
+            pattern.pattern_name or "Observed pattern",
+            "",
+            "Structure:",
+            pattern.structure or pattern.source_summary or "A reusable post structure from a source example.",
+            "",
+            "Why it worked:",
+            pattern.why_it_worked or pattern.engagement_notes or "The structure created attention or made the point easier to remember.",
+            "",
+            "Adaptation rule:",
+            pattern.adaptation_rule or "Use the structure, not the wording.",
+        ]
+    )
 
 
 def _performance_summary(metrics) -> str:

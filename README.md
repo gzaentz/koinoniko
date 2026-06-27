@@ -32,8 +32,9 @@ Koinoniko currently supports:
 - editing, revising, approving, scheduling, and posting approved queue items
 - storing draft-to-post linkage and generation influences
 - refreshing AI, sales, and lead generation trends through ScrapingDog
+- storing optional Pattern Scout examples for reusable post mechanics
 - showing Account connection status without exposing secret values
-- running protected Railway Cron tasks for post sync, metrics sync, and trend refresh
+- running protected Railway Cron tasks for post sync, metrics sync, trend refresh, and pattern refresh
 
 Generation requires a provider. There is no demo or template fallback.
 
@@ -61,6 +62,7 @@ leadpoet_social_brain/
   openrouter_provider.py      Built-in OpenRouter provider
   analytics.py                Transparent performance summaries
   trend_scout.py              Web trend refresh and ScrapingDog integration
+  pattern_scout.py            Optional Pattern Scout intake and refresh
   cli.py                      Command-line interface
   web/app.py                  Login-gated HTTP API and static UI server
   web/static/                 Single-page web UI
@@ -177,7 +179,7 @@ The command prompts for the password and stores only a salted PBKDF2 hash. Reset
 
 The UI has four main areas:
 
-- `Dashboard`: recent X posts, daily and weekly trends, performance signals, and a quiet last-sync line
+- `Dashboard`: daily/weekly trends, daily/weekly patterns, and the full X posts table
 - `Queue`: review, edit, AI revise, approve, schedule, and post approved content
 - `Voice`: compact Voice status, current Koinoniko Voice, selected Voice Examples, and collapsed suggested examples
 - `Account`: connection status, data sync actions, model routing, and account/security controls
@@ -367,6 +369,7 @@ Sync metadata is stored under simple keys:
 - `x_metrics_sync`
 - `x_daily_sync`
 - `trends_sync`
+- `patterns_sync`
 
 Only timestamps, status, JSON summaries, and errors are stored.
 
@@ -430,6 +433,7 @@ POST /tasks/sync-x-metrics
 POST /tasks/sync-x-all
 POST /tasks/sync-x-daily
 POST /tasks/refresh-trends
+POST /tasks/refresh-patterns
 ```
 
 They require:
@@ -441,9 +445,10 @@ Authorization: Bearer <TASK_SECRET>
 Recommended cron setup:
 
 ```text
-X post sync:     every 30 minutes    */30 * * * *
-X metrics sync:  every 2 hours        15 */2 * * *
-Trend refresh:   daily                25 6 * * *
+X post sync:       every 30 minutes    */30 * * * *
+X metrics sync:    every 2 hours        15 */2 * * *
+Trend refresh:     daily                25 6 * * *
+Pattern refresh:   daily or weekly      40 6 * * *
 ```
 
 Create Railway Cron services that run and exit:
@@ -452,6 +457,7 @@ Create Railway Cron services that run and exit:
 python -m leadpoet_social_brain.web.task_client sync-x-posts
 python -m leadpoet_social_brain.web.task_client sync-x-metrics
 python -m leadpoet_social_brain.web.task_client refresh-trends
+python -m leadpoet_social_brain.web.task_client refresh-patterns
 ```
 
 `sync-x-posts` is incremental by default: after the first import, it asks X only for posts newer than the latest stored X post. The default cron payloads also keep post and metric limits modest to avoid repeated backfills.
@@ -530,13 +536,14 @@ The normal web-first loop:
 4. Click strong posts and mark them as Voice Examples.
 5. Open Voice and click `Update Voice`.
 6. Refresh Trends.
-7. Create a weekly plan.
-8. Review and edit queued posts.
-9. Use AI revisions only when useful.
-10. Approve posts you are ready to publish.
-11. Publish approved items manually or with `publish-due-x`.
-12. Sync metrics after posting.
-13. Review analytics and repeat.
+7. Optionally add or refresh Patterns if there are post mechanics worth adapting.
+8. Create a weekly plan.
+9. Review and edit queued posts.
+10. Use AI revisions only when useful.
+11. Approve posts you are ready to publish.
+12. Publish approved items manually or with `publish-due-x`.
+13. Sync metrics after posting.
+14. Review analytics and repeat.
 
 CLI equivalent:
 
@@ -749,6 +756,7 @@ Generation uses:
 - Koinoniko Voice
 - modular Leadpoet context
 - optional trends
+- optional Pattern Scout mechanics
 - analytics hints when enough data exists
 - markdown skills
 - review filter
@@ -842,6 +850,78 @@ python3 -m leadpoet_social_brain.cli mark-trend-used --trend-id "<trend id>"
 
 When a generated draft uses trends and is later published, trend influences are preserved for later analytics.
 
+## Pattern Scout
+
+Pattern Scout stores optional source examples for reusable post mechanics. It is not a separate content system and it does not replace Voice. Use it when you see a post structure worth adapting.
+
+The rule is:
+
+```text
+Use the structure, not the wording.
+```
+
+The Dashboard shows daily and weekly Pattern cards next to Trends. Clicking a Pattern opens its source text, structure, why it worked, adaptation rule, source link, and Archive/Ignore actions. `Use Pattern` opens Create Post with that pattern selected; generated output still goes to Queue as `needs_review`.
+
+Manual add:
+
+```bash
+python3 -m leadpoet_social_brain.cli add-pattern-example \
+  --source-url "https://x.com/example/status/123" \
+  --source-author "Example" \
+  --source-text "Source post text..." \
+  --topic "sales LLMs" \
+  --category sales \
+  --pattern-name "Weak default teardown" \
+  --hook-style "names the weak default" \
+  --structure "weak default, concrete counterexample, practical replacement" \
+  --why-it-worked "It turns a vague market claim into an obvious product point." \
+  --adaptation-rule "Use the structure, not the wording." \
+  --window daily
+```
+
+Batch import:
+
+```bash
+python3 -m leadpoet_social_brain.cli ingest-patterns-batch --csv data/patterns.csv
+```
+
+Useful CSV columns:
+
+```text
+source_url,source_author,source_text,source_summary,topic,category,pattern_name,hook_style,structure,pacing,tone,formatting,why_it_worked,adaptation_rule,engagement_notes,likes,replies,reposts,quotes,bookmarks,impressions,collected_at,window,status
+```
+
+List or refresh:
+
+```bash
+python3 -m leadpoet_social_brain.cli list-patterns --window daily
+python3 -m leadpoet_social_brain.cli refresh-patterns --window daily --limit 5
+```
+
+`refresh-patterns` requires both ScrapingDog and an LLM provider. If ScrapingDog is missing, it fails clearly and manual add/import still work.
+
+Use patterns during generation only when helpful:
+
+```bash
+python3 -m leadpoet_social_brain.cli generate-x \
+  --topic "sales LLMs" \
+  --post-type founder_insight \
+  --angle "why account context beats generated email volume" \
+  --use-patterns
+```
+
+You can pin a specific pattern:
+
+```bash
+python3 -m leadpoet_social_brain.cli generate-x \
+  --topic "sales LLMs" \
+  --post-type founder_insight \
+  --angle "why buyer timing matters" \
+  --pattern-id "<pattern id>"
+```
+
+When a generated draft uses Pattern Scout and is later published, the pattern name, hook style, and structure are preserved as influences for later analytics.
+
 ## Publishing And Feedback Loop
 
 Generated drafts are stored in `generated_drafts`.
@@ -927,7 +1007,7 @@ Generation loads:
 2. platform skill
 3. post-type skill when present
 4. review filter
-5. examples, context, analytics hints, and trends from SQLite
+5. examples, context, analytics hints, trends, and optional Pattern Scout mechanics from SQLite
 
 Edit these markdown files when the voice or post-type behavior needs to change.
 
@@ -944,6 +1024,7 @@ Important SQLite tables:
 - `queued_post_versions`: manual and AI edit history
 - `trend_items`: timely market context
 - `patterns`: reusable named patterns
+- `pattern_examples`: Pattern Scout source examples and reusable mechanics
 - `context_sections`: Leadpoet context and Koinoniko Voice sections
 - `web_auth_users`: single local web login
 - `sync_metadata`: X and trend sync status summaries
@@ -955,6 +1036,7 @@ Key linkage:
 generated_drafts.id -> posts.source_draft_id -> post_influences -> post_metrics
 content_queue.draft_id -> generated_drafts.id -> posts.source_draft_id
 content_queue.id -> queued_post_versions.queue_id
+pattern_examples.id -> generated_drafts.context_snapshot -> post_influences
 ```
 
 This lets later metrics be analyzed against the examples, context, trends, and patterns that shaped the post.
@@ -968,6 +1050,12 @@ GET /api/taxonomy/topics
 GET /api/taxonomy/post-types
 PATCH /api/posts/:id
 POST /api/posts/:id/voice
+GET /api/patterns
+POST /api/patterns
+GET /api/patterns/:id
+POST /api/patterns/:id/archive
+POST /api/patterns/:id/ignore
+POST /api/patterns/refresh
 ```
 
 The topic and post type option endpoints return distinct values from stored posts and queue items plus sensible defaults. They do not create a separate management system.
@@ -988,6 +1076,10 @@ sync-x-metrics
 update-post-notes
 add-context
 add-pattern
+add-pattern-example
+ingest-patterns-batch
+list-patterns
+refresh-patterns
 generate-x
 plan-week-x
 list-content-queue

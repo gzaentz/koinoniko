@@ -21,6 +21,12 @@ from leadpoet_social_brain.core.models import ContentQueueItem, DraftRequest, En
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
 from leadpoet_social_brain.openrouter_provider import OpenRouterProvider, create_provider
+from leadpoet_social_brain.pattern_scout import (
+    PATTERN_REFRESH_MISSING_SCRAPINGDOG,
+    add_pattern_example,
+    ingest_patterns_batch_csv,
+    refresh_patterns,
+)
 from leadpoet_social_brain.platforms.x_api import (
     MISSING_X_WRITE_CREDENTIALS_MESSAGE,
     XApiClient,
@@ -379,8 +385,22 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('id="queueModal"', index_html)
         self.assertIn('id="recentPostsTable"', index_html)
         self.assertIn('id="postVoiceFilter"', index_html)
-        self.assertIn('id="dailyTrendList"', index_html)
-        self.assertIn('id="weeklyTrendList"', index_html)
+        self.assertIn('id="trendList"', index_html)
+        self.assertIn('id="trendDailyButton"', index_html)
+        self.assertIn('id="trendWeeklyButton"', index_html)
+        self.assertIn('id="patternList"', index_html)
+        self.assertIn('id="patternDailyButton"', index_html)
+        self.assertIn('id="patternWeeklyButton"', index_html)
+        self.assertIn('id="patternModal"', index_html)
+        self.assertIn('id="savedTrendList"', index_html)
+        self.assertEqual(index_html.count('id="trendList"'), 1)
+        self.assertIn("Use the structure, not the wording.", app_js)
+        self.assertIn("usePatternInPost", app_js)
+        self.assertIn("renderDashboardPatterns", app_js)
+        self.assertIn("/api/patterns/", app_js)
+        self.assertIn('id="createPostUsePatterns"', index_html)
+        self.assertIn('id="planUsePatterns"', index_html)
+        self.assertNotIn('data-view="patterns"', index_html)
         self.assertNotIn("All X Posts", index_html)
         self.assertNotIn("Workflow", index_html)
         self.assertNotIn('id="viewTitle"', index_html)
@@ -1524,6 +1544,17 @@ class SocialBrainTest(unittest.TestCase):
                     date=utc_now(),
                 )
             )
+            pattern = add_pattern_example(
+                store,
+                source_url="https://x.com/operator/status/dashboardpattern",
+                source_text="A good AI post starts with the weak default.",
+                topic="sales LLMs",
+                category="sales",
+                pattern_name="Weak default teardown",
+                structure="weak default, sharper replacement",
+                why_it_worked="It gives the reader a better model quickly.",
+                window="daily",
+            )
             store.close()
 
             status, payload = handle_api_request("GET", "/api/dashboard", db_path=db_path)
@@ -1535,6 +1566,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["recent_posts"][0]["metrics"]["impressions"], 2500)
             self.assertEqual(payload["trends"][0]["id"], trend.id)
             self.assertEqual(payload["trend_groups"]["daily"][0]["id"], trend.id)
+            self.assertEqual(payload["pattern_groups"]["daily"][0]["id"], pattern.id)
             self.assertIn("analytics_hints", payload)
 
     def test_web_can_update_recent_post_topic(self):
@@ -1715,6 +1747,151 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["trend_groups"]["daily"][0]["title"], "Daily AI sales signal")
             self.assertEqual(payload["trend_groups"]["weekly"][0]["title"], "Weekly lead generation signal")
 
+    def test_pattern_scout_manual_batch_and_api_payloads(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            manual = add_pattern_example(
+                store,
+                source_url="https://x.com/founder/status/pattern1",
+                source_author="Founder",
+                source_text="The old way was volume. The new way is timing.",
+                topic="sales LLMs",
+                category="sales",
+                pattern_name="Old way, new way",
+                hook_style="sharp contrast",
+                structure="old belief, new model",
+                pacing="short",
+                tone="plainspoken",
+                formatting="two short paragraphs",
+                why_it_worked="It names a stale default and replaces it quickly.",
+                adaptation_rule="Use the structure, not the wording.",
+                likes=120,
+                replies=9,
+                window="daily",
+            )
+            csv_path = Path(tmpdir) / "patterns.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "source_url",
+                        "source_text",
+                        "source_summary",
+                        "topic",
+                        "category",
+                        "pattern_name",
+                        "hook_style",
+                        "structure",
+                        "pacing",
+                        "tone",
+                        "formatting",
+                        "why_it_worked",
+                        "adaptation_rule",
+                        "engagement_notes",
+                        "likes",
+                        "window",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "source_url": "https://x.com/founder/status/pattern2",
+                        "source_text": "A useful product update shows the before state first.",
+                        "source_summary": "Product update structure",
+                        "topic": "product",
+                        "category": "product",
+                        "pattern_name": "Before state first",
+                        "hook_style": "specific before state",
+                        "structure": "before state, product change, practical result",
+                        "pacing": "compact",
+                        "tone": "useful",
+                        "formatting": "short lines",
+                        "why_it_worked": "It makes the product point concrete.",
+                        "adaptation_rule": "Use the structure, not the wording.",
+                        "engagement_notes": "High bookmark signal",
+                        "likes": "88",
+                        "window": "weekly",
+                    }
+                )
+
+            batch = ingest_patterns_batch_csv(store, csv_path)
+            store.close()
+
+            status, listed = handle_api_request("GET", "/api/patterns?window=daily", db_path=db_path)
+            detail_status, detail = handle_api_request("GET", f"/api/patterns/{manual.id}", db_path=db_path)
+            archive_status, archived = handle_api_request("POST", f"/api/patterns/{manual.id}/archive", b"{}", db_path=db_path)
+
+            self.assertEqual(batch.imported, 1)
+            self.assertEqual(batch.categories["product"], 1)
+            self.assertEqual(status, 200)
+            self.assertEqual(listed["items"][0]["id"], manual.id)
+            self.assertEqual(detail_status, 200)
+            self.assertEqual(detail["pattern"]["metrics"]["likes"], 120)
+            self.assertEqual(archive_status, 200)
+            self.assertEqual(archived["pattern"]["status"], "archived")
+
+    def test_pattern_refresh_requires_scrapingdog_without_fetcher(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            provider = FakeProvider([
+                '{"pattern_name":"Contrast","category":"sales","structure":"old way then new way"}'
+            ])
+
+            with patch.dict(os.environ, {"SCRAPINGDOG_API_KEY": "", "SCRAPING_DOG_API_KEY": ""}, clear=False):
+                with self.assertRaises(ValueError) as error:
+                    refresh_patterns(store, provider, limit=1)
+
+            self.assertEqual(str(error.exception), PATTERN_REFRESH_MISSING_SCRAPINGDOG)
+            store.close()
+
+    def test_pattern_refresh_stores_provider_analysis_with_mocked_candidates(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            provider = FakeProvider([
+                json.dumps(
+                    {
+                        "pattern_name": "Specific teardown",
+                        "source_summary": "A post tears down a generic AI claim.",
+                        "hook_style": "names the weak default",
+                        "structure": "weak claim, concrete counterexample, useful rule",
+                        "pacing": "fast",
+                        "tone": "direct",
+                        "formatting": "three short lines",
+                        "why_it_worked": "It makes a familiar AI mistake feel obvious.",
+                        "adaptation_rule": "Use the structure, not the wording.",
+                        "category": "sales",
+                        "topic": "sales LLMs",
+                        "engagement_signal": "High replies",
+                    }
+                )
+            ])
+
+            result = refresh_patterns(
+                store,
+                provider,
+                limit=1,
+                window="daily",
+                fetch_candidates=lambda limit: [
+                    {
+                        "source_url": "https://x.com/operator/status/pattern3",
+                        "source_author": "Operator",
+                        "source_text": "Most AI SDR takes are just volume with better adjectives.",
+                        "likes": 200,
+                        "replies": 18,
+                    }
+                ],
+            )
+            patterns = store.list_viral_patterns(status="active", window="daily")
+
+            self.assertEqual(result.fetched, 1)
+            self.assertEqual(result.stored, 1)
+            self.assertEqual(patterns[0].pattern_name, "Specific teardown")
+            self.assertEqual(patterns[0].category, "sales")
+            self.assertEqual(patterns[0].replies, 18)
+            self.assertIn("Extract the mechanic only", provider.prompts[0])
+            store.close()
+
     def test_refresh_trends_task_saves_daily_and_weekly_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"
@@ -1863,7 +2040,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertTrue(payload["status"]["scrapingdog_configured"])
             self.assertEqual(payload["connections"]["scrapingdog"]["status"], "connected")
-            self.assertIn("Trend source", payload["connections"]["scrapingdog"]["description"])
+            self.assertIn("Pattern Scout", payload["connections"]["scrapingdog"]["description"])
             self.assertNotIn("secret-scrapingdog-key", serialized)
             self.assertNotIn("SCRAPINGDOG_API_KEY", serialized)
 
@@ -2459,6 +2636,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(TASK_DEFAULTS["sync-x-metrics"]["since_days"], 30)
         self.assertEqual(TASK_DEFAULTS["sync-x-metrics"]["limit"], 250)
         self.assertEqual(TASK_DEFAULTS["refresh-trends"], {"limit": 5})
+        self.assertEqual(TASK_DEFAULTS["refresh-patterns"], {"limit": 5, "window": "daily"})
         with patch(
             "leadpoet_social_brain.web.task_client.post_task",
             return_value={"ok": True, "errors": []},
@@ -3412,6 +3590,116 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(note.imitate)
             self.assertIn("Strong because it makes a sharp contrast", section.content)
             self.assertIn("Name the weak default", section.content)
+            store.close()
+
+    def test_generation_uses_pattern_scout_and_published_metrics_analyze_back(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            active = add_pattern_example(
+                store,
+                source_url="https://x.com/operator/status/pattern-active",
+                source_author="Operator",
+                source_text="Most AI SDR takes are volume with a better adjective.",
+                topic="sales LLMs",
+                category="sales",
+                pattern_name="Weak default teardown",
+                hook_style="names the weak default",
+                structure="weak default, concrete counterexample, practical replacement",
+                tone="direct",
+                why_it_worked="It turns a vague market claim into an obvious product point.",
+                adaptation_rule="Use the structure, not the wording.",
+                likes=90,
+                replies=12,
+                window="daily",
+            )
+            ignored = add_pattern_example(
+                store,
+                source_url="https://x.com/operator/status/pattern-ignored",
+                topic="sales LLMs",
+                category="sales",
+                pattern_name="Ignored pattern",
+                structure="do not use this",
+                status="ignored",
+                window="daily",
+            )
+
+            request = DraftRequest(
+                platform="x",
+                topic="sales LLMs",
+                post_type="founder_insight",
+                angle="sales AI should know why the buyer cares now",
+                use_patterns=True,
+            )
+            prompt = SocialBrainGenerator(store).build_prompt(request)
+            draft = SocialBrainGenerator(
+                store,
+                provider=FakeProvider(["Sales AI should not make outbound louder. It should make buyer timing obvious."]),
+            ).generate(request, variants=1)[0]
+            post = publish_x_draft(
+                store,
+                draft_id=draft.id,
+                url="https://x.com/gavin/status/patternpublished",
+                date="2026-06-25",
+                author="Gavin",
+                metrics=EngagementMetrics(impressions=2500, likes=90, replies=8, reposts=10, bookmarks=24),
+            )
+            influences = store.list_post_influences([post.id], influence_type="pattern")
+            summary = build_analytics_summary(store)
+
+            self.assertIn("Pattern mechanics to adapt:", prompt)
+            self.assertIn("Weak default teardown", prompt)
+            self.assertIn("Use the structure, not the wording.", prompt)
+            self.assertNotIn(ignored.pattern_name, prompt)
+            self.assertEqual(draft.context_snapshot["selected_viral_patterns"][0]["id"], active.id)
+            self.assertIn(active.id, {influence.ref_id for influence in influences})
+            self.assertIn("Weak default teardown", {row.key for row in summary.by_pattern})
+            self.assertNotIn("names the weak default", {row.key for row in summary.by_pattern})
+            self.assertIn("names the weak default", {row.key for row in summary.by_hook})
+            self.assertIn("weak default, concrete counterexample, practical replacement", {row.key for row in summary.by_structure})
+            store.close()
+
+    def test_web_create_post_endpoint_accepts_pattern_inspiration(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.seed_defaults()
+            pattern = add_pattern_example(
+                store,
+                source_url="https://x.com/operator/status/createpattern",
+                topic="sales LLMs",
+                category="sales",
+                pattern_name="Concrete replacement",
+                structure="weak default, concrete replacement",
+                why_it_worked="It makes the product point less abstract.",
+                window="daily",
+            )
+            store.close()
+
+            with patch(
+                "leadpoet_social_brain.web.app.load_provider_from_env",
+                return_value=FakeProvider(["Sales AI needs account context before it needs another generated sentence."]),
+            ):
+                status, payload = handle_api_request(
+                    "POST",
+                    "/api/content/create-post",
+                    json.dumps(
+                        {
+                            "instruction": "Write about account context beating generated email volume.",
+                            "topic": "sales LLMs",
+                            "post_type": "founder_insight",
+                            "use_patterns": True,
+                            "pattern_ids": [pattern.id],
+                        }
+                    ),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["item"]["status"], "needs_review")
+            store = SQLiteStore(db_path)
+            saved_draft = store.get_generated_draft(payload["item"]["draft_id"])
+            self.assertEqual(saved_draft.context_snapshot["selected_viral_patterns"][0]["id"], pattern.id)
             store.close()
 
     def test_trend_items_manual_batch_generation_and_publish_linkage(self):

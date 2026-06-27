@@ -23,6 +23,7 @@ from leadpoet_social_brain.core.models import (
     SocialPost,
     SyncMetadata,
     TrendItem,
+    ViralPattern,
     WebAuthUser,
     new_id,
     utc_now,
@@ -123,6 +124,41 @@ class SQLiteStore:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS pattern_examples (
+                id TEXT PRIMARY KEY,
+                platform TEXT NOT NULL DEFAULT 'x',
+                source_url TEXT,
+                source_author TEXT,
+                source_text TEXT,
+                source_summary TEXT,
+                topic TEXT,
+                category TEXT,
+                pattern_name TEXT,
+                hook_style TEXT,
+                structure TEXT,
+                pacing TEXT,
+                tone TEXT,
+                formatting TEXT,
+                why_it_worked TEXT,
+                adaptation_rule TEXT,
+                engagement_notes TEXT,
+                likes INTEGER,
+                replies INTEGER,
+                reposts INTEGER,
+                quotes INTEGER,
+                bookmarks INTEGER,
+                impressions INTEGER,
+                collected_at TEXT,
+                window TEXT NOT NULL DEFAULT 'manual',
+                status TEXT NOT NULL DEFAULT 'active',
+                raw_text TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_pattern_examples_lookup
+            ON pattern_examples(status, window, category, topic, collected_at);
 
             CREATE TABLE IF NOT EXISTS context_sections (
                 id TEXT PRIMARY KEY,
@@ -898,6 +934,165 @@ class SQLiteStore:
         self.conn.commit()
         return saved
 
+    def save_viral_pattern(self, pattern: ViralPattern) -> ViralPattern:
+        now = utc_now()
+        saved = ViralPattern(
+            id=pattern.id,
+            platform=pattern.platform or "x",
+            source_url=pattern.source_url,
+            source_author=pattern.source_author,
+            source_text=pattern.source_text,
+            source_summary=pattern.source_summary,
+            topic=pattern.topic,
+            category=pattern.category,
+            pattern_name=pattern.pattern_name,
+            hook_style=pattern.hook_style,
+            structure=pattern.structure,
+            pacing=pattern.pacing,
+            tone=pattern.tone,
+            formatting=pattern.formatting,
+            why_it_worked=pattern.why_it_worked,
+            adaptation_rule=pattern.adaptation_rule,
+            engagement_notes=pattern.engagement_notes,
+            likes=pattern.likes,
+            replies=pattern.replies,
+            reposts=pattern.reposts,
+            quotes=pattern.quotes,
+            bookmarks=pattern.bookmarks,
+            impressions=pattern.impressions,
+            collected_at=pattern.collected_at or now,
+            window=pattern.window or "manual",
+            status=pattern.status or "active",
+            raw_text=pattern.raw_text,
+            created_at=pattern.created_at,
+            updated_at=now,
+        )
+        self.conn.execute(
+            """
+            INSERT INTO pattern_examples (
+                id, platform, source_url, source_author, source_text,
+                source_summary, topic, category, pattern_name, hook_style,
+                structure, pacing, tone, formatting, why_it_worked,
+                adaptation_rule, engagement_notes, likes, replies, reposts,
+                quotes, bookmarks, impressions, collected_at, window, status,
+                raw_text, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                platform = excluded.platform,
+                source_url = excluded.source_url,
+                source_author = excluded.source_author,
+                source_text = excluded.source_text,
+                source_summary = excluded.source_summary,
+                topic = excluded.topic,
+                category = excluded.category,
+                pattern_name = excluded.pattern_name,
+                hook_style = excluded.hook_style,
+                structure = excluded.structure,
+                pacing = excluded.pacing,
+                tone = excluded.tone,
+                formatting = excluded.formatting,
+                why_it_worked = excluded.why_it_worked,
+                adaptation_rule = excluded.adaptation_rule,
+                engagement_notes = excluded.engagement_notes,
+                likes = excluded.likes,
+                replies = excluded.replies,
+                reposts = excluded.reposts,
+                quotes = excluded.quotes,
+                bookmarks = excluded.bookmarks,
+                impressions = excluded.impressions,
+                collected_at = excluded.collected_at,
+                window = excluded.window,
+                status = excluded.status,
+                raw_text = excluded.raw_text,
+                updated_at = excluded.updated_at
+            """,
+            (
+                saved.id,
+                saved.platform,
+                saved.source_url,
+                saved.source_author,
+                saved.source_text,
+                saved.source_summary,
+                saved.topic,
+                saved.category,
+                saved.pattern_name,
+                saved.hook_style,
+                saved.structure,
+                saved.pacing,
+                saved.tone,
+                saved.formatting,
+                saved.why_it_worked,
+                saved.adaptation_rule,
+                saved.engagement_notes,
+                saved.likes,
+                saved.replies,
+                saved.reposts,
+                saved.quotes,
+                saved.bookmarks,
+                saved.impressions,
+                saved.collected_at,
+                saved.window,
+                saved.status,
+                saved.raw_text,
+                saved.created_at,
+                saved.updated_at,
+            ),
+        )
+        self.conn.commit()
+        return saved
+
+    def get_viral_pattern(self, pattern_id: str) -> ViralPattern | None:
+        row = self.conn.execute("SELECT * FROM pattern_examples WHERE id = ?", (pattern_id,)).fetchone()
+        return self._row_to_viral_pattern(row) if row else None
+
+    def list_viral_patterns(
+        self,
+        *,
+        status: str | None = "active",
+        window: str | None = None,
+        category: str | None = None,
+        topic: str | None = None,
+        limit: int | None = 20,
+    ) -> list[ViralPattern]:
+        clauses: list[str] = []
+        params: list[object] = []
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if window:
+            clauses.append("window = ?")
+            params.append(window)
+        if category:
+            clauses.append("category = ?")
+            params.append(category)
+        if topic:
+            clauses.append("(topic = ? OR topic LIKE ? OR category LIKE ?)")
+            params.extend([topic, f"%{topic}%", f"%{topic}%"])
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        limit_sql = " LIMIT ?" if limit is not None else ""
+        if limit is not None:
+            params.append(limit)
+        rows = self.conn.execute(
+            f"""
+            SELECT *
+            FROM pattern_examples
+            {where}
+            ORDER BY collected_at DESC, updated_at DESC
+            {limit_sql}
+            """,
+            params,
+        ).fetchall()
+        return [self._row_to_viral_pattern(row) for row in rows]
+
+    def mark_viral_pattern_status(self, pattern_id: str, status: str) -> ViralPattern | None:
+        self.conn.execute(
+            "UPDATE pattern_examples SET status = ?, updated_at = ? WHERE id = ?",
+            (status, utc_now(), pattern_id),
+        )
+        self.conn.commit()
+        return self.get_viral_pattern(pattern_id)
+
     def list_trends(
         self,
         *,
@@ -1335,6 +1530,39 @@ class SQLiteStore:
             updated_at=row["updated_at"],
         )
 
+    def _row_to_viral_pattern(self, row: sqlite3.Row) -> ViralPattern:
+        return ViralPattern(
+            id=row["id"],
+            platform=row["platform"],
+            source_url=row["source_url"],
+            source_author=row["source_author"],
+            source_text=row["source_text"],
+            source_summary=row["source_summary"],
+            topic=row["topic"],
+            category=row["category"],
+            pattern_name=row["pattern_name"],
+            hook_style=row["hook_style"],
+            structure=row["structure"],
+            pacing=row["pacing"],
+            tone=row["tone"],
+            formatting=row["formatting"],
+            why_it_worked=row["why_it_worked"],
+            adaptation_rule=row["adaptation_rule"],
+            engagement_notes=row["engagement_notes"],
+            likes=row["likes"],
+            replies=row["replies"],
+            reposts=row["reposts"],
+            quotes=row["quotes"],
+            bookmarks=row["bookmarks"],
+            impressions=row["impressions"],
+            collected_at=row["collected_at"],
+            window=row["window"],
+            status=row["status"],
+            raw_text=row["raw_text"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
     def _row_to_context(self, row: sqlite3.Row) -> ContextSection:
         return ContextSection(
             id=row["id"],
@@ -1590,6 +1818,49 @@ def draft_influences_for_post(post_id: str, draft: GeneratedDraft) -> list[PostI
                 },
             )
         )
+
+    for pattern in snapshot.get("selected_viral_patterns", []):
+        name = _clean(pattern.get("pattern_name") or pattern.get("name"))
+        if not name:
+            continue
+        metadata = {
+            "source": "draft.selected_viral_patterns",
+            "source_field": "pattern",
+            "source_url": pattern.get("source_url"),
+            "hook_style": pattern.get("hook_style"),
+            "structure": pattern.get("structure"),
+            "why_it_worked": pattern.get("why_it_worked"),
+            "adaptation_rule": pattern.get("adaptation_rule"),
+        }
+        influences.append(
+            PostInfluence(
+                post_id=post_id,
+                source_draft_id=draft.id,
+                influence_type="pattern",
+                category=_clean(pattern.get("category")) or "viral_pattern",
+                name=name,
+                ref_id=_clean(pattern.get("id")) or None,
+                metadata=metadata,
+            )
+        )
+        for category, value in [
+            ("hook", pattern.get("hook_style")),
+            ("structure", pattern.get("structure")),
+        ]:
+            label = _clean(value)
+            if not label:
+                continue
+            influences.append(
+                PostInfluence(
+                    post_id=post_id,
+                    source_draft_id=draft.id,
+                    influence_type="pattern",
+                    category=category,
+                    name=label,
+                    ref_id=_clean(pattern.get("id")) or None,
+                    metadata={**metadata, "source_field": category},
+                )
+            )
 
     for section in snapshot.get("selected_context_sections", []):
         name = _clean(section.get("name"))

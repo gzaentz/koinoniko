@@ -69,6 +69,7 @@ def plan_week_x(
     variants_per_slot: int,
     allow_evergreen: bool = False,
     best_version: bool = False,
+    use_patterns: bool = False,
 ) -> PlanWeekResult:
     if posts <= 0:
         raise ValueError("--posts must be greater than 0.")
@@ -106,6 +107,7 @@ def plan_week_x(
             extra_context="Weekly content calendar suggestion. Make it worth posting on its own.",
             use_trends=bool(trend),
             trend_ids=[trend.id] if trend else [],
+            use_patterns=use_patterns,
         )
         drafts = generator.generate(
             request,
@@ -142,6 +144,8 @@ def create_post_x(
     best_version: bool = False,
     scheduled_at: str | None = None,
     extra_context: str | None = None,
+    use_patterns: bool = False,
+    pattern_ids: list[str] | None = None,
 ) -> CreatePostResult:
     instruction = instruction.strip()
     if not instruction:
@@ -169,6 +173,8 @@ def create_post_x(
         extra_context="\n".join(context_parts),
         use_trends=bool(selected_trends),
         trend_ids=[trend.id for trend in selected_trends],
+        use_patterns=use_patterns,
+        pattern_ids=pattern_ids or [],
     )
     draft = generator.generate(request, variants=1, best_version=best_version)[0]
     trend_ids = selected_trend_ids(draft, selected_trends)
@@ -279,7 +285,7 @@ Return only revised post text variants. Do not explain. Do not approve or post a
         ]
         strategy_raw = generate_with_provider(
             provider,
-            build_strategy_prompt(request, bundle, trends=trends),
+            build_strategy_prompt(request, bundle, trends=trends, patterns=[]),
             variants=1,
             model=model_routing.strategist,
         )[0]
@@ -291,6 +297,7 @@ Return only revised post text variants. Do not explain. Do not approve or post a
                 bundle,
                 skills=skills,
                 trends=trends,
+                patterns=[],
                 strategy_summary=strategy_summary,
                 max_chars=adapter.rules.default_max_chars,
             ),

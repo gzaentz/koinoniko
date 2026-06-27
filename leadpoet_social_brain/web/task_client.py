@@ -15,6 +15,7 @@ TASK_DEFAULTS: dict[str, dict[str, Any]] = {
     "sync-x-all": {"post_limit": 25, "metrics_limit": 250, "since_days": 30},
     "sync-x-daily": {"post_limit": 25, "metrics_limit": 250, "since_days": 30},
     "refresh-trends": {"limit": 5},
+    "refresh-patterns": {"limit": 5, "window": "daily"},
 }
 
 

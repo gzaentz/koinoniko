@@ -110,6 +110,39 @@ class Pattern:
 
 
 @dataclass(frozen=True)
+class ViralPattern:
+    platform: str = "x"
+    source_url: str | None = None
+    source_author: str | None = None
+    source_text: str | None = None
+    source_summary: str | None = None
+    topic: str | None = None
+    category: str | None = None
+    pattern_name: str | None = None
+    hook_style: str | None = None
+    structure: str | None = None
+    pacing: str | None = None
+    tone: str | None = None
+    formatting: str | None = None
+    why_it_worked: str | None = None
+    adaptation_rule: str | None = None
+    engagement_notes: str | None = None
+    likes: int | None = None
+    replies: int | None = None
+    reposts: int | None = None
+    quotes: int | None = None
+    bookmarks: int | None = None
+    impressions: int | None = None
+    collected_at: str | None = None
+    window: str = "manual"
+    status: str = "active"
+    raw_text: str | None = None
+    id: str = field(default_factory=new_id)
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
 class ContextSection:
     kind: str
     name: str
@@ -207,6 +240,8 @@ class DraftRequest:
     extra_context: str | None = None
     use_trends: bool = False
     trend_ids: list[str] = field(default_factory=list)
+    use_patterns: bool = False
+    pattern_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

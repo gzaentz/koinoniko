@@ -39,10 +39,18 @@ from leadpoet_social_brain.core.models import (
     SocialPost,
     SyncMetadata,
     TrendItem,
+    ViralPattern,
     new_id,
     utc_now,
 )
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
+from leadpoet_social_brain.pattern_scout import (
+    PATTERN_REFRESH_MISSING_PROVIDER,
+    PATTERN_REFRESH_MISSING_SCRAPINGDOG,
+    add_pattern_example,
+    pattern_groups,
+    refresh_patterns,
+)
 from leadpoet_social_brain.platforms.x_api import (
     DEFAULT_IMPORT_POST_TYPE,
     DEFAULT_IMPORT_TOPIC,
@@ -85,6 +93,7 @@ X_POSTS_SYNC_KEY = "x_posts_sync"
 X_METRICS_SYNC_KEY = "x_metrics_sync"
 X_DAILY_SYNC_KEY = "x_daily_sync"
 TRENDS_SYNC_KEY = "trends_sync"
+PATTERNS_SYNC_KEY = "patterns_sync"
 VOICE_CONTEXT_NAME = "learned_from_high_performers"
 DEFAULT_TOPIC_OPTIONS = [
     "Leadpoet",
@@ -545,6 +554,8 @@ def route_api(
         return 200, sync_x_daily_payload(store, payload)
     if method == "POST" and parts == ["tasks", "refresh-trends"]:
         return 200, refresh_trends_task_payload(store, payload)
+    if method == "POST" and parts == ["tasks", "refresh-patterns"]:
+        return 200, refresh_patterns_task_payload(store, payload)
     if not parts or parts[0] != "api":
         return 404, {"error": "Not found."}
 
@@ -583,6 +594,22 @@ def route_api(
             "current": voice_current_payload(store, section=section),
             "status": voice_status_payload(store),
         }
+    if method == "GET" and parts == ["api", "patterns"]:
+        return 200, patterns_payload(store, query)
+    if method == "POST" and parts == ["api", "patterns"]:
+        return 200, {"pattern": pattern_payload(add_pattern_from_payload(store, payload))}
+    if method == "POST" and parts == ["api", "patterns", "refresh"]:
+        return refresh_patterns_api_response(store, payload)
+    if method == "GET" and len(parts) == 3 and parts[:2] == ["api", "patterns"]:
+        pattern = store.get_viral_pattern(parts[2])
+        if not pattern:
+            return 404, {"error": "Pattern not found."}
+        return 200, {"pattern": pattern_payload(pattern)}
+    if method == "POST" and len(parts) == 4 and parts[:2] == ["api", "patterns"] and parts[3] in {"archive", "ignore"}:
+        pattern = store.mark_viral_pattern_status(parts[2], "archived" if parts[3] == "archive" else "ignored")
+        if not pattern:
+            return 404, {"error": "Pattern not found."}
+        return 200, {"pattern": pattern_payload(pattern)}
     if method == "GET" and len(parts) == 3 and parts[:2] == ["api", "posts"]:
         post = store.get_post(parts[2])
         if not post:
@@ -656,6 +683,8 @@ def route_api(
             best_version=bool_from_payload(payload, "best_version", False),
             scheduled_at=clean_optional(payload.get("scheduled_at")),
             extra_context=clean_optional(payload.get("extra_context")),
+            use_patterns=bool_from_payload(payload, "use_patterns", False),
+            pattern_ids=string_list_payload(payload.get("pattern_ids")),
         )
         item_payload = queue_item_payload(store, result.item)
         return 200, {
@@ -683,6 +712,7 @@ def route_api(
             variants_per_slot=int(payload.get("variants_per_slot") or 1),
             allow_evergreen=bool(payload.get("allow_evergreen", True)),
             best_version=bool(payload.get("best_version", False)),
+            use_patterns=bool(payload.get("use_patterns", False)),
         )
         return 200, {
             "queued": [queue_item_payload(store, item) for item in result.queued],
@@ -973,6 +1003,63 @@ def refresh_trends_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> 
         store.save_sync_metadata(
             SyncMetadata(
                 key=TRENDS_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=completed_at,
+                status="failed",
+                summary=summary,
+                error_message=str(exc),
+            )
+        )
+        raise
+
+
+def refresh_patterns_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    started_at = utc_now()
+    try:
+        provider = load_configured_provider(store)
+        if not provider:
+            raise ValueError(PATTERN_REFRESH_MISSING_PROVIDER)
+        result = refresh_patterns(
+            store,
+            provider,
+            limit=int(payload.get("limit") or 5),
+            window=str(payload.get("window") or "daily"),
+        )
+        completed_at = utc_now()
+        summary = {
+            "fetched": result.fetched,
+            "stored": result.stored,
+            "skipped": result.skipped,
+            "errors": result.errors,
+            "completed_at": completed_at,
+        }
+        metadata = store.save_sync_metadata(
+            SyncMetadata(
+                key=PATTERNS_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=completed_at,
+                status="partial" if result.errors else "success",
+                summary=summary,
+                error_message="\n".join(result.errors[:5]) if result.errors else None,
+            )
+        )
+        return {
+            **summary,
+            "patterns": [pattern_payload(pattern) for pattern in result.patterns],
+            "sync": sync_metadata_payload(metadata),
+        }
+    except Exception as exc:  # noqa: BLE001 - task should persist failure summary.
+        completed_at = utc_now()
+        summary = {
+            "fetched": 0,
+            "stored": 0,
+            "skipped": 0,
+            "errors": [str(exc)],
+            "completed_at": completed_at,
+        }
+        store.save_sync_metadata(
+            SyncMetadata(
+                key=PATTERNS_SYNC_KEY,
                 last_started_at=started_at,
                 last_completed_at=completed_at,
                 status="failed",
@@ -1445,6 +1532,52 @@ def voice_post_payload(post: SocialPost, note: PostNote | None, metrics: Any | N
     return payload
 
 
+def patterns_payload(store: SQLiteStore, query: dict[str, list[str]]) -> dict[str, Any]:
+    patterns = store.list_viral_patterns(
+        status=one(query, "status") or "active",
+        window=one(query, "window"),
+        limit=int(one(query, "limit") or 20),
+    )
+    return {"items": [pattern_payload(pattern) for pattern in patterns]}
+
+
+def add_pattern_from_payload(store: SQLiteStore, payload: dict[str, Any]) -> ViralPattern:
+    return add_pattern_example(
+        store,
+        source_url=clean_optional(payload.get("source_url")),
+        source_author=clean_optional(payload.get("source_author")),
+        source_text=clean_optional(payload.get("source_text")),
+        source_summary=clean_optional(payload.get("source_summary")),
+        topic=clean_optional(payload.get("topic")),
+        category=clean_optional(payload.get("category")),
+        pattern_name=clean_optional(payload.get("pattern_name")),
+        hook_style=clean_optional(payload.get("hook_style")),
+        structure=clean_optional(payload.get("structure")),
+        pacing=clean_optional(payload.get("pacing")),
+        tone=clean_optional(payload.get("tone")),
+        formatting=clean_optional(payload.get("formatting")),
+        why_it_worked=clean_optional(payload.get("why_it_worked")),
+        adaptation_rule=clean_optional(payload.get("adaptation_rule")),
+        engagement_notes=clean_optional(payload.get("engagement_notes")),
+        likes=optional_int(payload.get("likes")),
+        replies=optional_int(payload.get("replies")),
+        reposts=optional_int(payload.get("reposts")),
+        quotes=optional_int(payload.get("quotes")),
+        bookmarks=optional_int(payload.get("bookmarks")),
+        impressions=optional_int(payload.get("impressions")),
+        collected_at=clean_optional(payload.get("collected_at")),
+        window=clean_optional(payload.get("window")) or "manual",
+        status=clean_optional(payload.get("status")) or "active",
+    )
+
+
+def refresh_patterns_api_response(store: SQLiteStore, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    try:
+        return 200, refresh_patterns_task_payload(store, payload)
+    except ValueError as exc:
+        return 400, {"error": str(exc)}
+
+
 def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
     queue = store.list_content_queue(platform="x", limit=500)
     counts: dict[str, int] = {}
@@ -1460,6 +1593,7 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
     notes = store.notes_by_post_id([post.id for post in recent_posts])
     trend_groups = web_trend_groups(store)
     trends = [*trend_groups.daily, *trend_groups.weekly]
+    patterns = pattern_groups(store)
     return {
         "status": status_payload(store),
         "queue_counts": counts,
@@ -1471,6 +1605,7 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
         ],
         "trends": [trend_payload(trend) for trend in trends],
         "trend_groups": trend_groups_payload(trend_groups),
+        "pattern_groups": pattern_groups_payload(patterns),
         "sync": account_sync_payload(store),
         "analytics_hints": analytics.hints,
         "best_examples": [post_payload(post) for post in analytics.best_examples[:5]],
@@ -1621,7 +1756,7 @@ def account_connections_payload(status: dict[str, Any]) -> dict[str, dict[str, s
         "scrapingdog": connection_payload(
             "connected" if status.get("scrapingdog_configured") else "not_connected",
             "ScrapingDog",
-            "Trend source used to refresh AI, sales, and lead gen trends.",
+            "Source used to refresh trends and Pattern Scout examples.",
         ),
         "daily_sync": connection_payload(
             "connected" if status.get("daily_sync_configured") else "not_configured",
@@ -1646,6 +1781,7 @@ def account_sync_payload(store: SQLiteStore) -> dict[str, Any]:
         X_METRICS_SYNC_KEY: sync_metadata_payload(metadata.get(X_METRICS_SYNC_KEY)),
         X_DAILY_SYNC_KEY: sync_metadata_payload(metadata.get(X_DAILY_SYNC_KEY)),
         TRENDS_SYNC_KEY: sync_metadata_payload(metadata.get(TRENDS_SYNC_KEY)),
+        PATTERNS_SYNC_KEY: sync_metadata_payload(metadata.get(PATTERNS_SYNC_KEY)),
     }
 
 
@@ -1654,12 +1790,13 @@ def account_sync_status_payload(sync: dict[str, Any]) -> dict[str, Any]:
         "last_x_post_sync": sync[X_POSTS_SYNC_KEY]["last_completed_at"],
         "last_x_metrics_sync": sync[X_METRICS_SYNC_KEY]["last_completed_at"],
         "last_trend_refresh": sync[TRENDS_SYNC_KEY]["last_completed_at"],
+        "last_pattern_refresh": sync[PATTERNS_SYNC_KEY]["last_completed_at"],
         "latest_error": latest_sync_error(sync),
     }
 
 
 def latest_sync_error(sync: dict[str, Any]) -> str | None:
-    for key in [TRENDS_SYNC_KEY, X_DAILY_SYNC_KEY, X_POSTS_SYNC_KEY, X_METRICS_SYNC_KEY]:
+    for key in [PATTERNS_SYNC_KEY, TRENDS_SYNC_KEY, X_DAILY_SYNC_KEY, X_POSTS_SYNC_KEY, X_METRICS_SYNC_KEY]:
         item = sync.get(key) or {}
         if item.get("error_message"):
             return str(item["error_message"])
@@ -1924,6 +2061,49 @@ def trend_payload(trend: TrendItem) -> dict[str, Any]:
     }
 
 
+def pattern_groups_payload(groups: dict[str, list[ViralPattern]]) -> dict[str, Any]:
+    return {
+        "daily": [pattern_payload(pattern) for pattern in groups.get("daily", [])],
+        "weekly": [pattern_payload(pattern) for pattern in groups.get("weekly", [])],
+    }
+
+
+def pattern_payload(pattern: ViralPattern) -> dict[str, Any]:
+    return {
+        "id": pattern.id,
+        "platform": pattern.platform,
+        "source_url": pattern.source_url,
+        "source_author": pattern.source_author,
+        "source_text": pattern.source_text,
+        "source_summary": pattern.source_summary,
+        "topic": pattern.topic,
+        "category": pattern.category,
+        "pattern_name": pattern.pattern_name,
+        "hook_style": pattern.hook_style,
+        "structure": pattern.structure,
+        "pacing": pattern.pacing,
+        "tone": pattern.tone,
+        "formatting": pattern.formatting,
+        "why_it_worked": pattern.why_it_worked,
+        "adaptation_rule": pattern.adaptation_rule,
+        "engagement_notes": pattern.engagement_notes,
+        "metrics": {
+            "likes": pattern.likes,
+            "replies": pattern.replies,
+            "reposts": pattern.reposts,
+            "quotes": pattern.quotes,
+            "bookmarks": pattern.bookmarks,
+            "impressions": pattern.impressions,
+        },
+        "collected_at": pattern.collected_at,
+        "window": pattern.window,
+        "status": pattern.status,
+        "raw_text": pattern.raw_text,
+        "created_at": pattern.created_at,
+        "updated_at": pattern.updated_at,
+    }
+
+
 def post_payload(post) -> dict[str, Any]:
     return {
         "id": post.id,
@@ -2107,6 +2287,13 @@ def bool_from_payload(payload: dict[str, Any], key: str, default: bool) -> bool:
     if value is None:
         return default
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def string_list_payload(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [cleaned for item in value if (cleaned := clean_optional(item))]
+    cleaned = clean_optional(value)
+    return [cleaned] if cleaned else []
 
 
 def value_or_current(payload: dict[str, Any], key: str, current):

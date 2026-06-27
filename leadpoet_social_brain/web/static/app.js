@@ -11,6 +11,10 @@ const state = {
   reviewItems: [],
   scheduledItems: [],
   savedTrends: [],
+  selectedTrendWindow: "daily",
+  selectedPatternWindow: "daily",
+  selectedPatternForCreate: null,
+  patternDetail: null,
   draggedQueueId: "",
   queueDetail: null,
   postDetail: null,
@@ -273,6 +277,7 @@ function updateGlobalControls() {
 function renderDashboard() {
   renderRecentPosts();
   renderDashboardTrends();
+  renderDashboardPatterns();
 }
 
 function renderRecentPosts() {
@@ -781,8 +786,10 @@ window.savePostVoice = (event) => {
 
 function renderDashboardTrends() {
   const groups = state.dashboard?.trend_groups || {};
-  renderTrendList("dailyTrendList", groups.daily || [], "No daily trends loaded yet.");
-  renderTrendList("weeklyTrendList", groups.weekly || [], "No weekly trends loaded yet.");
+  $("trendDailyButton").classList.toggle("active", state.selectedTrendWindow === "daily");
+  $("trendWeeklyButton").classList.toggle("active", state.selectedTrendWindow === "weekly");
+  const trends = groups[state.selectedTrendWindow] || [];
+  renderTrendList("trendList", trends, `No ${state.selectedTrendWindow} trends loaded yet.`);
 }
 
 function renderTrendList(targetId, trends, emptyText) {
@@ -800,6 +807,39 @@ function dashboardTrendRow(item) {
       </div>
       <h3>${escapeHtml(item.title)}</h3>
       <p>${escapeHtml(item.summary || "")}</p>
+      ${item.why_it_matters ? `<p>${escapeHtml(item.why_it_matters)}</p>` : ""}
+      ${item.leadpoet_angle ? `<p><strong>Leadpoet angle:</strong> ${escapeHtml(item.leadpoet_angle)}</p>` : ""}
+      <div class="actions left">
+        <button class="secondary" onclick='useTrendInPost(event, ${jsArg(item.id)})'>Use in Post</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderDashboardPatterns() {
+  const groups = state.dashboard?.pattern_groups || {};
+  $("patternDailyButton").classList.toggle("active", state.selectedPatternWindow === "daily");
+  $("patternWeeklyButton").classList.toggle("active", state.selectedPatternWindow === "weekly");
+  const patterns = groups[state.selectedPatternWindow] || [];
+  $("patternList").innerHTML = patterns.length
+    ? patterns.slice(0, 5).map(patternCard).join("")
+    : `<p class="muted">No ${escapeHtml(state.selectedPatternWindow)} patterns yet. Add patterns manually or refresh Pattern Scout.</p>`;
+}
+
+function patternCard(pattern) {
+  return `
+    <article class="pattern-card" role="button" tabindex="0" onclick='openPatternDetails(${jsArg(pattern.id)})' onkeydown='openPatternDetailsFromKey(event, ${jsArg(pattern.id)})'>
+      <div class="meta-row">
+        <span>${escapeHtml(label(pattern.category || "other"))}</span>
+        <span>${escapeHtml(topicLabel(pattern.topic || "No topic"))}</span>
+        <span>${escapeHtml(patternSignal(pattern))}</span>
+      </div>
+      <h3>${escapeHtml(pattern.pattern_name || "Observed pattern")}</h3>
+      <p>${escapeHtml(pattern.structure || pattern.source_summary || "")}</p>
+      ${pattern.why_it_worked ? `<p><strong>Why this worked:</strong> ${escapeHtml(pattern.why_it_worked)}</p>` : ""}
+      <div class="actions left">
+        <button class="secondary" onclick='usePatternInPost(event, ${jsArg(pattern.id)})'>Use Pattern</button>
+      </div>
     </article>
   `;
 }
@@ -837,6 +877,19 @@ window.openTrendDetails = (id) => {
   openModal("trendModal");
 };
 
+window.useTrendInPost = (event, id) => {
+  event.stopPropagation();
+  const trend = findTrendItem(id);
+  if (!trend) return;
+  state.selectedPatternForCreate = null;
+  $("createPostInstruction").value = trend.leadpoet_angle || trend.title || "";
+  $("createPostTopic").value = trend.topic || "Leadpoet";
+  $("createPostUseTrends").checked = true;
+  $("createPostUsePatterns").checked = false;
+  renderCreatePostPatternHint();
+  openCreatePostModal();
+};
+
 function findTrendItem(id) {
   const groups = state.dashboard?.trend_groups || {};
   return [
@@ -845,6 +898,134 @@ function findTrendItem(id) {
     ...(state.dashboard?.trends || []),
     ...(state.savedTrends || []),
   ].find((item) => item.id === id);
+}
+
+function findPatternItem(id) {
+  const groups = state.dashboard?.pattern_groups || {};
+  return [
+    ...(groups.daily || []),
+    ...(groups.weekly || []),
+  ].find((item) => item.id === id);
+}
+
+window.openPatternDetailsFromKey = (event, id) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  window.openPatternDetails(id);
+};
+
+window.openPatternDetails = (id) => {
+  runButton(null, "", async () => {
+    const payload = await api(`/api/patterns/${encodeURIComponent(id)}`);
+    state.patternDetail = payload.pattern;
+    renderPatternModal();
+    openModal("patternModal");
+  });
+};
+
+function renderPatternModal() {
+  const pattern = state.patternDetail;
+  if (!pattern) return;
+  const metrics = pattern.metrics || {};
+  $("patternModalTitle").textContent = pattern.pattern_name || "Pattern details";
+  $("patternModalBody").innerHTML = `
+    <p class="pattern-rule">Use the structure, not the wording.</p>
+    <div class="full-text">${escapeHtml(pattern.source_text || pattern.source_summary || "No source text stored.")}</div>
+    <div class="compact-meta-row">
+      ${compactMeta("Category", label(pattern.category || "other"))}
+      ${compactMeta("Topic", topicLabel(pattern.topic || "No topic"))}
+      ${compactMeta("Author", pattern.source_author || "Unknown")}
+      ${compactMeta("Signal", patternSignal(pattern))}
+    </div>
+    <div class="compact-metrics-row" aria-label="Pattern metrics">
+      ${compactMetric("Likes", metrics.likes)}
+      ${compactMetric("Replies", metrics.replies)}
+      ${compactMetric("Reposts", metrics.reposts)}
+      ${compactMetric("Quotes", metrics.quotes)}
+      ${compactMetric("Bookmarks", metrics.bookmarks)}
+      ${compactMetric("Impressions", metrics.impressions)}
+    </div>
+    <section class="trend-detail-section">
+      <h3>Pattern analysis</h3>
+      <ul class="bullet-list">
+        ${trendBullet(["Structure", pattern.structure || "Not set"])}
+        ${trendBullet(["Hook style", pattern.hook_style || "Not set"])}
+        ${trendBullet(["Pacing", pattern.pacing || "Not set"])}
+        ${trendBullet(["Tone", pattern.tone || "Not set"])}
+        ${trendBullet(["Formatting", pattern.formatting || "Not set"])}
+        ${trendBullet(["Why this worked", pattern.why_it_worked || "Not set"])}
+        ${trendBullet(["Adaptation rule", pattern.adaptation_rule || "Use the structure, not the wording."])}
+      </ul>
+    </section>
+    <div class="actions left">
+      <button onclick='usePatternInPost(event, ${jsArg(pattern.id)})'>Use Pattern</button>
+      ${pattern.source_url ? `<a class="button-link secondary-link" href="${escapeAttr(pattern.source_url)}" target="_blank" rel="noreferrer">Open Source</a>` : ""}
+      <button class="secondary" onclick='archivePattern(event, ${jsArg(pattern.id)})'>Archive</button>
+      <button class="quiet-button" onclick='ignorePattern(event, ${jsArg(pattern.id)})'>Ignore</button>
+    </div>
+  `;
+}
+
+function renderCreatePostPatternHint() {
+  const hint = $("createPostPatternHint");
+  if (!hint) return;
+  const pattern = state.selectedPatternForCreate;
+  if (!pattern) {
+    hint.classList.add("hidden");
+    hint.innerHTML = "";
+    return;
+  }
+  hint.classList.remove("hidden");
+  hint.innerHTML = `
+    <strong>${escapeHtml(pattern.pattern_name || "Selected pattern")}</strong>
+    <span>${escapeHtml(pattern.structure || pattern.adaptation_rule || "Use the structure, not the wording.")}</span>
+    <button class="quiet-button" type="button" onclick="clearSelectedPattern(event)">Remove</button>
+  `;
+}
+
+window.clearSelectedPattern = (event) => {
+  event?.stopPropagation();
+  state.selectedPatternForCreate = null;
+  $("createPostUsePatterns").checked = false;
+  renderCreatePostPatternHint();
+};
+
+window.usePatternInPost = (event, id) => {
+  event.stopPropagation();
+  const pattern = state.patternDetail?.id === id ? state.patternDetail : findPatternItem(id);
+  if (!pattern) return;
+  state.selectedPatternForCreate = pattern;
+  $("createPostUsePatterns").checked = true;
+  $("createPostTopic").value = pattern.topic || $("createPostTopic").value || "Leadpoet";
+  if (!$("createPostInstruction").value.trim()) {
+    $("createPostInstruction").value = pattern.structure || pattern.pattern_name || "";
+  }
+  renderCreatePostPatternHint();
+  closeModal("patternModal");
+  openCreatePostModal();
+};
+
+window.archivePattern = (event, id) => updatePatternStatus(event, id, "archive");
+
+window.ignorePattern = (event, id) => updatePatternStatus(event, id, "ignore");
+
+function updatePatternStatus(event, id, action) {
+  runButton(event.currentTarget, "Saving...", async () => {
+    await api(`/api/patterns/${encodeURIComponent(id)}/${action}`, { method: "POST", body: "{}" });
+    closeModal("patternModal");
+    showMessage(action === "archive" ? "Pattern archived." : "Pattern ignored.");
+    await refresh();
+  });
+}
+
+function patternSignal(pattern) {
+  const metrics = pattern.metrics || {};
+  if (metrics.bookmarks !== null && metrics.bookmarks !== undefined) return `${metric(metrics.bookmarks)} bookmarks`;
+  if (metrics.replies !== null && metrics.replies !== undefined) return `${metric(metrics.replies)} replies`;
+  if (metrics.reposts !== null && metrics.reposts !== undefined) return `${metric(metrics.reposts)} reposts`;
+  if (metrics.likes !== null && metrics.likes !== undefined) return `${metric(metrics.likes)} likes`;
+  if (metrics.impressions !== null && metrics.impressions !== undefined) return `${metric(metrics.impressions)} impressions`;
+  return pattern.engagement_notes || "No signal yet";
 }
 
 function trendDetailBullets(trend) {
@@ -1183,6 +1364,7 @@ window.postNow = (event, id) => {
 
 function openCreatePostModal() {
   $("createPostResult").innerHTML = "";
+  renderCreatePostPatternHint();
   openModal("createPostModal");
   window.setTimeout(() => $("createPostInstruction").focus(), 0);
 }
@@ -1197,6 +1379,8 @@ async function createPost() {
       topic: $("createPostTopic").value || "Leadpoet",
       post_type: $("createPostType").value || "founder_insight",
       use_trends: $("createPostUseTrends").checked,
+      use_patterns: $("createPostUsePatterns").checked,
+      pattern_ids: state.selectedPatternForCreate ? [state.selectedPatternForCreate.id] : [],
       best_version: $("createPostQuality").value === "best_version",
       scheduled_at: $("createPostScheduled").value,
       extra_context: $("createPostExtra").value,
@@ -1212,6 +1396,9 @@ async function createPost() {
   $("createPostExtra").value = "";
   $("createPostScheduled").value = "";
   $("createPostUseTrends").checked = false;
+  $("createPostUsePatterns").checked = false;
+  state.selectedPatternForCreate = null;
+  renderCreatePostPatternHint();
   $("createPostQuality").value = "standard";
   await refresh();
   setView("reviewer");
@@ -1228,6 +1415,7 @@ async function planWeek() {
       cadence: $("planCadence").value,
       trend_window_days: 14,
       use_trends: $("planUseTrends").checked,
+      use_patterns: $("planUsePatterns").checked,
       allow_evergreen: $("planAllowEvergreen").checked,
       best_version: $("planQuality").value === "best_version",
       instruction: $("planInstruction").value,
@@ -1534,7 +1722,7 @@ async function publishDue() {
 async function loadTrends() {
   const payload = await api("/api/trends?limit=100&status=unused");
   state.savedTrends = payload.items || [];
-  $("trendList").innerHTML = state.savedTrends.length
+  $("savedTrendList").innerHTML = state.savedTrends.length
     ? state.savedTrends.map(trendCard).join("")
     : `<p class="muted">No saved trends yet. The scheduled trend refresh will add current items.</p>`;
 }
@@ -1597,6 +1785,7 @@ function renderAccount() {
     syncRow("Last X post sync", sync.x_posts_sync, "New posts imported from X"),
     syncRow("Last X metrics sync", sync.x_metrics_sync, "Fresh public metric snapshots"),
     syncRow("Last trend refresh", sync.trends_sync, "Daily and weekly trend context"),
+    syncRow("Last pattern refresh", sync.patterns_sync, "Reusable post mechanics from Pattern Scout"),
     syncPlainRow("Total X posts stored", String(stats.total_x_posts_stored || 0), "Stored authored X posts"),
     syncPlainRow("Latest imported X post", stats.latest_imported_x_post_date ? formatDateTime(stats.latest_imported_x_post_date) : "None yet", "Newest stored X post"),
     syncPlainRow("Latest sync error", syncStatus.latest_error || latestSyncError(sync) || "None", "Most recent sync issue"),
@@ -1668,7 +1857,7 @@ function fallbackConnections(status) {
     scrapingdog: {
       status: status.scrapingdog_configured ? "connected" : "not_connected",
       label: "ScrapingDog",
-      description: "Trend source used to refresh AI, sales, and lead gen trends.",
+      description: "Source used to refresh trends and Pattern Scout examples.",
     },
     daily_sync: {
       status: status.daily_sync_configured ? "connected" : "not_configured",
@@ -1742,7 +1931,7 @@ function syncPlainRow(title, value, description = "") {
 }
 
 function latestSyncError(sync) {
-  const items = [sync?.trends_sync, sync?.x_daily_sync, sync?.x_posts_sync, sync?.x_metrics_sync].filter(Boolean);
+  const items = [sync?.patterns_sync, sync?.trends_sync, sync?.x_daily_sync, sync?.x_posts_sync, sync?.x_metrics_sync].filter(Boolean);
   return items.find((item) => item.error_message)?.error_message || "";
 }
 
@@ -1974,6 +2163,28 @@ function setup() {
   document.addEventListener("click", closePostFieldEditor);
   $("generatePostButton").addEventListener("click", (event) => runButton(event.currentTarget, "Generating...", createPost));
   $("planWeekButton").addEventListener("click", (event) => runButton(event.currentTarget, "Creating...", planWeek));
+  $("trendDailyButton").addEventListener("click", () => {
+    state.selectedTrendWindow = "daily";
+    renderDashboardTrends();
+  });
+  $("trendWeeklyButton").addEventListener("click", () => {
+    state.selectedTrendWindow = "weekly";
+    renderDashboardTrends();
+  });
+  $("patternDailyButton").addEventListener("click", () => {
+    state.selectedPatternWindow = "daily";
+    renderDashboardPatterns();
+  });
+  $("patternWeeklyButton").addEventListener("click", () => {
+    state.selectedPatternWindow = "weekly";
+    renderDashboardPatterns();
+  });
+  $("createPostUsePatterns").addEventListener("change", () => {
+    if (!$("createPostUsePatterns").checked) {
+      state.selectedPatternForCreate = null;
+    }
+    renderCreatePostPatternHint();
+  });
   $("loadTrendsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Loading...", loadTrends));
   $("saveAccountButton").addEventListener("click", (event) => runButton(event.currentTarget, "Saving...", saveAccount));
   $("accountSyncPostsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncPosts));

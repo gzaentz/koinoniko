@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-full-height-voice">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-pattern-scout-sidebar-toggle">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -86,19 +86,33 @@
       <section id="message" class="message hidden"></section>
 
       <section class="view active" id="dashboardView">
-        <div class="dashboard-grid">
+        <div class="dashboard-top-grid">
           <section class="panel trend-panel">
             <div class="panel-header">
-              <h2>Daily Trends</h2>
+              <div>
+                <h2>Trends</h2>
+                <p class="panel-subtitle">What Gavin may want to comment on.</p>
+              </div>
+              <div class="segmented-control" role="group" aria-label="Trend window">
+                <button class="secondary active" id="trendDailyButton" type="button">Daily</button>
+                <button class="secondary" id="trendWeeklyButton" type="button">Weekly</button>
+              </div>
             </div>
-            <div id="dailyTrendList" class="trend-list trend-scroll"></div>
+            <div id="trendList" class="trend-list trend-scroll"></div>
           </section>
 
-          <section class="panel trend-panel">
+          <section class="panel patterns-panel">
             <div class="panel-header">
-              <h2>Weekly Trends</h2>
+              <div>
+                <h2>Patterns</h2>
+                <p class="panel-subtitle">Post mechanics getting traction now.</p>
+              </div>
+              <div class="segmented-control" role="group" aria-label="Pattern window">
+                <button class="secondary active" id="patternDailyButton" type="button">Daily</button>
+                <button class="secondary" id="patternWeeklyButton" type="button">Weekly</button>
+              </div>
             </div>
-            <div id="weeklyTrendList" class="trend-list trend-scroll"></div>
+            <div id="patternList" class="pattern-list trend-scroll"></div>
           </section>
         </div>
 
@@ -358,7 +372,9 @@
         </div>
         <div class="option-row">
           <label class="inline-check"><input id="createPostUseTrends" type="checkbox"> Use trends</label>
+          <label class="inline-check"><input id="createPostUsePatterns" type="checkbox"> Use patterns</label>
         </div>
+        <div id="createPostPatternHint" class="selected-pattern-hint hidden"></div>
         <label>Extra instruction<textarea id="createPostExtra" rows="3"></textarea></label>
         <div class="modal-actions">
           <button id="generatePostButton">Generate Post</button>
@@ -398,6 +414,7 @@
         </div>
         <div class="option-row">
           <label class="inline-check"><input id="planUseTrends" type="checkbox"> Use trends</label>
+          <label class="inline-check"><input id="planUsePatterns" type="checkbox"> Use patterns</label>
           <label class="inline-check"><input id="planAllowEvergreen" type="checkbox" checked> Allow evergreen</label>
         </div>
         <label>Optional instruction<textarea id="planInstruction" rows="3" placeholder="Example: make the sales posts sharper and more founder-led."></textarea></label>
@@ -424,11 +441,27 @@
             <h3>Saved Trends</h3>
             <button class="quiet-button" id="loadTrendsButton">Refresh</button>
           </div>
-          <div id="trendList" class="stack"></div>
+          <div id="savedTrendList" class="stack"></div>
         </section>
       </div>
     </section>
 
-    <script src="/static/app.js?v=20260627-classification-combo"></script>
+    <section class="modal hidden" id="patternModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="patternModal"></div>
+      <div class="modal-card wide">
+        <div class="modal-header">
+          <div>
+            <span class="eyebrow">Pattern Scout</span>
+            <h2 id="patternModalTitle">Pattern details</h2>
+          </div>
+          <button class="icon-button" data-close-modal="patternModal" aria-label="Close">x</button>
+        </div>
+        <div id="patternModalBody" class="detail-stack"></div>
+      </div>
+    </section>
+
+    <datalist id="topicOptions"></datalist>
+    <datalist id="postTypeOptions"></datalist>
+    <script src="/static/app.js?v=20260627-pattern-scout-classification-combo"></script>
   </body>
 </html>

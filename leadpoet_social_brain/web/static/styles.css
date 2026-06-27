@@ -160,11 +160,11 @@ a {
 }
 
 .brand-row {
-  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-height: 36px;
 }
 
 .brand {
@@ -172,9 +172,10 @@ a {
   flex-direction: row;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   width: auto;
   height: 34px;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   white-space: nowrap;
 }
 
@@ -193,30 +194,37 @@ a {
   font-family: var(--font-display);
   font-size: 18px;
   font-weight: 500;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   line-height: 1;
   white-space: nowrap;
 }
 
 .sidebar-toggle {
-  position: absolute;
-  top: 2px;
-  right: -39px;
-  z-index: 10;
-  width: 28px;
-  min-height: 28px;
+  flex: 0 0 34px;
+  width: 34px;
+  min-height: 34px;
   padding: 0;
-  border-radius: 999px;
-  border-color: var(--line);
-  background: rgba(255, 255, 255, 0.94);
+  border-radius: 8px;
+  border-color: transparent;
+  background: transparent;
   color: var(--ink);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.08);
-  backdrop-filter: blur(12px);
+  box-shadow: none;
+  opacity: 0.78;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, opacity 160ms ease;
+}
+
+.sidebar-toggle:hover,
+.sidebar-toggle:focus-visible {
+  border-color: var(--line);
+  background: var(--soft);
+  color: var(--ink);
+  opacity: 1;
+  outline: 0;
 }
 
 .sidebar-toggle-icon {
   display: block;
-  font-size: 24px;
+  font-size: 22px;
   line-height: 1;
   transform: translateY(-1px);
   transition: transform 180ms ease;
@@ -309,7 +317,7 @@ main {
   width: var(--sidebar-rail-width);
   padding: 20px 14px;
   align-items: center;
-  gap: 26px;
+  gap: 18px;
 }
 
 .sidebar-collapsed main {
@@ -323,12 +331,16 @@ main {
 }
 
 .sidebar-collapsed .brand-row {
-  justify-content: center;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 10px;
 }
 
 .sidebar-collapsed .brand {
   justify-content: center;
-  width: 100%;
+  width: 34px;
+  flex: 0 0 auto;
 }
 
 .sidebar-collapsed .brand strong,
@@ -464,7 +476,8 @@ main {
   gap: 18px;
 }
 
-.dashboard-grid {
+.dashboard-grid,
+.dashboard-top-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
@@ -623,6 +636,7 @@ main {
 }
 
 .trend-list,
+.pattern-list,
 .signal-list,
 .stack,
 .card-list,
@@ -637,7 +651,8 @@ main {
   margin-top: 16px;
 }
 
-.trend-panel {
+.trend-panel,
+.patterns-panel {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -651,6 +666,7 @@ main {
 }
 
 .trend-row,
+.pattern-card,
 .trend-card,
 .queue-card,
 .revision,
@@ -662,7 +678,8 @@ main {
   padding: 15px;
 }
 
-.trend-row {
+.trend-row,
+.pattern-card {
   display: grid;
   gap: 7px;
   min-height: clamp(132px, 13vh, 176px);
@@ -670,12 +687,15 @@ main {
 }
 
 .trend-row[role="button"],
+.pattern-card[role="button"],
 .trend-card[role="button"] {
   cursor: pointer;
 }
 
 .trend-row[role="button"]:hover,
 .trend-row[role="button"]:focus-visible,
+.pattern-card[role="button"]:hover,
+.pattern-card[role="button"]:focus-visible,
 .trend-card[role="button"]:hover,
 .trend-card[role="button"]:focus-visible {
   background: var(--soft);
@@ -694,7 +714,8 @@ main {
   color: var(--muted);
 }
 
-.trend-row p {
+.trend-row p,
+.pattern-card p {
   color: var(--muted);
   font-size: 13px;
   display: -webkit-box;
@@ -703,8 +724,74 @@ main {
   overflow: hidden;
 }
 
-.trend-row strong {
+.trend-row strong,
+.pattern-card strong {
   color: var(--ink);
+}
+
+.panel-subtitle {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 3px;
+}
+
+.segmented-control {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+}
+
+.segmented-control button {
+  min-height: 30px;
+  padding: 5px 10px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+}
+
+.segmented-control button.active {
+  background: var(--white);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.pattern-rule,
+.selected-pattern-hint {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  padding: 11px 12px;
+}
+
+.pattern-rule {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.selected-pattern-hint {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 12px;
+  align-items: center;
+}
+
+.selected-pattern-hint strong,
+.selected-pattern-hint span {
+  min-width: 0;
+}
+
+.selected-pattern-hint span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.selected-pattern-hint button {
+  grid-row: 1 / span 2;
+  grid-column: 2;
 }
 
 .trend-detail-section {
@@ -906,10 +993,29 @@ main {
 
 .account-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: minmax(0, 1.04fr) minmax(360px, 0.96fr);
+  grid-template-areas:
+    "connections model"
+    "sync account";
+  gap: 18px 20px;
   align-items: start;
-  max-width: 1040px;
+  max-width: none;
+}
+
+.account-layout > .account-section:nth-child(1) {
+  grid-area: connections;
+}
+
+.account-layout > .account-section:nth-child(2) {
+  grid-area: sync;
+}
+
+.account-model-section {
+  grid-area: model;
+}
+
+.account-security-section {
+  grid-area: account;
 }
 
 .account-section .panel-header {
@@ -977,10 +1083,23 @@ main {
 }
 
 .sync-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-  flex-wrap: wrap;
   margin: 16px 0;
+}
+
+.sync-actions button {
+  width: 100%;
+}
+
+.account-model-section .settings-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+}
+
+.account-model-section .actions {
+  grid-column: 1 / -1;
 }
 
 .account-card {
@@ -1435,11 +1554,20 @@ main {
 
 @media (max-width: 1100px) {
   .dashboard-grid,
+  .dashboard-top-grid,
   .account-layout,
   .board,
   .voice-status-panel,
   .two-column {
     grid-template-columns: 1fr;
+  }
+
+  .account-layout {
+    grid-template-areas:
+      "connections"
+      "sync"
+      "model"
+      "account";
   }
 
   #dashboardView.view.active {
@@ -1478,7 +1606,8 @@ main {
     max-height: none;
   }
 
-  .dashboard-grid {
+  .dashboard-grid,
+  .dashboard-top-grid {
     margin-bottom: 18px;
   }
 
@@ -1596,6 +1725,11 @@ main {
   }
 
   .compact-meta-row {
+    grid-template-columns: 1fr;
+  }
+
+  .sync-actions,
+  .account-model-section .settings-form {
     grid-template-columns: 1fr;
   }
 }

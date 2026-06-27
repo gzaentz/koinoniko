@@ -29,6 +29,12 @@ from leadpoet_social_brain.core.models import (
 )
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
+from leadpoet_social_brain.pattern_scout import (
+    PATTERN_REFRESH_MISSING_PROVIDER,
+    add_pattern_example,
+    ingest_patterns_batch_csv,
+    refresh_patterns,
+)
 from leadpoet_social_brain.platforms.x import get_x_adapter
 from leadpoet_social_brain.platforms.x_api import (
     DEFAULT_IMPORT_POST_TYPE,
@@ -149,6 +155,43 @@ def build_parser() -> argparse.ArgumentParser:
     add_pattern.add_argument("--inactive", action="store_true")
     add_pattern.set_defaults(func=cmd_add_pattern)
 
+    add_pattern_example_parser = subparsers.add_parser("add-pattern-example", help="Add one Pattern Scout source example.")
+    add_pattern_example_parser.add_argument("--source-url")
+    add_pattern_example_parser.add_argument("--source-author")
+    add_pattern_example_parser.add_argument("--source-text")
+    add_pattern_example_parser.add_argument("--source-summary")
+    add_pattern_example_parser.add_argument("--topic")
+    add_pattern_example_parser.add_argument("--category")
+    add_pattern_example_parser.add_argument("--pattern-name")
+    add_pattern_example_parser.add_argument("--hook-style")
+    add_pattern_example_parser.add_argument("--structure")
+    add_pattern_example_parser.add_argument("--pacing")
+    add_pattern_example_parser.add_argument("--tone")
+    add_pattern_example_parser.add_argument("--formatting")
+    add_pattern_example_parser.add_argument("--why-it-worked")
+    add_pattern_example_parser.add_argument("--adaptation-rule")
+    add_pattern_example_parser.add_argument("--engagement-notes")
+    add_metric_args(add_pattern_example_parser)
+    add_pattern_example_parser.add_argument("--collected-at")
+    add_pattern_example_parser.add_argument("--window", default="manual", choices=["manual", "daily", "weekly"])
+    add_pattern_example_parser.add_argument("--status", default="active", choices=["active", "archived", "ignored"])
+    add_pattern_example_parser.set_defaults(func=cmd_add_pattern_example)
+
+    patterns_batch = subparsers.add_parser("ingest-patterns-batch", help="Import Pattern Scout examples from CSV.")
+    patterns_batch.add_argument("--csv", required=True, dest="csv_path")
+    patterns_batch.set_defaults(func=cmd_ingest_patterns_batch)
+
+    list_patterns = subparsers.add_parser("list-patterns", help="List Pattern Scout examples.")
+    list_patterns.add_argument("--status", default="active")
+    list_patterns.add_argument("--window")
+    list_patterns.add_argument("--limit", type=int, default=20)
+    list_patterns.set_defaults(func=cmd_list_patterns)
+
+    refresh_pattern_parser = subparsers.add_parser("refresh-patterns", help="Refresh Pattern Scout examples using ScrapingDog and the configured provider.")
+    refresh_pattern_parser.add_argument("--limit", type=int, default=5)
+    refresh_pattern_parser.add_argument("--window", default="daily", choices=["daily", "weekly"])
+    refresh_pattern_parser.set_defaults(func=cmd_refresh_patterns)
+
     generate = subparsers.add_parser("generate-x", help="Generate X drafts.")
     generate.add_argument("--topic", required=True)
     generate.add_argument("--post-type", required=True)
@@ -159,6 +202,8 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--extra-context")
     generate.add_argument("--max-chars", type=int)
     generate.add_argument("--use-trends", action="store_true")
+    generate.add_argument("--use-patterns", action="store_true")
+    generate.add_argument("--pattern-id", action="append", dest="pattern_ids", default=[])
     generate.add_argument("--variants", type=int, default=3)
     generate.add_argument("--best-version", action="store_true")
     generate.set_defaults(func=cmd_generate_x)
@@ -167,6 +212,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_week.add_argument("--week-start", required=True)
     plan_week.add_argument("--posts", type=int, default=7)
     plan_week.add_argument("--use-trends", action="store_true")
+    plan_week.add_argument("--use-patterns", action="store_true")
     plan_week.add_argument("--trend-window-days", type=int, default=14)
     plan_week.add_argument("--topic-mix")
     plan_week.add_argument("--cadence", default="daily_mornings")
@@ -293,6 +339,8 @@ def build_parser() -> argparse.ArgumentParser:
     prompt.add_argument("--extra-context")
     prompt.add_argument("--max-chars", type=int)
     prompt.add_argument("--use-trends", action="store_true")
+    prompt.add_argument("--use-patterns", action="store_true")
+    prompt.add_argument("--pattern-id", action="append", dest="pattern_ids", default=[])
     prompt.set_defaults(func=cmd_prompt_x)
 
     return parser
@@ -559,6 +607,96 @@ def cmd_add_pattern(store: SQLiteStore, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_add_pattern_example(store: SQLiteStore, args: argparse.Namespace) -> int:
+    pattern = add_pattern_example(
+        store,
+        source_url=args.source_url,
+        source_author=args.source_author,
+        source_text=args.source_text,
+        source_summary=args.source_summary,
+        topic=args.topic,
+        category=args.category,
+        pattern_name=args.pattern_name,
+        hook_style=args.hook_style,
+        structure=args.structure,
+        pacing=args.pacing,
+        tone=args.tone,
+        formatting=args.formatting,
+        why_it_worked=args.why_it_worked,
+        adaptation_rule=args.adaptation_rule,
+        engagement_notes=args.engagement_notes,
+        likes=args.likes,
+        replies=args.replies,
+        reposts=args.reposts,
+        quotes=args.quotes,
+        bookmarks=args.bookmarks,
+        impressions=args.impressions,
+        collected_at=args.collected_at,
+        window=args.window,
+        status=args.status,
+    )
+    print(f"Saved Pattern Scout example {pattern.id}")
+    print(f"Pattern: {pattern.pattern_name or 'Observed pattern'}")
+    print(f"Structure: {pattern.structure or 'not set'}")
+    print(f"Rule: {pattern.adaptation_rule or 'Use the structure, not the wording.'}")
+    return 0
+
+
+def cmd_ingest_patterns_batch(store: SQLiteStore, args: argparse.Namespace) -> int:
+    result = ingest_patterns_batch_csv(store, args.csv_path)
+    print("Imported Pattern Scout batch")
+    print(f"Patterns imported: {result.imported}")
+    print(f"Patterns skipped: {result.skipped}")
+    if result.errors:
+        print("Errors:")
+        for error in result.errors[:20]:
+            print(f"- {error}")
+    print("Top categories:")
+    print_counter(result.categories)
+    print("Top pattern names:")
+    print_counter(result.pattern_names)
+    return 0
+
+
+def cmd_list_patterns(store: SQLiteStore, args: argparse.Namespace) -> int:
+    patterns = store.list_viral_patterns(status=args.status, window=args.window, limit=args.limit)
+    if not patterns:
+        print("No Pattern Scout examples found.")
+        return 0
+    for pattern in patterns:
+        signal = pattern_engagement_signal(pattern)
+        print(
+            f"{pattern.id} | {pattern.window} | {pattern.category or 'other'} | "
+            f"{pattern.pattern_name or 'Observed pattern'} | {signal}"
+        )
+        if pattern.structure:
+            print(f"  Structure: {pattern.structure}")
+        if pattern.why_it_worked:
+            print(f"  Why: {pattern.why_it_worked}")
+        if pattern.source_url:
+            print(f"  Source: {pattern.source_url}")
+    return 0
+
+
+def cmd_refresh_patterns(store: SQLiteStore, args: argparse.Namespace) -> int:
+    provider = load_configured_provider(store)
+    if not provider:
+        raise SystemExit(PATTERN_REFRESH_MISSING_PROVIDER)
+    try:
+        result = refresh_patterns(store, provider, limit=args.limit, window=args.window)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    print("Pattern Scout refresh")
+    print(f"Candidates fetched: {result.fetched}")
+    print(f"Patterns stored: {result.stored}")
+    print(f"Skipped: {result.skipped}")
+    if result.errors:
+        print("Errors:")
+        for error in result.errors[:20]:
+            print(f"- {error}")
+    return 0
+
+
 def cmd_generate_x(store: SQLiteStore, args: argparse.Namespace) -> int:
     provider = load_configured_provider(store)
     if not provider:
@@ -576,6 +714,8 @@ def cmd_generate_x(store: SQLiteStore, args: argparse.Namespace) -> int:
         max_chars=args.max_chars,
         extra_context=args.extra_context,
         use_trends=args.use_trends,
+        use_patterns=args.use_patterns,
+        pattern_ids=args.pattern_ids,
     )
     drafts = generator.generate(request, variants=args.variants, best_version=args.best_version)
     for index, draft in enumerate(drafts, start=1):
@@ -604,6 +744,7 @@ def cmd_plan_week_x(store: SQLiteStore, args: argparse.Namespace) -> int:
             variants_per_slot=args.variants_per_slot,
             allow_evergreen=args.allow_evergreen,
             best_version=args.best_version,
+            use_patterns=args.use_patterns,
         )
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
@@ -925,6 +1066,8 @@ def cmd_prompt_x(store: SQLiteStore, args: argparse.Namespace) -> int:
         max_chars=args.max_chars,
         extra_context=args.extra_context,
         use_trends=getattr(args, "use_trends", False),
+        use_patterns=getattr(args, "use_patterns", False),
+        pattern_ids=getattr(args, "pattern_ids", []),
     )
     print(generator.build_prompt(request))
     return 0
@@ -974,6 +1117,20 @@ def print_counter(counter) -> None:
         return
     for key, count in counter.most_common(5):
         print(f"- {key}: {count}")
+
+
+def pattern_engagement_signal(pattern) -> str:
+    if pattern.bookmarks is not None:
+        return f"{pattern.bookmarks} bookmarks"
+    if pattern.replies is not None:
+        return f"{pattern.replies} replies"
+    if pattern.reposts is not None:
+        return f"{pattern.reposts} reposts"
+    if pattern.likes is not None:
+        return f"{pattern.likes} likes"
+    if pattern.impressions is not None:
+        return f"{pattern.impressions} impressions"
+    return "no metrics"
 
 
 def load_configured_provider(store: SQLiteStore):
