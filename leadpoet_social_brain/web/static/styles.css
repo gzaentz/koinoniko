@@ -1469,17 +1469,6 @@ main {
   width: min(980px, 100%);
 }
 
-.assistant-pill-button {
-  min-height: 38px;
-  border-radius: 999px;
-  padding: 9px 16px;
-  border-color: var(--black);
-  background: var(--black);
-  color: var(--white);
-  font-size: 13px;
-  font-weight: 600;
-}
-
 .assistant-launcher {
   position: fixed;
   right: 24px;
@@ -1549,8 +1538,7 @@ main {
 }
 
 .assistant-expand-button {
-  min-width: 82px;
-  box-shadow: none;
+  flex: 0 0 34px;
 }
 
 .assistant-header h2 {
