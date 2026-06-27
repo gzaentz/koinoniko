@@ -2410,9 +2410,11 @@ function renderAssistantDrawer() {
   }
   const messages = state.assistant.messages.map(assistantMessageHtml);
   if (state.assistant.loading) {
-    messages.push(`<div class="assistant-message assistant"><span class="assistant-loading">Thinking...</span></div>`);
+    messages.push(`<div class="assistant-message assistant assistant-thinking"><span class="assistant-loading">Thinking</span></div>`);
   }
-  $("assistantMessages").innerHTML = messages.length
+  const messageList = $("assistantMessages");
+  messageList.classList.toggle("has-chat", Boolean(messages.length));
+  messageList.innerHTML = messages.length
     ? messages.join("")
     : `<div class="assistant-empty">Ask what is working, what feels weak, or what Gavin should post next.</div>`;
   $("assistantSendButton").disabled = state.assistant.loading;

@@ -331,6 +331,7 @@ class SocialBrainTest(unittest.TestCase):
         static_dir = Path("leadpoet_social_brain/web/static")
         index_html = (static_dir / "index.html").read_text(encoding="utf-8")
         app_js = (static_dir / "app.js").read_text(encoding="utf-8")
+        styles_css = (static_dir / "styles.css").read_text(encoding="utf-8")
         favicon_svg = (static_dir / "koinoniko-favicon.svg").read_text(encoding="utf-8")
 
         self.assertTrue((static_dir / "koinoniko-logo.svg").exists())
@@ -417,6 +418,9 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("toggleAssistantExpanded", app_js)
         self.assertIn("assistantRichTextHtml", app_js)
         self.assertIn("assistantInlineHtml", app_js)
+        self.assertIn("assistant-thinking", app_js)
+        self.assertIn(".assistant-messages.has-chat::before", styles_css)
+        self.assertIn("grid-template-columns: minmax(0, 1fr) auto", styles_css)
         self.assertIn('drawer.classList.toggle("expanded"', app_js)
         self.assertNotIn('data-view="assistant"', index_html)
         self.assertIn("Use the structure, not the wording.", app_js)
