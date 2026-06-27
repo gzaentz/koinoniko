@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-assistant-expand-control">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-active-writing-rules">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -197,18 +197,18 @@
               <div id="voiceCoverageGrid" class="voice-coverage-block"></div>
               <p id="voiceCoverageRecommendation" class="voice-coverage-recommendation">Add a few Voice Examples to see coverage.</p>
             </section>
-            <section class="voice-compact-section" aria-labelledby="voiceAvoidTitle">
+            <section class="voice-compact-section" aria-labelledby="voiceRulesTitle">
               <div class="voice-section-heading">
-                <h3 id="voiceAvoidTitle">Writing Guardrails</h3>
-                <p>Words and habits Koinoniko should write around.</p>
+                <h3 id="voiceRulesTitle">Active Writing Rules</h3>
+                <p>Positioning, Voice, and review rules Koinoniko uses when writing.</p>
               </div>
-              <div id="voiceAvoidPhraseList" class="phrase-chip-list"></div>
-              <div class="phrase-editor">
-                <input id="voiceAvoidPhraseInput" placeholder="Add phrase">
-                <button class="secondary" id="voiceAvoidAddButton" type="button">Add</button>
-                <button id="voiceAvoidSaveButton" type="button">Save</button>
-              </div>
-              <span id="voiceAvoidSaveStatus" class="inline-save-status" aria-live="polite"></span>
+              <button class="voice-rules-card" id="voiceRulesButton" type="button">
+                <span>
+                  <strong id="voiceRulesCount">Loading rules</strong>
+                  <small id="voiceRulesSummary">Positioning, Voice, Review Filters, and Writing Guardrails</small>
+                </span>
+                <strong>View Rules</strong>
+              </button>
             </section>
           </section>
         </div>
@@ -348,6 +348,35 @@
           <summary>Show suggested examples</summary>
           <div id="voiceSuggestionsList" class="voice-list compact"></div>
         </details>
+      </div>
+    </section>
+
+    <section class="modal hidden" id="voiceRulesModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="voiceRulesModal"></div>
+      <div class="modal-card wide voice-rules-modal-card">
+        <div class="modal-header">
+          <div>
+            <span class="eyebrow">Voice</span>
+            <h2>Active Writing Rules</h2>
+          </div>
+          <button class="icon-button" data-close-modal="voiceRulesModal" aria-label="Close">x</button>
+        </div>
+        <div id="voiceRulesList" class="voice-rules-list"></div>
+        <section class="voice-rule-group voice-rule-editor" aria-labelledby="voiceAvoidTitle">
+          <div class="voice-rule-group-heading">
+            <div>
+              <h3 id="voiceAvoidTitle">Writing Guardrails</h3>
+              <p>Words and habits Koinoniko should write around.</p>
+            </div>
+          </div>
+          <div id="voiceAvoidPhraseList" class="phrase-chip-list"></div>
+          <div class="phrase-editor">
+            <input id="voiceAvoidPhraseInput" placeholder="Add phrase">
+            <button class="secondary" id="voiceAvoidAddButton" type="button">Add</button>
+            <button id="voiceAvoidSaveButton" type="button">Save</button>
+          </div>
+          <span id="voiceAvoidSaveStatus" class="inline-save-status" aria-live="polite"></span>
+        </section>
       </div>
     </section>
 
@@ -573,6 +602,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260627-assistant-expand-control"></script>
+    <script src="/static/app.js?v=20260627-active-writing-rules"></script>
   </body>
 </html>

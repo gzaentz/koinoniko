@@ -300,6 +300,7 @@ class SQLiteStore:
             """
         )
         self._migrate_existing_schema()
+        self._ensure_required_context_sections()
         self.conn.commit()
 
     def _migrate_existing_schema(self) -> None:
@@ -321,6 +322,34 @@ class SQLiteStore:
         ]:
             self._ensure_column("trend_items", column, "TEXT")
         self._ensure_column("trend_items", "enrichment_status", "TEXT NOT NULL DEFAULT 'not_attempted'")
+
+    def _ensure_required_context_sections(self) -> None:
+        for section in required_context_sections():
+            exists = self.conn.execute(
+                "SELECT 1 FROM context_sections WHERE kind = ? AND name = ?",
+                (section.kind, section.name),
+            ).fetchone()
+            if exists:
+                continue
+            now = utc_now()
+            self.conn.execute(
+                """
+                INSERT INTO context_sections (
+                    id, kind, name, content, weight, active, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    section.id,
+                    section.kind,
+                    section.name,
+                    section.content,
+                    section.weight,
+                    int(section.active),
+                    now,
+                    now,
+                ),
+            )
 
     def save_content_queue_item(self, item: ContentQueueItem) -> ContentQueueItem:
         now = utc_now()
@@ -1827,6 +1856,7 @@ def default_context_sections() -> list[ContextSection]:
             ),
             weight=1.4,
         ),
+        *required_context_sections(),
         ContextSection(
             kind="bittensor",
             name="bittensor_subnet_context_v0",
@@ -1851,6 +1881,23 @@ def default_context_sections() -> list[ContextSection]:
                 "Current priorities: make Leadpoet concrete, show product progress, explain why context "
                 "matters, and attract serious inbound from customers, partners, and investors."
             ),
+        ),
+    ]
+
+
+def required_context_sections() -> list[ContextSection]:
+    return [
+        ContextSection(
+            kind="positioning",
+            name="leadpoet_intent_layer_v0",
+            content=(
+                "Leadpoet is the core intent layer for sales LLMs: proprietary buyer context, "
+                "timing signals, and account-level intent. Other tools, agents, and case studies "
+                "are market proof that the world needs intent infrastructure, not the source of "
+                "Leadpoet's unique wedge. When a trend mentions another vendor, use it to validate "
+                "Leadpoet's thesis and pull the point back to Leadpoet."
+            ),
+            weight=1.8,
         ),
     ]
 

@@ -17,6 +17,27 @@ DEFAULT_AVOID_PHRASES = [
     "vague market commentary",
 ]
 
+POSITIONING_RULES = [
+    (
+        "Leadpoet is the core intent layer: proprietary buyer context, timing signals, "
+        "and account-level intent."
+    ),
+    (
+        "Other tools, agents, and case studies are market proof that intent matters, "
+        "not the source of Leadpoet's unique wedge."
+    ),
+    (
+        "When referencing another product, validate the market shift, then pull the "
+        "point back to Leadpoet owning buyer timing and proprietary context."
+    ),
+]
+
+DEFAULT_VOICE_RULES = [
+    "Plain, direct, and specific.",
+    "Founder-led without sounding like a brand account.",
+    "Practical enough that a buyer or investor can see the business point.",
+]
+
 
 def load_avoid_phrases(store: SQLiteStore) -> list[str]:
     raw = store.get_app_setting(VOICE_AVOID_PHRASES_SETTING)

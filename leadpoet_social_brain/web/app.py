@@ -77,6 +77,7 @@ from leadpoet_social_brain.providers import (
     load_provider_from_env,
     resolve_model_routing,
 )
+from leadpoet_social_brain.skills import load_skill
 from leadpoet_social_brain.storage.sqlite_store import (
     DEFAULT_DB_PATH,
     DEFAULT_WEB_AUTH_USERNAME,
@@ -86,6 +87,8 @@ from leadpoet_social_brain.storage.sqlite_store import (
 from leadpoet_social_brain.trend_scout import refresh_web_trends, scrapingdog_configured, web_trend_groups
 from leadpoet_social_brain.voice import (
     DEFAULT_AVOID_PHRASES,
+    DEFAULT_VOICE_RULES,
+    POSITIONING_RULES,
     load_avoid_phrases,
     save_avoid_phrases,
 )
@@ -604,6 +607,8 @@ def route_api(
         return 200, {"items": voice_suggestions_payload(store)}
     if method == "GET" and parts == ["api", "voice", "coverage"]:
         return 200, voice_coverage_payload(store)
+    if method == "GET" and parts == ["api", "voice", "rules"]:
+        return 200, voice_rules_payload(store)
     if method == "GET" and parts == ["api", "voice", "avoid-phrases"]:
         return 200, {"items": load_avoid_phrases(store), "defaults": DEFAULT_AVOID_PHRASES}
     if method == "POST" and parts == ["api", "voice", "avoid-phrases"]:
@@ -1683,6 +1688,54 @@ def coverage_rows(counts: Counter[str], defaults: list[str]) -> list[dict[str, A
         if name not in names:
             names.append(name)
     return [{"name": name, "count": int(counts.get(name, 0))} for name in names[:8]]
+
+
+def voice_rules_payload(store: SQLiteStore) -> dict[str, Any]:
+    avoid_phrases = load_avoid_phrases(store)
+    groups = [
+        {
+            "title": "Positioning Rules",
+            "description": "How Koinoniko should frame Leadpoet in every post.",
+            "items": POSITIONING_RULES,
+        },
+        {
+            "title": "Voice Rules",
+            "description": "How Gavin's writing should feel.",
+            "items": current_voice_rules(store),
+        },
+        {
+            "title": "Review Filters",
+            "description": "Final checks before a draft is saved.",
+            "items": review_filter_rules(),
+        },
+    ]
+    rules_count = sum(len(group["items"]) for group in groups) + len(avoid_phrases)
+    return {
+        "rules_count": rules_count,
+        "summary": "Positioning, Voice, Review Filters, and Writing Guardrails",
+        "groups": groups,
+        "avoid_phrases": avoid_phrases,
+    }
+
+
+def current_voice_rules(store: SQLiteStore) -> list[str]:
+    current = current_voice_section(store)
+    if not current:
+        return list(DEFAULT_VOICE_RULES)
+    rules: list[str] = []
+    for section in voice_content_sections(current.content):
+        if section["title"] in {"Recurring voice traits", "Voice traits", "Reusable writing principles"}:
+            rules.extend(str(item).strip() for item in section["items"] if str(item).strip())
+    return rules[:8] or list(DEFAULT_VOICE_RULES)
+
+
+def review_filter_rules() -> list[str]:
+    try:
+        content = load_skill("review_filter.md").content
+    except FileNotFoundError:
+        return []
+    rules = [line[2:].strip() for line in content.splitlines() if line.startswith("- ")]
+    return [rule for rule in rules if rule]
 
 
 def voice_coverage_recommendation(topic_counts: Counter[str], type_counts: Counter[str], examples_count: int) -> str:

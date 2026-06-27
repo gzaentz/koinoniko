@@ -371,8 +371,12 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("Voice Examples", index_html)
         self.assertIn("Update Voice", index_html)
         self.assertIn("Voice Coverage", index_html)
+        self.assertIn("Active Writing Rules", index_html)
         self.assertIn("Writing Guardrails", index_html)
+        self.assertIn("View Rules", index_html)
         self.assertIn('id="voiceCoverageGrid"', index_html)
+        self.assertIn('id="voiceRulesButton"', index_html)
+        self.assertIn('id="voiceRulesModal"', index_html)
         self.assertIn('id="voiceAvoidPhraseList"', index_html)
         self.assertIn('id="voiceAvoidPhraseInput"', index_html)
         self.assertNotIn("Voice Context", index_html)
@@ -568,6 +572,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("/api/voice/current", app_js)
         self.assertIn("/api/voice/suggestions", app_js)
         self.assertIn("/api/voice/coverage", app_js)
+        self.assertIn("/api/voice/rules", app_js)
         self.assertIn("/api/voice/avoid-phrases", app_js)
         self.assertIn("/api/voice/examples/", app_js)
         self.assertIn("Suggest why this worked", app_js)
@@ -862,6 +867,8 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("# Founder Insight", prompt)
             self.assertIn("## skills/review_filter.md", prompt)
             self.assertIn("# Review Filter", prompt)
+            self.assertIn("Leadpoet is the core intent layer", prompt)
+            self.assertIn("Do not frame another tool, agent, or case study as owning Leadpoet's core intent advantage", prompt)
             store.close()
 
     def test_generation_prompt_is_example_first_not_label_heavy(self):
@@ -2756,6 +2763,30 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(type_counts["founder_insight"], 3)
             self.assertEqual(type_counts["product_update"], 0)
             self.assertIn("product update examples", coverage["recommendation"])
+
+    def test_voice_rules_endpoint_groups_positioning_voice_filters_and_guardrails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.seed_defaults()
+            save_avoid_phrases(store, ["game changer", "not just X, but Y"])
+            store.close()
+
+            status, payload = handle_api_request("GET", "/api/voice/rules", db_path=db_path)
+            self.assertEqual(status, 200)
+            groups = {group["title"]: group for group in payload["groups"]}
+            self.assertIn("Positioning Rules", groups)
+            self.assertIn("Voice Rules", groups)
+            self.assertIn("Review Filters", groups)
+            self.assertIn("Writing Guardrails", payload["summary"])
+            self.assertIn("game changer", payload["avoid_phrases"])
+            self.assertGreaterEqual(payload["rules_count"], 10)
+            self.assertTrue(
+                any("core intent layer" in item for item in groups["Positioning Rules"]["items"])
+            )
+            self.assertTrue(
+                any("owning Leadpoet's core intent advantage" in item for item in groups["Review Filters"]["items"])
+            )
 
     def test_voice_avoid_phrases_can_load_save_and_appear_in_prompts(self):
         with tempfile.TemporaryDirectory() as tmpdir:

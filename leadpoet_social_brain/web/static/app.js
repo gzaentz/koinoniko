@@ -1868,12 +1868,13 @@ async function refreshAfterAccountAction() {
 }
 
 async function loadVoice() {
-  const [status, current, examples, suggestions, coverage, avoidPhrases] = await Promise.all([
+  const [status, current, examples, suggestions, coverage, rules, avoidPhrases] = await Promise.all([
     api("/api/voice/status"),
     api("/api/voice/current"),
     api("/api/voice/examples"),
     api("/api/voice/suggestions"),
     api("/api/voice/coverage"),
+    api("/api/voice/rules"),
     api("/api/voice/avoid-phrases"),
   ]);
   state.voice = {
@@ -1882,6 +1883,7 @@ async function loadVoice() {
     examples: examples.items || [],
     suggestions: suggestions.items || [],
     coverage,
+    rules,
     avoidPhrases: avoidPhrases.items || [],
   };
   state.voiceAvoidDraft = [...state.voice.avoidPhrases];
@@ -1893,7 +1895,7 @@ function renderVoice() {
   $("updateVoiceButton").disabled = status.status === "needs_examples";
   renderCurrentVoice();
   renderVoiceCoverage();
-  renderAvoidPhrases();
+  renderVoiceRules();
   renderVoiceTopicOptions();
   renderVoiceExamples();
   renderVoiceSuggestions();
@@ -1966,6 +1968,30 @@ function voiceCoverageLine(title, items) {
   `;
 }
 
+function renderVoiceRules() {
+  const rules = state.voice?.rules || {};
+  const avoidCount = (state.voiceAvoidDraft || []).length;
+  const groups = rules.groups || [];
+  const rulesCount = groups.reduce((total, group) => total + (group.items || []).length, 0) + avoidCount;
+  $("voiceRulesCount").textContent = `${metric(rulesCount || rules.rules_count || 0)} active rules`;
+  $("voiceRulesSummary").textContent = rules.summary || "Positioning, Voice, Review Filters, and Writing Guardrails";
+  $("voiceRulesList").innerHTML = groups.length
+    ? groups.map((group) => `
+      <section class="voice-rule-group">
+        <div class="voice-rule-group-heading">
+          <div>
+            <h3>${escapeHtml(group.title || "Rules")}</h3>
+            <p>${escapeHtml(group.description || "")}</p>
+          </div>
+          <span>${metric((group.items || []).length)}</span>
+        </div>
+        <ul>${(group.items || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </section>
+    `).join("")
+    : `<p class="empty-copy compact">No active rules loaded yet.</p>`;
+  renderAvoidPhrases();
+}
+
 function renderAvoidPhrases() {
   const phrases = state.voiceAvoidDraft || [];
   $("voiceAvoidPhraseList").innerHTML = phrases.length
@@ -2004,8 +2030,12 @@ async function saveAvoidPhrases() {
   });
   state.voice.avoidPhrases = payload.items || [];
   state.voiceAvoidDraft = [...state.voice.avoidPhrases];
+  if (state.voice.rules) {
+    state.voice.rules.avoid_phrases = [...state.voiceAvoidDraft];
+    state.voice.rules.rules_count = (state.voice.rules.groups || []).reduce((total, group) => total + (group.items || []).length, 0) + state.voiceAvoidDraft.length;
+  }
   setVoiceAvoidSaveStatus("Saved");
-  renderAvoidPhrases();
+  renderVoiceRules();
   showMessage("Writing Guardrails saved.");
 }
 
@@ -3100,6 +3130,7 @@ function setup() {
     $(id).addEventListener("input", renderVoiceExamples);
   });
   $("voiceContextButton").addEventListener("click", () => openModal("voiceContextModal"));
+  $("voiceRulesButton").addEventListener("click", () => openModal("voiceRulesModal"));
   $("voiceAvoidAddButton").addEventListener("click", addAvoidPhrase);
   $("voiceAvoidSaveButton").addEventListener("click", (event) => runButton(event.currentTarget, "Saving...", saveAvoidPhrases));
   $("voiceAvoidPhraseInput").addEventListener("keydown", (event) => {

@@ -10,5 +10,5 @@ Before finalizing, check the draft against these rules.
 - Avoid fake profundity.
 - Avoid excessive symmetry.
 - Avoid repeated "not just X, but Y" framing.
+- Do not frame another tool, agent, or case study as owning Leadpoet's core intent advantage. Treat it as market proof, then bring the point back to Leadpoet's buyer timing and proprietary context.
 - If the post feels too smooth, make it plainer.
-

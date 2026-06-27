@@ -1363,6 +1363,12 @@ main {
   overflow: hidden;
 }
 
+.voice-rules-modal-card {
+  width: min(980px, 100%);
+  max-height: min(820px, calc(100vh - 48px));
+  overflow: auto;
+}
+
 .voice-context-tools {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(150px, 190px) minmax(150px, 190px);
@@ -1451,6 +1457,92 @@ main {
   margin: 0;
   color: var(--muted);
   font-size: 14px;
+}
+
+.voice-rules-card {
+  width: 100%;
+  min-height: 78px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--white);
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  text-align: left;
+}
+
+.voice-rules-card:hover {
+  background: var(--soft);
+}
+
+.voice-rules-card > span {
+  display: grid;
+  gap: 4px;
+}
+
+.voice-rules-card small {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.voice-rules-list,
+.voice-rule-group {
+  display: grid;
+  gap: 12px;
+}
+
+.voice-rules-list {
+  align-content: start;
+}
+
+.voice-rule-group {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--white);
+}
+
+.voice-rule-group-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.voice-rule-group-heading h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.voice-rule-group-heading p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.voice-rule-group-heading span {
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.voice-rule-group ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  display: grid;
+  gap: 7px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.voice-rule-editor {
+  margin-top: 12px;
 }
 
 .phrase-chip-list {

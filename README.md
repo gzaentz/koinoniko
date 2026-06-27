@@ -26,7 +26,7 @@ Koinoniko currently supports:
 - marking strong posts as Voice Examples with "Why this worked" notes
 - suggesting "Why this worked" notes for Voice Examples through the configured provider
 - updating Koinoniko Voice from selected Voice Examples
-- tracking compact Voice Coverage and editable Writing Guardrails
+- tracking compact Voice Coverage and Active Writing Rules
 - generating X drafts through a configured LLM provider
 - using OpenRouter as the built-in provider
 - routing Standard and Best Version generation to configurable models
@@ -235,14 +235,13 @@ Use it like this:
 
 The Voice page shows:
 
-- status: Ready, Needs examples, Needs update, or Not updated yet
-- number of Voice Examples
-- last Voice update time
 - current Koinoniko Voice summary in clean sections
 - compact Voice Coverage by topic and post type
-- editable Writing Guardrails that generation and AI revisions should write around
+- Active Writing Rules grouped by positioning, Voice, review filters, and Writing Guardrails
 - selected Voice Examples with one simple performance signal
 - suggested Voice Examples behind `Show suggested examples`
+
+Positioning rules include the core Leadpoet framing: Leadpoet is the intent layer for proprietary buyer context, timing signals, and account-level intent. Other tools, agents, or case studies should be treated as market proof that intent matters, then brought back to Leadpoet's wedge.
 
 Each Voice Example can use `Suggest why this worked` to draft a concise note from the post text, metrics, topic, post type, and current Voice. The suggestion is only placed into the field for review; it is not saved until you click Save.
 
@@ -1219,7 +1218,7 @@ Current tests cover:
 - metrics sync snapshots and latest-snapshot analytics
 - Voice Example note workflows
 - Voice updates from selected examples
-- Voice suggested notes, coverage, and Writing Guardrails
+- Voice suggested notes, coverage, and Active Writing Rules
 - Voice page and post detail drawer UI expectations
 - Ask Koinoniko context, starter prompts, read-only chat behavior, source display, and drawer UI expectations
 - topic and post type option endpoints
