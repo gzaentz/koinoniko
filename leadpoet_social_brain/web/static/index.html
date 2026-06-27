@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-account-sync-footer">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-account-sync-voice-context-laurel">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -123,7 +123,7 @@
               <input id="postSearch" placeholder="Search posts">
               <select id="postVoiceFilter" aria-label="Post voice filter">
                 <option value="all">All posts</option>
-                <option value="voice">Voice Examples</option>
+                <option value="voice">Voice Context</option>
               </select>
               <input id="postDateFrom" type="date" aria-label="Start date">
               <input id="postDateTo" type="date" aria-label="End date">
@@ -189,7 +189,7 @@
               <h2>Voice Status</h2>
               <div class="voice-status-row">
                 <span class="status-badge" id="voiceStatusLabel">Loading</span>
-                <span class="voice-status-chip"><strong id="voiceExampleCount">0</strong> Voice Examples</span>
+                <span class="voice-status-chip"><strong id="voiceExampleCount">0</strong> Voice Context posts</span>
                 <span class="voice-status-chip">Updated <strong id="voiceLastUpdated">Never</strong></span>
               </div>
             </div>
@@ -207,28 +207,11 @@
             <div id="currentVoiceSummary" class="voice-summary"></div>
           </section>
 
-          <section class="panel voice-examples-panel">
-            <div class="panel-header">
-              <div>
-                <h2>Voice Examples</h2>
-              </div>
-              <div class="table-tools compact">
-                <input id="voiceSearch" placeholder="Search examples">
-                <select id="voiceTopicFilter" aria-label="Voice topic filter"></select>
-                <select id="voiceSort" aria-label="Voice sort">
-                  <option value="date">Sort by date</option>
-                  <option value="performance">Sort by performance</option>
-                </select>
-              </div>
-            </div>
-            <div id="voiceExamplesList" class="voice-list"></div>
-          </section>
-
-          <section class="voice-suggestions-panel">
-            <details class="voice-disclosure" id="voiceSuggestionsDisclosure">
-              <summary>Show suggested examples</summary>
-              <div id="voiceSuggestionsList" class="voice-list compact"></div>
-            </details>
+          <section class="panel voice-context-panel">
+            <button class="secondary voice-context-button" id="voiceContextButton" type="button">
+              <span>Voice Context</span>
+              <span><strong id="voiceContextCount">0</strong> posts</span>
+            </button>
           </section>
         </div>
       </section>
@@ -340,6 +323,32 @@
         </section>
       </div>
     </aside>
+
+    <section class="modal hidden" id="voiceContextModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="voiceContextModal"></div>
+      <div class="modal-card wide voice-context-modal-card">
+        <div class="modal-header">
+          <div>
+            <span class="eyebrow">Voice</span>
+            <h2>Voice Context</h2>
+          </div>
+          <button class="icon-button" data-close-modal="voiceContextModal" aria-label="Close">x</button>
+        </div>
+        <div class="table-tools voice-context-tools">
+          <input id="voiceSearch" placeholder="Search examples">
+          <select id="voiceTopicFilter" aria-label="Voice topic filter"></select>
+          <select id="voiceSort" aria-label="Voice sort">
+            <option value="date">Sort by date</option>
+            <option value="performance">Sort by performance</option>
+          </select>
+        </div>
+        <div id="voiceExamplesList" class="voice-list voice-context-list"></div>
+        <details class="voice-disclosure" id="voiceSuggestionsDisclosure">
+          <summary>Show suggested examples</summary>
+          <div id="voiceSuggestionsList" class="voice-list compact"></div>
+        </details>
+      </div>
+    </section>
 
     <section class="modal hidden" id="postModal" aria-hidden="true">
       <div class="modal-backdrop" data-close-modal="postModal"></div>
@@ -516,10 +525,16 @@
     </section>
 
     <button class="assistant-launcher" id="assistantLauncher" type="button" aria-label="Ask Koinoniko" title="Ask Koinoniko" aria-controls="assistantDrawer" aria-expanded="false">
-      <svg class="assistant-launcher-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"></path>
-        <path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"></path>
-        <path d="M5 14l.7 1.6L7.5 16l-1.8.4L5 18l-.7-1.6L2.5 16l1.8-.4L5 14z"></path>
+      <svg class="assistant-launcher-icon" viewBox="0 0 24 24" width="24" height="24" fill="none" aria-hidden="true">
+        <path class="assistant-launcher-laurel" d="M7.1 17.1c-2-2.3-2-5.7-.2-8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+        <path class="assistant-launcher-laurel" d="M16.9 17.1c2-2.3 2-5.7.2-8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+        <path class="assistant-launcher-leaf" d="M6.1 15.3c-1-.2-1.7-.8-2-1.8 1 .1 1.8.8 2 1.8z" fill="currentColor"></path>
+        <path class="assistant-launcher-leaf" d="M5.9 12.5c-.9-.4-1.5-1.2-1.6-2.2 1 .3 1.6 1.1 1.6 2.2z" fill="currentColor"></path>
+        <path class="assistant-launcher-leaf" d="M6.7 9.9c-.7-.7-1-1.6-.7-2.6.8.6 1.1 1.5.7 2.6z" fill="currentColor"></path>
+        <path class="assistant-launcher-leaf" d="M17.9 15.3c1-.2 1.7-.8 2-1.8-1 .1-1.8.8-2 1.8z" fill="currentColor"></path>
+        <path class="assistant-launcher-leaf" d="M18.1 12.5c.9-.4 1.5-1.2 1.6-2.2-1 .3-1.6 1.1-1.6 2.2z" fill="currentColor"></path>
+        <path class="assistant-launcher-leaf" d="M17.3 9.9c.7-.7 1-1.6.7-2.6-.8.6-1.1 1.5-.7 2.6z" fill="currentColor"></path>
+        <path class="assistant-launcher-sparkle" d="M12 6.5l1.1 3.2 3.2 1.1-3.2 1.1L12 15.2l-1.1-3.3-3.2-1.1 3.2-1.1L12 6.5z" fill="currentColor"></path>
       </svg>
     </button>
 

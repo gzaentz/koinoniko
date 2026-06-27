@@ -1,7 +1,7 @@
 const DEFAULT_SYNC_USERNAME = "gavinzaentz";
 const SIDEBAR_COLLAPSED_KEY = "koinonikoSidebarCollapsed";
 const ASSISTANT_FALLBACK_STARTERS = [
-  "What are the best posts to use as Voice Examples?",
+  "What are the best posts to use as Voice Context?",
   "What patterns are working best?",
   "What should I post about today?",
   "Which scheduled posts feel weakest?",
@@ -1873,8 +1873,10 @@ async function loadVoice() {
 function renderVoice() {
   const voice = state.voice || {};
   const status = voice.status || {};
+  const examplesCount = Number(status.examples_count ?? voice.examples?.length ?? 0);
   $("voiceStatusLabel").textContent = status.label || "Loading";
-  $("voiceExampleCount").textContent = String(status.examples_count || 0);
+  $("voiceExampleCount").textContent = String(examplesCount);
+  $("voiceContextCount").textContent = String(examplesCount);
   $("voiceLastUpdated").textContent = status.last_updated_at ? formatDateTime(status.last_updated_at) : "Never";
   $("updateVoiceButton").disabled = status.status === "needs_examples";
   renderCurrentVoice();
@@ -1886,7 +1888,7 @@ function renderVoice() {
 function renderCurrentVoice() {
   const current = state.voice?.current || {};
   if (!current.exists) {
-    $("currentVoiceSummary").innerHTML = `<p class="empty-copy">${escapeHtml(current.empty_message || "No Voice yet. Mark a few strong posts as Voice Examples, then update Voice.")}</p>`;
+    $("currentVoiceSummary").innerHTML = `<p class="empty-copy">${escapeHtml(current.empty_message || "No Voice yet. Mark a few strong posts as Voice Context, then update Voice.")}</p>`;
     return;
   }
   const sections = cleanVoiceSections(current.sections || []);
@@ -1941,7 +1943,7 @@ function renderVoiceExamples() {
   const examples = filteredVoiceExamples();
   $("voiceExamplesList").innerHTML = examples.length
     ? examples.map((post) => voiceExampleCard(post, { removable: true })).join("")
-    : `<p class="empty-copy">No Voice Examples yet. Mark a few strong posts so Koinoniko can learn Gavin's voice.</p>`;
+    : `<p class="empty-copy">No Voice Context posts yet. Mark a few strong posts so Koinoniko can learn Gavin's voice.</p>`;
 }
 
 function filteredVoiceExamples() {
@@ -2072,7 +2074,7 @@ async function updateVoice() {
     method: "POST",
     body: "{}",
   });
-  showMessage(`${payload.message || "Voice updated from selected examples."} Used ${payload.examples_used || 0} Voice Examples.`);
+  showMessage(`${payload.message || "Voice updated from selected examples."} Used ${payload.examples_used || 0} Voice Context posts.`);
   await loadVoice();
 }
 
@@ -2119,7 +2121,7 @@ window.removeVoiceExample = (event, id) => {
       method: "POST",
       body: JSON.stringify({ voice_example: false }),
     });
-    showMessage("Removed from Voice Examples.");
+    showMessage("Removed from Voice Context.");
     await refresh();
     await loadVoice();
   });
@@ -2988,6 +2990,7 @@ function setup() {
   ["voiceSearch", "voiceTopicFilter", "voiceSort"].forEach((id) => {
     $(id).addEventListener("input", renderVoiceExamples);
   });
+  $("voiceContextButton").addEventListener("click", () => openModal("voiceContextModal"));
   document.querySelectorAll(".posts-table th[data-sort-key]").forEach((header) => {
     header.querySelector("button")?.addEventListener("click", () => setRecentPostsSort(header.dataset.sortKey));
   });
