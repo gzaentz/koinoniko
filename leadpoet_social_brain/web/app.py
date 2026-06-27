@@ -760,12 +760,16 @@ def route_api(
             limit=int(one(query, "limit") or 50),
         )
         return 200, {"items": [trend_payload(trend) for trend in trends]}
+    if method == "GET" and len(parts) == 3 and parts[:2] == ["api", "trends"]:
+        trend = store.get_trend_item(parts[2])
+        if not trend:
+            return 404, {"error": "Trend not found."}
+        return 200, {"item": trend_payload(trend, include_raw=one(query, "include_raw") == "true")}
     if method == "POST" and parts == ["api", "trends", "refresh"]:
         try:
-            groups = refresh_web_trends(store)
+            return 200, refresh_trends_task_payload(store, payload)
         except Exception as exc:  # noqa: BLE001 - web trend sources can fail independently of the app.
             return 502, {"error": f"Could not refresh web trends: {exc}"}
-        return 200, trend_refresh_payload(groups)
     if method == "POST" and parts == ["api", "trends"]:
         trend = store.save_trend_item(trend_from_payload(payload))
         return 200, {"item": trend_payload(trend)}
@@ -1007,12 +1011,35 @@ def sync_x_daily_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[st
 def refresh_trends_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
     started_at = utc_now()
     try:
-        groups = refresh_web_trends(store, limit=int(payload.get("limit") or 5))
+        limit = int(payload.get("limit") or 5)
+        no_enrich = bool(payload.get("no_enrich", False))
+        enrich_limit = int(payload.get("enrich_limit") or limit)
+        provider = None
+        provider_warning = ""
+        if not no_enrich:
+            try:
+                provider = load_configured_provider(store)
+            except Exception as exc:  # noqa: BLE001 - provider-backed digest should not block trend storage.
+                provider_warning = f"Trend enrichment provider unavailable: {exc}"
+        groups = call_refresh_web_trends(
+            store,
+            limit=limit,
+            provider=provider,
+            enrich=not no_enrich,
+            enrich_limit=enrich_limit,
+        )
         completed_at = utc_now()
         errors = list(groups.errors)
+        if provider_warning:
+            errors.append(provider_warning)
         summary = {
             "daily_trends": len(groups.daily),
             "weekly_trends": len(groups.weekly),
+            "candidates_found": groups.candidates_found,
+            "trends_stored": groups.trends_stored,
+            "enriched": groups.enriched,
+            "partial": groups.partial,
+            "failed": groups.failed,
             "sources": groups.sources,
             "errors": errors,
             "completed_at": completed_at,
@@ -1037,6 +1064,11 @@ def refresh_trends_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> 
         summary = {
             "daily_trends": 0,
             "weekly_trends": 0,
+            "candidates_found": 0,
+            "trends_stored": 0,
+            "enriched": 0,
+            "partial": 0,
+            "failed": 0,
             "sources": [],
             "errors": [str(exc)],
             "completed_at": completed_at,
@@ -1052,6 +1084,28 @@ def refresh_trends_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> 
             )
         )
         raise
+
+
+def call_refresh_web_trends(
+    store: SQLiteStore,
+    *,
+    limit: int,
+    provider: Any | None,
+    enrich: bool,
+    enrich_limit: int,
+):
+    try:
+        return refresh_web_trends(
+            store,
+            limit=limit,
+            provider=provider,
+            enrich=enrich,
+            enrich_limit=enrich_limit,
+        )
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return refresh_web_trends(store)
 
 
 def refresh_patterns_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
@@ -2080,8 +2134,8 @@ def publish_result_payload(result) -> dict[str, Any]:
     }
 
 
-def trend_payload(trend: TrendItem) -> dict[str, Any]:
-    return {
+def trend_payload(trend: TrendItem, *, include_raw: bool = False) -> dict[str, Any]:
+    payload = {
         "id": trend.id,
         "title": trend.title,
         "source_url": trend.source_url,
@@ -2096,10 +2150,23 @@ def trend_payload(trend: TrendItem) -> dict[str, Any]:
         "status": trend.status,
         "engagement_notes": trend.engagement_notes,
         "source_author": trend.source_author,
-        "raw_text": trend.raw_text,
+        "source_title": trend.source_title,
+        "source_published_at": trend.source_published_at,
+        "source_excerpt": trend.source_excerpt,
+        "source_text_excerpt": truncate_payload_text(trend.source_text_excerpt, 1200),
+        "key_points": json_list_payload(trend.key_points_json),
+        "important_claims": json_list_payload(trend.important_claims_json),
+        "post_angles": json_list_payload(trend.post_angles_json),
+        "source_confidence": trend.source_confidence,
+        "enriched_at": trend.enriched_at,
+        "enrichment_status": trend.enrichment_status,
+        "enrichment_error": trend.enrichment_error,
         "created_at": trend.created_at,
         "updated_at": trend.updated_at,
     }
+    if include_raw:
+        payload["raw_text"] = truncate_payload_text(trend.raw_text, 4000)
+    return payload
 
 
 def pattern_groups_payload(groups: dict[str, list[ViralPattern]]) -> dict[str, Any]:
@@ -2246,6 +2313,17 @@ def trend_from_payload(payload: dict[str, Any], *, existing: TrendItem | None = 
         engagement_notes=value_or_existing(payload.get("engagement_notes"), existing.engagement_notes if existing else None),
         source_author=value_or_existing(payload.get("source_author"), existing.source_author if existing else None),
         raw_text=value_or_existing(payload.get("raw_text"), existing.raw_text if existing else None),
+        source_title=value_or_existing(payload.get("source_title"), existing.source_title if existing else None),
+        source_published_at=value_or_existing(payload.get("source_published_at"), existing.source_published_at if existing else None),
+        source_excerpt=value_or_existing(payload.get("source_excerpt"), existing.source_excerpt if existing else None),
+        source_text_excerpt=value_or_existing(payload.get("source_text_excerpt"), existing.source_text_excerpt if existing else None),
+        key_points_json=value_or_existing(payload.get("key_points_json"), existing.key_points_json if existing else None),
+        important_claims_json=value_or_existing(payload.get("important_claims_json"), existing.important_claims_json if existing else None),
+        post_angles_json=value_or_existing(payload.get("post_angles_json"), existing.post_angles_json if existing else None),
+        source_confidence=value_or_existing(payload.get("source_confidence"), existing.source_confidence if existing else None),
+        enriched_at=value_or_existing(payload.get("enriched_at"), existing.enriched_at if existing else None),
+        enrichment_status=value_or_existing(payload.get("enrichment_status"), existing.enrichment_status if existing else "not_attempted"),
+        enrichment_error=value_or_existing(payload.get("enrichment_error"), existing.enrichment_error if existing else None),
         created_at=existing.created_at if existing else utc_now(),
         updated_at=existing.updated_at if existing else utc_now(),
     )
@@ -2263,6 +2341,11 @@ def trend_refresh_payload(groups) -> dict[str, Any]:
         "trend_groups": trend_groups_payload(groups),
         "errors": list(getattr(groups, "errors", []) or []),
         "sources": list(getattr(groups, "sources", []) or []),
+        "candidates_found": int(getattr(groups, "candidates_found", 0) or 0),
+        "trends_stored": int(getattr(groups, "trends_stored", 0) or 0),
+        "enriched": int(getattr(groups, "enriched", 0) or 0),
+        "partial": int(getattr(groups, "partial", 0) or 0),
+        "failed": int(getattr(groups, "failed", 0) or 0),
     }
 
 
@@ -2313,6 +2396,27 @@ def one(query: dict[str, list[str]], key: str) -> str | None:
 def clean_optional(value: object) -> str | None:
     text = str(value).strip() if value is not None else ""
     return text or None
+
+
+def json_list_payload(value: str | None) -> list[str]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return [value]
+    if not isinstance(parsed, list):
+        return []
+    return [cleaned for item in parsed if (cleaned := clean_optional(item))]
+
+
+def truncate_payload_text(value: str | None, limit: int) -> str | None:
+    if not value:
+        return None
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
 
 
 def optional_int(value: object) -> int | None:

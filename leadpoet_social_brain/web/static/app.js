@@ -880,10 +880,7 @@ window.openTrendDetailsFromKey = (event, id) => {
 window.openTrendDetails = (id) => {
   const trend = findTrendItem(id);
   if (!trend) return;
-  const raw = parseTrendRawData(trend.raw_text);
-  const bullets = trendDetailBullets(trend);
-  const metadata = trendSourceMetadata(trend, raw);
-  const sourceText = trendSourceText(raw);
+  const sourceDetails = trendSourceDetails(trend);
 
   $("trendModalTitle").textContent = trend.title || "Trend details";
   $("trendModalBody").innerHTML = `
@@ -892,11 +889,18 @@ window.openTrendDetails = (id) => {
       ${detail("Urgency", label(trend.urgency || "medium"))}
       ${detail("Type", label(trend.source_type || "trend"))}
       ${detail("Date", formatDateTime(trend.date))}
-      ${detail("Source", trend.source_author || sourceValue(raw, ["sourceCommonName", "domain", "source"]) || "Unknown")}
+      ${detail("Source", trend.source_author || trend.source_title || "Unknown")}
     </div>
-    ${bullets.length ? `<section class="trend-detail-section"><h3>Details</h3><ul class="bullet-list">${bullets.map(trendBullet).join("")}</ul></section>` : ""}
-    ${sourceText ? `<section class="trend-detail-section"><h3>Stored Source Detail</h3><div class="source-text">${escapeHtml(sourceText)}</div></section>` : ""}
-    ${metadata.length ? `<section class="trend-detail-section"><h3>Source Metadata</h3><ul class="bullet-list compact">${metadata.map(trendBullet).join("")}</ul></section>` : ""}
+    ${trendSection("What happened", trend.summary)}
+    ${trendSection("Why it matters", trend.why_it_matters)}
+    ${trendSection("Leadpoet angle", trend.leadpoet_angle)}
+    ${trendListSection("Suggested hook", trendHookList(trend))}
+    ${trendSection("Source", trend.source_url ? `<a href="${escapeAttr(trend.source_url)}" target="_blank" rel="noreferrer">${escapeHtml(trend.source_author || trend.source_title || trend.source_url)}</a>` : escapeHtml(trend.source_author || "No source URL stored."), true)}
+    <details class="trend-detail-section source-details">
+      <summary>Source details</summary>
+      <ul class="bullet-list compact">${sourceDetails.map(trendBullet).join("")}</ul>
+      ${trend.source_text_excerpt ? `<div class="source-text">${escapeHtml(trend.source_text_excerpt)}</div>` : ""}
+    </details>
     <div class="actions left">
       ${trend.source_url ? `<a class="button-link" href="${escapeAttr(trend.source_url)}" target="_blank" rel="noreferrer">Open Source</a>` : ""}
     </div>
@@ -1055,72 +1059,56 @@ function patternSignal(pattern) {
   return pattern.engagement_notes || "No signal yet";
 }
 
-function trendDetailBullets(trend) {
-  return [
-    ["Summary", trend.summary],
-    ["Why it matters", trend.why_it_matters],
-    ["Leadpoet angle", trend.leadpoet_angle],
-    ["Suggested hook", trend.suggested_hooks],
-    ["Notes", trend.engagement_notes],
-  ].filter(([, value]) => cleanString(value));
+function trendSection(title, value, htmlValue = false) {
+  const cleaned = cleanString(value);
+  if (!cleaned) return "";
+  return `
+    <section class="trend-detail-section">
+      <h3>${escapeHtml(title)}</h3>
+      <p>${htmlValue ? value : escapeHtml(cleaned)}</p>
+    </section>
+  `;
 }
 
-function trendSourceMetadata(trend, raw) {
-  const breakdown = sourceValue(raw, ["trend_breakdown_text"]) || sourceListValue(raw?.trend_breakdown);
+function trendListSection(title, values) {
+  if (!values.length) return "";
+  return `
+    <section class="trend-detail-section">
+      <h3>${escapeHtml(title)}</h3>
+      <ul class="bullet-list">${values.map((value) => `<li>${escapeHtml(value)}</li>`).join("")}</ul>
+    </section>
+  `;
+}
+
+function trendHookList(trend) {
+  if (Array.isArray(trend.suggested_hooks)) return trend.suggested_hooks.map(cleanString).filter(Boolean).slice(0, 3);
+  return cleanString(trend.suggested_hooks)
+    .split(/\n+|;/)
+    .map(cleanString)
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function trendSourceDetails(trend) {
+  const keyPoints = Array.isArray(trend.key_points) ? trend.key_points.join("; ") : "";
+  const claims = Array.isArray(trend.important_claims) ? trend.important_claims.join("; ") : "";
+  const angles = Array.isArray(trend.post_angles) ? trend.post_angles.join("; ") : "";
   return [
-    ["Provider", providerLabel(sourceValue(raw, ["provider"]))],
     ["Source URL", trend.source_url],
     ["Source author", trend.source_author],
-    ["Search volume", sourceValue(raw, ["search_volume"])],
-    ["Increase", sourceValue(raw, ["increase_percentage"])],
-    ["Trend breakdown", breakdown],
-    ["Provider date", sourceValue(raw, ["date", "seendate", "start_timestamp", "start_date"])],
+    ["Published date", trend.source_published_at],
+    ["Raw snippet", trend.source_excerpt],
+    ["Key points", keyPoints],
+    ["Important claims", claims],
+    ["Post angles", angles],
+    ["Enrichment status", trend.enrichment_status],
+    ["Source confidence", trend.source_confidence],
+    ["Enrichment error", trend.enrichment_error],
   ].filter(([, value]) => cleanString(value));
-}
-
-function trendSourceText(raw) {
-  return sourceValue(raw, ["snippet", "description", "summary", "trend_breakdown_text"]);
 }
 
 function trendBullet([labelText, value]) {
   return `<li><strong>${escapeHtml(labelText)}:</strong> ${escapeHtml(cleanString(value))}</li>`;
-}
-
-function parseTrendRawData(value) {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function sourceValue(raw, keys) {
-  if (!raw) return "";
-  for (const key of keys) {
-    const value = raw[key];
-    if (typeof value === "number") return String(value);
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      const nested = cleanString(value.name || value.title || value.domain);
-      if (nested) return nested;
-    }
-    const cleaned = cleanString(value);
-    if (cleaned) return cleaned;
-  }
-  return "";
-}
-
-function sourceListValue(value) {
-  return Array.isArray(value) ? value.map(cleanString).filter(Boolean).join(", ") : "";
-}
-
-function providerLabel(value) {
-  const provider = cleanString(value);
-  if (provider === "scrapingdog_trending_now") return "Scrapingdog Google Trends";
-  if (provider === "scrapingdog_google_news") return "Scrapingdog Google News";
-  if (provider === "gdelt") return "GDELT";
-  return provider;
 }
 
 function cleanString(value) {
@@ -1951,6 +1939,9 @@ function syncRow(title, sync, description = "") {
   if (summary.metrics_updated !== undefined) pieces.push(`metrics ${summary.metrics_updated}`);
   if (summary.daily_trends !== undefined) pieces.push(`daily ${summary.daily_trends}`);
   if (summary.weekly_trends !== undefined) pieces.push(`weekly ${summary.weekly_trends}`);
+  if (summary.enriched !== undefined) pieces.push(`enriched ${summary.enriched}`);
+  if (summary.partial !== undefined) pieces.push(`partial ${summary.partial}`);
+  if (summary.failed !== undefined) pieces.push(`failed ${summary.failed}`);
   const detail = [
     item.last_completed_at ? `Last synced ${formatDateTime(item.last_completed_at)}` : "Never synced",
     pieces.join(", "),

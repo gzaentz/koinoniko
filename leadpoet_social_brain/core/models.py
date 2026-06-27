@@ -170,6 +170,17 @@ class TrendItem:
     engagement_notes: str | None = None
     source_author: str | None = None
     raw_text: str | None = None
+    source_title: str | None = None
+    source_published_at: str | None = None
+    source_excerpt: str | None = None
+    source_text_excerpt: str | None = None
+    key_points_json: str | None = None
+    important_claims_json: str | None = None
+    post_angles_json: str | None = None
+    source_confidence: str | None = None
+    enriched_at: str | None = None
+    enrichment_status: str = "not_attempted"
+    enrichment_error: str | None = None
     id: str = field(default_factory=new_id)
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)

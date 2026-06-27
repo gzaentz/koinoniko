@@ -799,6 +799,15 @@ main {
   gap: 8px;
 }
 
+.trend-detail-section summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.source-details[open] {
+  gap: 10px;
+}
+
 .bullet-list {
   margin: 0;
   padding-left: 20px;

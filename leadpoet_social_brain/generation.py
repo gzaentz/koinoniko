@@ -511,6 +511,12 @@ def build_context_snapshot(
                 "topic": trend.topic,
                 "urgency": trend.urgency,
                 "leadpoet_angle": trend.leadpoet_angle,
+                "what_happened": trend.summary,
+                "why_it_matters": trend.why_it_matters,
+                "suggested_hooks": trend.suggested_hooks,
+                "source_url": trend.source_url,
+                "source_confidence": trend.source_confidence,
+                "enrichment_status": trend.enrichment_status,
             }
             for trend in trends
         ],
@@ -677,6 +683,19 @@ def _format_example(post, bundle: ContextBundle) -> str:
 
 
 def _format_trend(trend: TrendItem) -> str:
+    hooks = _trend_list(trend.suggested_hooks)[:3]
+    key_points = _trend_json_list(trend.key_points_json)
+    claims = _trend_json_list(trend.important_claims_json)
+    post_angles = _trend_json_list(trend.post_angles_json)
+    what_is_new = claims[0] if claims else (key_points[1] if len(key_points) > 1 else trend.source_excerpt or "The timing or market context around this signal has changed.")
+    why_gtm = key_points[2] if len(key_points) > 2 else trend.why_it_matters
+    source_label = " ".join(
+        part for part in [
+            trend.source_author or trend.source_title,
+            f"({trend.source_url})" if trend.source_url else "",
+        ]
+        if part
+    ) or "No source URL stored."
     parts = [
         "Trend:",
         trend.title,
@@ -684,15 +703,50 @@ def _format_trend(trend: TrendItem) -> str:
         "What happened:",
         trend.summary,
         "",
+        "What is new:",
+        what_is_new,
+        "",
         "Why it matters:",
         trend.why_it_matters,
         "",
+        "Why it matters to AI / sales / lead generation / GTM:",
+        why_gtm,
+        "",
         "Leadpoet angle:",
         trend.leadpoet_angle,
+        "",
+        "Suggested hooks:",
+        "\n".join(f"- {hook}" for hook in hooks) if hooks else "- No hooks stored.",
+        "",
+        "Possible post angles:",
+        "\n".join(f"- {angle}" for angle in post_angles[:3]) if post_angles else "- Use the Leadpoet angle above.",
+        "",
+        "Source:",
+        source_label,
     ]
-    if trend.suggested_hooks:
-        parts.extend(["", "Possible hooks:", trend.suggested_hooks])
     return "\n".join(parts)
+
+
+def _trend_json_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return _trend_list(value)
+    if not isinstance(parsed, list):
+        return []
+    return [item for item in (str(raw).strip() for raw in parsed) if item]
+
+
+def _trend_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [
+        item.strip(" -")
+        for item in re.split(r"\n+|;", value)
+        if item.strip(" -")
+    ]
 
 
 def _format_viral_pattern(pattern: ViralPattern) -> str:

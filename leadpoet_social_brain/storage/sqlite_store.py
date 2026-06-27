@@ -220,6 +220,17 @@ class SQLiteStore:
                 engagement_notes TEXT,
                 source_author TEXT,
                 raw_text TEXT,
+                source_title TEXT,
+                source_published_at TEXT,
+                source_excerpt TEXT,
+                source_text_excerpt TEXT,
+                key_points_json TEXT,
+                important_claims_json TEXT,
+                post_angles_json TEXT,
+                source_confidence TEXT,
+                enriched_at TEXT,
+                enrichment_status TEXT NOT NULL DEFAULT 'not_attempted',
+                enrichment_error TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -296,6 +307,20 @@ class SQLiteStore:
         for column in ["hook", "structure", "tone", "cta", "formatting"]:
             self._ensure_column("post_notes", column, "TEXT")
         self._ensure_column("generated_drafts", "context_snapshot_json", "TEXT NOT NULL DEFAULT '{}'")
+        for column in [
+            "source_title",
+            "source_published_at",
+            "source_excerpt",
+            "source_text_excerpt",
+            "key_points_json",
+            "important_claims_json",
+            "post_angles_json",
+            "source_confidence",
+            "enriched_at",
+            "enrichment_error",
+        ]:
+            self._ensure_column("trend_items", column, "TEXT")
+        self._ensure_column("trend_items", "enrichment_status", "TEXT NOT NULL DEFAULT 'not_attempted'")
 
     def save_content_queue_item(self, item: ContentQueueItem) -> ContentQueueItem:
         now = utc_now()
@@ -883,6 +908,17 @@ class SQLiteStore:
             engagement_notes=trend.engagement_notes,
             source_author=trend.source_author,
             raw_text=trend.raw_text,
+            source_title=trend.source_title,
+            source_published_at=trend.source_published_at,
+            source_excerpt=trend.source_excerpt,
+            source_text_excerpt=trend.source_text_excerpt,
+            key_points_json=trend.key_points_json,
+            important_claims_json=trend.important_claims_json,
+            post_angles_json=trend.post_angles_json,
+            source_confidence=trend.source_confidence,
+            enriched_at=trend.enriched_at,
+            enrichment_status=trend.enrichment_status or "not_attempted",
+            enrichment_error=trend.enrichment_error,
             created_at=trend.created_at,
             updated_at=now,
         )
@@ -891,9 +927,13 @@ class SQLiteStore:
             INSERT INTO trend_items (
                 id, title, source_url, source_type, topic, summary, why_it_matters,
                 leadpoet_angle, suggested_hooks, urgency, date, status,
-                engagement_notes, source_author, raw_text, created_at, updated_at
+                engagement_notes, source_author, raw_text, source_title,
+                source_published_at, source_excerpt, source_text_excerpt,
+                key_points_json, important_claims_json, post_angles_json,
+                source_confidence, enriched_at, enrichment_status,
+                enrichment_error, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 source_url = excluded.source_url,
@@ -909,6 +949,17 @@ class SQLiteStore:
                 engagement_notes = excluded.engagement_notes,
                 source_author = excluded.source_author,
                 raw_text = excluded.raw_text,
+                source_title = excluded.source_title,
+                source_published_at = excluded.source_published_at,
+                source_excerpt = excluded.source_excerpt,
+                source_text_excerpt = excluded.source_text_excerpt,
+                key_points_json = excluded.key_points_json,
+                important_claims_json = excluded.important_claims_json,
+                post_angles_json = excluded.post_angles_json,
+                source_confidence = excluded.source_confidence,
+                enriched_at = excluded.enriched_at,
+                enrichment_status = excluded.enrichment_status,
+                enrichment_error = excluded.enrichment_error,
                 updated_at = excluded.updated_at
             """,
             (
@@ -927,6 +978,17 @@ class SQLiteStore:
                 saved.engagement_notes,
                 saved.source_author,
                 saved.raw_text,
+                saved.source_title,
+                saved.source_published_at,
+                saved.source_excerpt,
+                saved.source_text_excerpt,
+                saved.key_points_json,
+                saved.important_claims_json,
+                saved.post_angles_json,
+                saved.source_confidence,
+                saved.enriched_at,
+                saved.enrichment_status,
+                saved.enrichment_error,
                 saved.created_at,
                 saved.updated_at,
             ),
@@ -1592,6 +1654,17 @@ class SQLiteStore:
             engagement_notes=row["engagement_notes"],
             source_author=row["source_author"],
             raw_text=row["raw_text"],
+            source_title=row["source_title"],
+            source_published_at=row["source_published_at"],
+            source_excerpt=row["source_excerpt"],
+            source_text_excerpt=row["source_text_excerpt"],
+            key_points_json=row["key_points_json"],
+            important_claims_json=row["important_claims_json"],
+            post_angles_json=row["post_angles_json"],
+            source_confidence=row["source_confidence"],
+            enriched_at=row["enriched_at"],
+            enrichment_status=row["enrichment_status"] or "not_attempted",
+            enrichment_error=row["enrichment_error"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

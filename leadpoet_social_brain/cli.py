@@ -48,6 +48,7 @@ from leadpoet_social_brain.platforms.x_api import (
 )
 from leadpoet_social_brain.providers import load_provider_from_env, resolve_model_routing
 from leadpoet_social_brain.storage.sqlite_store import DEFAULT_DB_PATH, DEFAULT_WEB_AUTH_USERNAME, SQLiteStore
+from leadpoet_social_brain.trend_scout import refresh_web_trends
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
@@ -191,6 +192,11 @@ def build_parser() -> argparse.ArgumentParser:
     refresh_pattern_parser.add_argument("--limit", type=int, default=5)
     refresh_pattern_parser.add_argument("--window", default="daily", choices=["daily", "weekly"])
     refresh_pattern_parser.set_defaults(func=cmd_refresh_patterns)
+
+    refresh_trends_parser = subparsers.add_parser("refresh-trends", help="Refresh Trend Scout sources and enrich selected trends.")
+    refresh_trends_parser.add_argument("--limit", type=int, default=5)
+    refresh_trends_parser.add_argument("--no-enrich", action="store_true")
+    refresh_trends_parser.set_defaults(func=cmd_refresh_trends)
 
     generate = subparsers.add_parser("generate-x", help="Generate X drafts.")
     generate.add_argument("--topic", required=True)
@@ -693,6 +699,39 @@ def cmd_refresh_patterns(store: SQLiteStore, args: argparse.Namespace) -> int:
     if result.errors:
         print("Errors:")
         for error in result.errors[:20]:
+            print(f"- {error}")
+    return 0
+
+
+def cmd_refresh_trends(store: SQLiteStore, args: argparse.Namespace) -> int:
+    provider = None
+    provider_warning = ""
+    if not args.no_enrich:
+        try:
+            provider = load_configured_provider(store)
+        except Exception as exc:  # noqa: BLE001 - keep trend refresh usable without digest enrichment.
+            provider_warning = f"Trend enrichment provider unavailable: {exc}"
+    groups = refresh_web_trends(
+        store,
+        limit=args.limit,
+        provider=provider,
+        enrich=not args.no_enrich,
+        enrich_limit=args.limit,
+    )
+    print("Trend Scout refresh")
+    print(f"Candidates found: {groups.candidates_found}")
+    print(f"Trends stored: {groups.trends_stored}")
+    print(f"Enriched: {groups.enriched}")
+    print(f"Partial: {groups.partial}")
+    print(f"Failed: {groups.failed}")
+    print(f"Daily: {len(groups.daily)}")
+    print(f"Weekly: {len(groups.weekly)}")
+    if groups.sources:
+        print(f"Sources: {', '.join(groups.sources)}")
+    errors = [*groups.errors, provider_warning] if provider_warning else list(groups.errors)
+    if errors:
+        print("Errors:")
+        for error in errors[:20]:
             print(f"- {error}")
     return 0
 

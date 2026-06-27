@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import os
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from leadpoet_social_brain.core.models import TrendItem, utc_now
+from leadpoet_social_brain.providers import DraftProvider, generate_with_provider
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 
 
@@ -21,6 +24,10 @@ SCRAPINGDOG_API_KEY_ALT_ENV = "SCRAPING_DOG_API_KEY"
 SCRAPINGDOG_TRENDS_URL = "https://api.scrapingdog.com/google_trends/trending_now"
 SCRAPINGDOG_NEWS_URL = "https://api.scrapingdog.com/google_news"
 SCRAPINGDOG_TIMEOUT_SECONDS = 45
+SOURCE_FETCH_TIMEOUT_SECONDS = 8
+SOURCE_TEXT_EXCERPT_CHARS = 3500
+SOURCE_PROMPT_TEXT_CHARS = 5000
+SOURCE_EXCERPT_CHARS = 700
 WEB_DAILY_SOURCE_TYPE = "web_daily"
 WEB_WEEKLY_SOURCE_TYPE = "web_weekly"
 WEB_TREND_QUERY = (
@@ -54,6 +61,7 @@ TREND_RELEVANCE_TERMS = {
     "sdr",
 }
 FetchArticles = Callable[..., list[dict[str, object]]]
+FetchSourcePage = Callable[[str], str]
 
 
 @dataclass(frozen=True)
@@ -62,6 +70,24 @@ class WebTrendGroups:
     weekly: list[TrendItem]
     errors: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
+    candidates_found: int = 0
+    trends_stored: int = 0
+    enriched: int = 0
+    partial: int = 0
+    failed: int = 0
+
+
+@dataclass(frozen=True)
+class SourcePageDetails:
+    title: str | None = None
+    author: str | None = None
+    published_at: str | None = None
+    excerpt: str | None = None
+    text_excerpt: str | None = None
+    key_paragraphs: list[str] = field(default_factory=list)
+    important_numbers: list[str] = field(default_factory=list)
+    mentioned_names: list[str] = field(default_factory=list)
+    error: str | None = None
 
 
 def refresh_web_trends(
@@ -69,12 +95,25 @@ def refresh_web_trends(
     *,
     fetch_articles: FetchArticles | None = None,
     limit: int = 5,
+    provider: DraftProvider | None = None,
+    enrich: bool = True,
+    enrich_limit: int | None = None,
+    fetch_source_page: FetchSourcePage | None = None,
 ) -> WebTrendGroups:
     if fetch_articles:
-        return refresh_gdelt_web_trends(store, fetch_articles=fetch_articles, limit=limit)
+        return refresh_gdelt_web_trends(
+            store,
+            fetch_articles=fetch_articles,
+            limit=limit,
+            provider=provider,
+            enrich=enrich,
+            enrich_limit=enrich_limit,
+            fetch_source_page=fetch_source_page,
+        )
 
     errors: list[str] = []
     sources: list[str] = []
+    stats = empty_refresh_stats()
     api_key = scrapingdog_api_key()
     daily = refresh_web_trends_for_period(
         store,
@@ -86,6 +125,11 @@ def refresh_web_trends(
         scrapingdog_api_key=api_key or None,
         errors=errors,
         sources=sources,
+        stats=stats,
+        provider=provider,
+        enrich=enrich,
+        enrich_limit=enrich_limit,
+        fetch_source_page=fetch_source_page,
     )
     weekly = refresh_web_trends_for_period(
         store,
@@ -97,8 +141,13 @@ def refresh_web_trends(
         scrapingdog_api_key=api_key or None,
         errors=errors,
         sources=sources,
+        stats=stats,
+        provider=provider,
+        enrich=enrich,
+        enrich_limit=enrich_limit,
+        fetch_source_page=fetch_source_page,
     )
-    return WebTrendGroups(daily=daily, weekly=weekly, errors=errors, sources=unique_texts(sources))
+    return WebTrendGroups(daily=daily, weekly=weekly, errors=errors, sources=unique_texts(sources), **stats)
 
 
 def scrapingdog_api_key() -> str:
@@ -114,21 +163,38 @@ def refresh_gdelt_web_trends(
     *,
     fetch_articles: FetchArticles | None = None,
     limit: int = 5,
+    provider: DraftProvider | None = None,
+    enrich: bool = True,
+    enrich_limit: int | None = None,
+    fetch_source_page: FetchSourcePage | None = None,
 ) -> WebTrendGroups:
     fetch = fetch_articles or fetch_gdelt_articles
+    stats = empty_refresh_stats()
     daily = save_web_trend_articles(
         store,
         articles=fetch(timespan="1d", limit=limit * 4),
         source_type=WEB_DAILY_SOURCE_TYPE,
         limit=limit,
+        stats=stats,
+        provider=provider,
+        enrich=enrich,
+        enrich_limit=enrich_limit,
+        fetch_source_page=fetch_source_page,
+        count_candidates=True,
     )
     weekly = save_web_trend_articles(
         store,
         articles=fetch(timespan="7d", limit=limit * 4),
         source_type=WEB_WEEKLY_SOURCE_TYPE,
         limit=limit,
+        stats=stats,
+        provider=provider,
+        enrich=enrich,
+        enrich_limit=enrich_limit,
+        fetch_source_page=fetch_source_page,
+        count_candidates=True,
     )
-    return WebTrendGroups(daily=daily, weekly=weekly, sources=["GDELT"])
+    return WebTrendGroups(daily=daily, weekly=weekly, sources=["GDELT"], **stats)
 
 
 def refresh_web_trends_for_period(
@@ -142,6 +208,11 @@ def refresh_web_trends_for_period(
     scrapingdog_api_key: str | None,
     errors: list[str],
     sources: list[str],
+    stats: dict[str, int],
+    provider: DraftProvider | None = None,
+    enrich: bool = True,
+    enrich_limit: int | None = None,
+    fetch_source_page: FetchSourcePage | None = None,
 ) -> list[TrendItem]:
     articles: list[dict[str, object]] = []
     if scrapingdog_api_key:
@@ -175,18 +246,27 @@ def refresh_web_trends_for_period(
             except Exception as exc:  # noqa: BLE001 - third-party trend source can fail independently.
                 errors.append(f"{period} Scrapingdog Google News failed: {exc}")
 
+    stats["candidates_found"] += len(articles)
     selected = select_web_trend_articles(articles, limit=limit)
     if len(selected) < limit:
         try:
-            selected.extend(
-                article
-                for article in gdelt_articles(fetch_gdelt_articles(timespan=gdelt_timespan, limit=limit * 4))
-                if article not in selected
-            )
+            fallback_articles = gdelt_articles(fetch_gdelt_articles(timespan=gdelt_timespan, limit=limit * 4))
+            stats["candidates_found"] += len(fallback_articles)
+            selected.extend(article for article in fallback_articles if article not in selected)
             sources.append("GDELT")
         except Exception as exc:  # noqa: BLE001 - no-key fallback can also throttle.
             errors.append(f"{period} GDELT fallback failed: {exc}")
-    return save_web_trend_articles(store, articles=selected, source_type=source_type, limit=limit)
+    return save_web_trend_articles(
+        store,
+        articles=selected,
+        source_type=source_type,
+        limit=limit,
+        stats=stats,
+        provider=provider,
+        enrich=enrich,
+        enrich_limit=enrich_limit,
+        fetch_source_page=fetch_source_page,
+    )
 
 
 def fetch_scrapingdog_trending_now(
@@ -399,9 +479,19 @@ def save_web_trend_articles(
     articles: list[dict[str, object]],
     source_type: str,
     limit: int,
+    stats: dict[str, int] | None = None,
+    provider: DraftProvider | None = None,
+    enrich: bool = True,
+    enrich_limit: int | None = None,
+    fetch_source_page: FetchSourcePage | None = None,
+    count_candidates: bool = True,
 ) -> list[TrendItem]:
     saved: list[TrendItem] = []
     seen: set[str] = set()
+    if stats is not None and count_candidates:
+        stats["candidates_found"] += len(articles)
+    attempted_enrichments = 0
+    max_enrichments = limit if enrich_limit is None else max(0, enrich_limit)
     for article in articles:
         title = clean_text(article.get("title"))
         url = clean_text(article.get("url") or article.get("url_mobile"))
@@ -412,10 +502,365 @@ def save_web_trend_articles(
             continue
         seen.add(dedupe_key)
         trend = store.save_trend_item(web_trend_from_article(article, source_type=source_type))
+        if stats is not None:
+            stats["trends_stored"] += 1
+        if enrich and attempted_enrichments < max_enrichments and (provider or fetch_source_page):
+            attempted_enrichments += 1
+            trend = store.save_trend_item(
+                enrich_trend_source(
+                    trend,
+                    article,
+                    provider=provider,
+                    fetch_source_page=fetch_source_page or fetch_source_page_text,
+                )
+            )
+            if stats is not None:
+                if trend.enrichment_status == "enriched":
+                    stats["enriched"] += 1
+                elif trend.enrichment_status == "failed":
+                    stats["failed"] += 1
+                elif trend.enrichment_status == "partial":
+                    stats["partial"] += 1
         saved.append(trend)
         if len(saved) >= limit:
             break
     return saved
+
+
+def enrich_trend_source(
+    trend: TrendItem,
+    article: dict[str, object],
+    *,
+    provider: DraftProvider | None,
+    fetch_source_page: FetchSourcePage,
+) -> TrendItem:
+    page = SourcePageDetails()
+    page_error = ""
+    url = trend.source_url or clean_text(article.get("link") or article.get("url") or article.get("url_mobile"))
+    if url and should_fetch_source_url(url):
+        try:
+            page = extract_source_page_details(fetch_source_page(url))
+        except Exception as exc:  # noqa: BLE001 - one source page should not break trend refresh.
+            page = SourcePageDetails(error=str(exc))
+            page_error = f"source fetch failed: {exc}"
+    elif url:
+        page_error = "source URL is not an article page"
+    else:
+        page_error = "no source URL available"
+
+    provider_error = ""
+    digest: dict[str, object] = {}
+    provider_digest = False
+    if provider:
+        try:
+            raw_digest = generate_with_provider(
+                provider,
+                build_trend_digest_prompt(trend, article, page),
+                variants=1,
+            )[0]
+            digest = parse_trend_digest(raw_digest)
+            provider_digest = bool(digest)
+        except Exception as exc:  # noqa: BLE001 - keep partial extraction if the model fails.
+            provider_error = f"digest failed: {exc}"
+    if not digest:
+        digest = fallback_trend_digest(trend, article, page)
+
+    has_source_detail = bool(page.text_excerpt or page.key_paragraphs or page.title or page.excerpt)
+    enrichment_error = "; ".join(error for error in [page_error, provider_error, page.error] if error) or None
+    if provider_digest and has_source_detail and not page_error:
+        status = "enriched"
+    elif provider_digest or has_source_detail:
+        status = "partial"
+    else:
+        status = "failed"
+
+    hooks = normalize_string_list(digest.get("suggested_hooks"), limit=3)
+    post_angles = normalize_string_list(digest.get("possible_post_angles") or digest.get("post_angles"), limit=5)
+    key_points = normalize_string_list(
+        digest.get("key_points")
+        or [
+            digest.get("what_happened"),
+            digest.get("what_is_new"),
+            digest.get("why_it_matters_to_gtm") or digest.get("why_it_matters_to_ai_sales_gtm"),
+        ],
+        limit=6,
+    )
+    claims = normalize_string_list(digest.get("important_claims") or page.key_paragraphs, limit=6)
+    source_title = clean_text(page.title) or clean_text(article.get("title")) or trend.source_title
+    source_author = clean_text(page.author) or clean_text(article.get("author")) or trend.source_author
+    source_published_at = normalize_article_date(page.published_at or article.get("date") or trend.date)
+    excerpt = truncate_text(page.excerpt or trend.source_excerpt or clean_text(article.get("summary") or article.get("snippet")), SOURCE_EXCERPT_CHARS)
+    text_excerpt = truncate_text(page.text_excerpt or trend.source_text_excerpt or "", SOURCE_TEXT_EXCERPT_CHARS) or None
+    confidence = clean_text(digest.get("source_confidence")) or source_confidence_for(status, provider_digest, has_source_detail)
+
+    return replace(
+        trend,
+        summary=clean_text(digest.get("what_happened")) or trend.summary,
+        why_it_matters=clean_text(digest.get("why_it_matters")) or trend.why_it_matters,
+        leadpoet_angle=clean_text(digest.get("leadpoet_angle")) or trend.leadpoet_angle,
+        suggested_hooks="\n".join(hooks) if hooks else trend.suggested_hooks,
+        source_title=source_title,
+        source_author=source_author,
+        source_published_at=source_published_at,
+        source_excerpt=excerpt,
+        source_text_excerpt=text_excerpt,
+        key_points_json=json.dumps(key_points),
+        important_claims_json=json.dumps(claims),
+        post_angles_json=json.dumps(post_angles),
+        source_confidence=confidence,
+        enriched_at=utc_now(),
+        enrichment_status=status,
+        enrichment_error=enrichment_error,
+    )
+
+
+def fetch_source_page_text(url: str) -> str:
+    request = Request(
+        url,
+        headers={"User-Agent": "KoinonikoTrendScout/1.0"},
+    )
+    try:
+        with urlopen(request, timeout=SOURCE_FETCH_TIMEOUT_SECONDS) as response:
+            content_type = response.headers.get("content-type", "")
+            if content_type and "text/html" not in content_type and "application/xhtml" not in content_type:
+                raise RuntimeError(f"unsupported content type: {content_type}")
+            return response.read(1_000_000).decode("utf-8", errors="replace")
+    except HTTPError as exc:
+        raise RuntimeError(f"HTTP {exc.code} {exc.reason}") from exc
+    except URLError as exc:
+        raise RuntimeError(str(exc.reason)) from exc
+
+
+def should_fetch_source_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = parsed.netloc.lower()
+    return not any(blocked in host for blocked in ["trends.google.", "google.com"])
+
+
+def extract_source_page_details(source_html: str) -> SourcePageDetails:
+    parser = ArticleTextParser()
+    parser.feed(source_html)
+    parser.close()
+    paragraphs = [paragraph for paragraph in unique_texts(parser.paragraphs) if len(paragraph) >= 40]
+    text = " ".join(paragraphs)
+    key_paragraphs = select_key_paragraphs(paragraphs)
+    excerpt = truncate_text(" ".join(key_paragraphs or paragraphs[:2]), SOURCE_EXCERPT_CHARS)
+    return SourcePageDetails(
+        title=parser.title or meta_value(parser.meta, ["og:title", "twitter:title", "title"]),
+        author=meta_value(parser.meta, ["author", "article:author", "byl", "parsely-author"]),
+        published_at=meta_value(parser.meta, ["article:published_time", "datePublished", "date", "pubdate", "parsely-pub-date"]),
+        excerpt=excerpt,
+        text_excerpt=truncate_text(text, SOURCE_TEXT_EXCERPT_CHARS),
+        key_paragraphs=key_paragraphs,
+        important_numbers=important_numbers(text),
+        mentioned_names=mentioned_names(text),
+    )
+
+
+class ArticleTextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.meta: dict[str, str] = {}
+        self.title = ""
+        self.paragraphs: list[str] = []
+        self._capture_title = False
+        self._capture_tag = ""
+        self._parts: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_map = {key.lower(): value or "" for key, value in attrs}
+        if tag in {"script", "style", "svg", "noscript"}:
+            self._skip_depth += 1
+            return
+        if tag == "meta":
+            key = clean_text(attr_map.get("property") or attr_map.get("name") or attr_map.get("itemprop"))
+            content = clean_text(attr_map.get("content"))
+            if key and content:
+                self.meta[key] = content
+        if self._skip_depth:
+            return
+        if tag == "title":
+            self._capture_title = True
+            self._parts = []
+        elif tag in {"p", "h1", "h2", "li"}:
+            self._capture_tag = tag
+            self._parts = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style", "svg", "noscript"} and self._skip_depth:
+            self._skip_depth -= 1
+            return
+        if tag == "title" and self._capture_title:
+            self.title = clean_text(" ".join(self._parts))
+            self._capture_title = False
+            self._parts = []
+            return
+        if tag == self._capture_tag:
+            text = clean_text(" ".join(self._parts))
+            if text:
+                self.paragraphs.append(text)
+            self._capture_tag = ""
+            self._parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        if self._capture_title or self._capture_tag:
+            self._parts.append(data)
+
+
+def build_trend_digest_prompt(trend: TrendItem, article: dict[str, object], page: SourcePageDetails) -> str:
+    provider_metadata = {
+        "title": trend.title,
+        "source_url": trend.source_url,
+        "source_name": trend.source_author,
+        "source_type": trend.source_type,
+        "provider_date": trend.date,
+        "provider_snippet": trend.source_excerpt or clean_text(article.get("summary") or article.get("snippet")),
+        "trend_breakdown": clean_text(article.get("trend_breakdown_text")),
+    }
+    source_details = {
+        "article_title": page.title,
+        "author": page.author,
+        "published_at": page.published_at,
+        "excerpt": page.excerpt,
+        "key_paragraphs": page.key_paragraphs[:5],
+        "important_numbers": page.important_numbers[:8],
+        "product_company_names": page.mentioned_names[:10],
+    }
+    text_excerpt = truncate_text(page.text_excerpt or trend.source_text_excerpt or "", SOURCE_PROMPT_TEXT_CHARS)
+    return f"""Create a concise Trend Scout digest for Gavin at Leadpoet.
+
+Use source details for understanding, not copying. Do not quote long passages.
+
+Provider metadata:
+{json.dumps(provider_metadata, indent=2)}
+
+Extracted source details:
+{json.dumps(source_details, indent=2)}
+
+Source text excerpt:
+{text_excerpt or "No source page text extracted."}
+
+Return compact JSON only with these keys:
+what_happened, what_is_new, why_it_matters, why_it_matters_to_gtm, leadpoet_angle, suggested_hooks, possible_post_angles, key_points, important_claims, source_confidence, caveats.
+
+Keep each value specific and concise. suggested_hooks and possible_post_angles must be arrays."""
+
+
+def parse_trend_digest(raw: str) -> dict[str, object]:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I).strip()
+        text = re.sub(r"\s*```$", "", text).strip()
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, flags=re.S)
+        if not match:
+            return {}
+        try:
+            parsed = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def fallback_trend_digest(trend: TrendItem, article: dict[str, object], page: SourcePageDetails) -> dict[str, object]:
+    what_happened = page.excerpt or trend.summary
+    claims = page.key_paragraphs[:4] or [trend.summary]
+    numbers = page.important_numbers[:3]
+    number_note = f" Notable numbers: {', '.join(numbers)}." if numbers else ""
+    return {
+        "what_happened": what_happened,
+        "what_is_new": clean_text(article.get("trend_breakdown_text")) or trend.title,
+        "why_it_matters": f"{trend.why_it_matters}{number_note}",
+        "why_it_matters_to_gtm": "This matters for sales and lead generation if it changes buyer timing, prioritization, or the context reps need before outreach.",
+        "leadpoet_angle": trend.leadpoet_angle,
+        "suggested_hooks": [trend.suggested_hooks] if trend.suggested_hooks else [suggested_hook_for_topic(trend.topic)],
+        "possible_post_angles": [trend.leadpoet_angle],
+        "key_points": normalize_string_list([what_happened, clean_text(article.get("trend_breakdown_text"))], limit=4),
+        "important_claims": claims,
+        "source_confidence": "medium" if page.text_excerpt else "low",
+        "caveats": page.error or "",
+    }
+
+
+def select_key_paragraphs(paragraphs: list[str]) -> list[str]:
+    scored: list[tuple[int, str]] = []
+    for paragraph in paragraphs:
+        lowered = paragraph.lower()
+        score = sum(1 for term in TREND_RELEVANCE_TERMS if text_matches_term(lowered, term))
+        if important_numbers(paragraph):
+            score += 2
+        if score:
+            scored.append((score, truncate_text(paragraph, 360)))
+    selected = [paragraph for _, paragraph in sorted(scored, key=lambda item: item[0], reverse=True)[:5]]
+    return selected or [truncate_text(paragraph, 360) for paragraph in paragraphs[:4]]
+
+
+def important_numbers(text: str) -> list[str]:
+    matches = re.findall(
+        r"(?:\$?\d[\d,]*(?:\.\d+)?\s?(?:%|percent|billion|million|thousand|x|users|customers|companies|emails|leads|searches|ARR|revenue)?)",
+        text,
+        flags=re.I,
+    )
+    return unique_texts([clean_text(match) for match in matches if clean_text(match)])[:10]
+
+
+def mentioned_names(text: str) -> list[str]:
+    matches = re.findall(r"\b[A-Z][A-Za-z0-9&.-]+(?:\s+[A-Z][A-Za-z0-9&.-]+){0,3}\b", text)
+    blocked = {"The", "This", "That", "For", "With", "But", "And", "CEO", "AI"}
+    return unique_texts([match for match in matches if match not in blocked])[:12]
+
+
+def meta_value(meta: dict[str, str], keys: list[str]) -> str | None:
+    lowered = {key.lower(): value for key, value in meta.items()}
+    for key in keys:
+        value = clean_text(lowered.get(key.lower()))
+        if value:
+            return value
+    return None
+
+
+def normalize_string_list(value: object, *, limit: int) -> list[str]:
+    if isinstance(value, list):
+        items = value
+    elif isinstance(value, str):
+        items = re.split(r"\n+|;|\s+\d+[.)]\s+", value)
+    elif value:
+        items = [value]
+    else:
+        items = []
+    return unique_texts([clean_text(item) for item in items if clean_text(item)])[:limit]
+
+
+def source_confidence_for(status: str, provider_digest: bool, has_source_detail: bool) -> str:
+    if status == "enriched" and provider_digest and has_source_detail:
+        return "high"
+    if provider_digest or has_source_detail:
+        return "medium"
+    return "low"
+
+
+def truncate_text(value: object, limit: int) -> str:
+    text = html.unescape(clean_text(value))
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def empty_refresh_stats() -> dict[str, int]:
+    return {
+        "candidates_found": 0,
+        "trends_stored": 0,
+        "enriched": 0,
+        "partial": 0,
+        "failed": 0,
+    }
 
 
 def web_trend_groups(store: SQLiteStore, *, now: datetime | None = None, limit: int = 5) -> WebTrendGroups:
@@ -437,6 +882,7 @@ def web_trend_from_article(article: dict[str, object], *, source_type: str) -> T
     url = clean_text(article.get("url") or article.get("link") or article.get("url_mobile")) or None
     source = clean_text(
         article.get("sourceCommonName")
+        or article.get("source")
         or article.get("domain")
         or article.get("sourceCountry")
         or "web"
@@ -464,6 +910,15 @@ def web_trend_from_article(article: dict[str, object], *, source_type: str) -> T
         engagement_notes=f"Auto-pulled from {provider_label(provider)} as a top {period} web trend.",
         source_author=source,
         raw_text=json.dumps(article, sort_keys=True),
+        source_title=title,
+        source_published_at=date_value,
+        source_excerpt=truncate_text(summary, SOURCE_EXCERPT_CHARS),
+        source_text_excerpt=None,
+        key_points_json=json.dumps(normalize_string_list([summary, article.get("trend_breakdown_text")], limit=4)),
+        important_claims_json=json.dumps([]),
+        post_angles_json=json.dumps([f"Use this to talk about {topic} through the lens of buyer timing."]),
+        source_confidence="low",
+        enrichment_status="not_attempted",
     )
 
 
