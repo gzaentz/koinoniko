@@ -797,6 +797,9 @@ function renderTrendList(targetId, trends, emptyText) {
 }
 
 function dashboardTrendRow(item) {
+  const summary = cleanString(item.summary);
+  const relevance = trendRelevanceText(item);
+  const leadpoetAngle = cleanString(item.leadpoet_angle);
   return `
     <article class="trend-row" role="button" tabindex="0" onclick='openTrendDetails(${jsArg(item.id)})' onkeydown='openTrendDetailsFromKey(event, ${jsArg(item.id)})'>
       <div class="meta-row">
@@ -804,14 +807,25 @@ function dashboardTrendRow(item) {
         ${item.source_url ? `<a href="${escapeAttr(item.source_url)}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">Source</a>` : ""}
       </div>
       <h3>${escapeHtml(item.title)}</h3>
-      <p>${escapeHtml(item.summary || "")}</p>
-      ${item.why_it_matters ? `<p>${escapeHtml(item.why_it_matters)}</p>` : ""}
-      ${item.leadpoet_angle ? `<p><strong>Leadpoet angle:</strong> ${escapeHtml(item.leadpoet_angle)}</p>` : ""}
+      ${summary ? `<p class="trend-summary">${escapeHtml(summary)}</p>` : ""}
+      <p class="trend-relevance"><strong>Why relevant:</strong> ${escapeHtml(relevance)}</p>
+      ${leadpoetAngle && leadpoetAngle !== relevance ? `<p class="trend-angle"><strong>Leadpoet angle:</strong> ${escapeHtml(leadpoetAngle)}</p>` : ""}
       <div class="actions left">
         <button class="secondary" onclick='useTrendInPost(event, ${jsArg(item.id)})'>Use in Post</button>
       </div>
     </article>
   `;
+}
+
+function trendRelevanceText(item) {
+  const explicit = cleanString(item.why_it_matters);
+  if (explicit) return explicit;
+  const angle = cleanString(item.leadpoet_angle);
+  if (angle) return angle;
+  const summary = cleanString(item.summary);
+  if (summary) return summary;
+  const topic = topicLabel(item.topic || "this topic");
+  return `Worth watching because it may affect buyer priorities, sales workflows, or the timing behind ${topic}.`;
 }
 
 function renderDashboardPatterns() {
@@ -1491,6 +1505,15 @@ async function refreshTrendsFromAccount() {
   await refreshAfterAccountAction();
 }
 
+async function refreshPatternsFromAccount() {
+  const payload = await api("/api/patterns/refresh", {
+    method: "POST",
+    body: JSON.stringify({ limit: 5, window: "daily" }),
+  });
+  showMessage(`Patterns refreshed. Stored ${payload.stored || 0}; skipped ${payload.skipped || 0}.`);
+  await refreshAfterAccountAction();
+}
+
 async function refreshAfterAccountAction() {
   await refresh();
   if (state.view === "account") {
@@ -1809,9 +1832,21 @@ function renderAccount() {
     <p class="muted">Change password from the CLI with <code>set-web-login</code>.</p>
   `;
   const trendsButton = $("accountRefreshTrendsButton");
+  const patternsButton = $("accountRefreshPatternsButton");
+  const syncMenuButton = $("accountSyncMenuButton");
+  const xReadConfigured = Boolean(status.x_read_configured);
+  ["accountSyncPostsButton", "accountSyncMetricsButton", "accountSyncAllButton"].forEach((id) => {
+    const button = $(id);
+    button.disabled = !xReadConfigured;
+    button.title = xReadConfigured ? "" : "X read auth is not connected.";
+  });
   const scrapingdogStatus = connectionStatus(connections.scrapingdog);
   trendsButton.disabled = scrapingdogStatus !== "connected";
   trendsButton.title = trendsButton.disabled ? "Connect ScrapingDog to refresh live trend context." : "Refresh live trend context.";
+  patternsButton.disabled = scrapingdogStatus !== "connected" || !status.provider_configured;
+  patternsButton.title = patternsButton.disabled ? "Connect ScrapingDog and the LLM provider to refresh patterns." : "Refresh Pattern Scout.";
+  syncMenuButton.disabled = !xReadConfigured && trendsButton.disabled && patternsButton.disabled;
+  syncMenuButton.title = syncMenuButton.disabled ? "Connect at least one sync source to run syncs." : "Choose a sync action.";
 }
 
 function setModelInput(id, savedValue, effectiveValue) {
@@ -2016,6 +2051,28 @@ function closeReviewAddMenu() {
   setReviewAddMenuOpen(false);
 }
 
+function setAccountSyncMenuOpen(open) {
+  $("accountSyncMenu").classList.toggle("hidden", !open);
+  $("accountSyncMenuButton").setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function toggleAccountSyncMenu(event) {
+  event.stopPropagation();
+  if ($("accountSyncMenuButton").disabled) return;
+  setAccountSyncMenuOpen($("accountSyncMenu").classList.contains("hidden"));
+}
+
+function closeAccountSyncMenu() {
+  if (!$("accountSyncMenu")) return;
+  setAccountSyncMenuOpen(false);
+}
+
+function runAccountSyncMenuAction(event, loadingText, work) {
+  event.stopPropagation();
+  closeAccountSyncMenu();
+  runButton($("accountSyncMenuButton"), loadingText, work);
+}
+
 function detail(labelText, value) {
   return `
     <div class="detail-item">
@@ -2158,6 +2215,8 @@ function setup() {
     openModal("planModal");
   });
   document.addEventListener("click", closeReviewAddMenu);
+  $("accountSyncMenuButton").addEventListener("click", toggleAccountSyncMenu);
+  $("accountSyncMenu").addEventListener("click", (event) => event.stopPropagation());
   document.addEventListener("click", closePostFieldEditor);
   $("generatePostButton").addEventListener("click", (event) => runButton(event.currentTarget, "Generating...", createPost));
   $("planWeekButton").addEventListener("click", (event) => runButton(event.currentTarget, "Creating...", planWeek));
@@ -2185,10 +2244,12 @@ function setup() {
   });
   $("loadTrendsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Loading...", loadTrends));
   $("saveAccountButton").addEventListener("click", (event) => runButton(event.currentTarget, "Saving...", saveAccount));
-  $("accountSyncPostsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncPosts));
-  $("accountSyncMetricsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncMetrics));
-  $("accountSyncAllButton").addEventListener("click", (event) => runButton(event.currentTarget, "Syncing...", syncAllXData));
-  $("accountRefreshTrendsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Refreshing...", refreshTrendsFromAccount));
+  $("accountSyncAllButton").addEventListener("click", (event) => runAccountSyncMenuAction(event, "Syncing...", syncAllXData));
+  $("accountSyncPostsButton").addEventListener("click", (event) => runAccountSyncMenuAction(event, "Syncing...", syncPosts));
+  $("accountSyncMetricsButton").addEventListener("click", (event) => runAccountSyncMenuAction(event, "Syncing...", syncMetrics));
+  $("accountRefreshTrendsButton").addEventListener("click", (event) => runAccountSyncMenuAction(event, "Syncing...", refreshTrendsFromAccount));
+  $("accountRefreshPatternsButton").addEventListener("click", (event) => runAccountSyncMenuAction(event, "Syncing...", refreshPatternsFromAccount));
+  document.addEventListener("click", closeAccountSyncMenu);
   $("updateVoiceButton").addEventListener("click", (event) => runButton(event.currentTarget, "Updating...", updateVoice));
 
   $("reviewList").addEventListener("dragover", (event) => event.preventDefault());

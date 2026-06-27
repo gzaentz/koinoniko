@@ -1083,14 +1083,24 @@ main {
 }
 
 .sync-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  display: flex;
+  justify-content: flex-start;
   margin: 16px 0;
 }
 
-.sync-actions button {
+.sync-menu-wrap {
+  width: min(240px, 100%);
+}
+
+.sync-menu-wrap > button {
   width: 100%;
+  justify-content: center;
+}
+
+.sync-menu {
+  left: 0;
+  right: auto;
+  min-width: 240px;
 }
 
 .account-model-section .settings-form {
@@ -1728,7 +1738,6 @@ main {
     grid-template-columns: 1fr;
   }
 
-  .sync-actions,
   .account-model-section .settings-form {
     grid-template-columns: 1fr;
   }

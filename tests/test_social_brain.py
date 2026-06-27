@@ -414,7 +414,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn('id="refreshTrendsButton"', index_html)
         self.assertNotIn("Performance Signals", index_html)
         self.assertNotIn("What is working", index_html)
-        self.assertIn("Refresh Trends", index_html)
+        self.assertIn("Sync Trends", index_html)
         self.assertNotIn('id="syncPostsButton"', index_html)
         self.assertNotIn('id="syncMetricsButton"', index_html)
         self.assertNotIn('id="dashboardSyncLine"', index_html)

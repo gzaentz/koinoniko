@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-pattern-scout-sidebar-toggle">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-trend-relevance">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -255,10 +255,16 @@
               </div>
             </div>
             <div class="sync-actions">
-              <button id="accountSyncPostsButton">Sync X Posts</button>
-              <button class="secondary" id="accountSyncMetricsButton">Sync X Metrics</button>
-              <button class="secondary" id="accountSyncAllButton">Sync All X Data</button>
-              <button class="secondary" id="accountRefreshTrendsButton">Refresh Trends</button>
+              <div class="add-menu-wrap sync-menu-wrap">
+                <button id="accountSyncMenuButton" type="button" aria-haspopup="true" aria-expanded="false">Sync</button>
+                <div class="action-menu sync-menu hidden" id="accountSyncMenu">
+                  <button id="accountSyncAllButton" type="button">Sync All</button>
+                  <button class="secondary" id="accountSyncPostsButton" type="button">Sync Posts</button>
+                  <button class="secondary" id="accountSyncMetricsButton" type="button">Sync Engagement</button>
+                  <button class="secondary" id="accountRefreshTrendsButton" type="button">Sync Trends</button>
+                  <button class="secondary" id="accountRefreshPatternsButton" type="button">Sync Patterns</button>
+                </div>
+              </div>
             </div>
             <div class="sync-table" id="accountSyncGrid"></div>
           </section>
@@ -462,6 +468,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260627-pattern-scout-classification-combo"></script>
+    <script src="/static/app.js?v=20260627-trend-relevance"></script>
   </body>
 </html>
