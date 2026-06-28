@@ -31,14 +31,113 @@ SOURCE_EXCERPT_CHARS = 700
 WEB_DAILY_SOURCE_TYPE = "web_daily"
 WEB_WEEKLY_SOURCE_TYPE = "web_weekly"
 WEB_TREND_QUERY = (
-    '("artificial intelligence" OR AI OR "AI agents" OR "generative AI") '
-    '("sales" OR "lead generation" OR "lead gen" OR GTM OR "sales automation" OR "AI SDR")'
+    '("AI SDR" OR "sales AI" OR "outbound AI" OR "GTM AI" OR "sales automation" '
+    'OR "sales engagement" OR "lead generation" OR "lead gen" OR "buyer intent" '
+    'OR "intent data" OR "account signals" OR RevOps OR CRM)'
 )
 SCRAPINGDOG_NEWS_QUERY = (
-    '("AI agents" OR "generative AI" OR "artificial intelligence" OR "AI SDR") '
-    '("sales" OR "lead generation" OR "lead gen" OR GTM OR "sales automation" OR pipeline)'
+    '("AI SDR" OR "sales AI" OR "outbound AI" OR "GTM AI" OR "sales automation" '
+    'OR "sales engagement" OR "lead generation" OR "lead gen" OR "buyer intent" '
+    'OR "intent data" OR "account signals" OR RevOps OR CRM OR pipeline)'
 )
+TREND_RELEVANCE_KEEP_THRESHOLD = 5
+TREND_REQUIRED_RELEVANCE_TERMS = {
+    "account signal",
+    "account signals",
+    "ai sales",
+    "ai sdr",
+    "b2b",
+    "buyer intent",
+    "buyer signal",
+    "buyer signals",
+    "buyer timing",
+    "buying intent",
+    "buying window",
+    "crm",
+    "data enrichment",
+    "go-to-market",
+    "gtm",
+    "intent data",
+    "lead gen",
+    "lead generation",
+    "outbound",
+    "pipeline",
+    "prospecting",
+    "revops",
+    "sales",
+    "sales ai",
+    "sales automation",
+    "sales engagement",
+    "sales workflow",
+    "sdr",
+}
+TREND_RELEVANCE_WEIGHTS = {
+    "account context": 5,
+    "account signal": 5,
+    "account signals": 5,
+    "ai sales": 5,
+    "ai sdr": 6,
+    "b2b": 2,
+    "buyer context": 5,
+    "buyer intent": 6,
+    "buyer signal": 5,
+    "buyer signals": 5,
+    "buyer timing": 6,
+    "buying intent": 6,
+    "buying window": 5,
+    "buying windows": 5,
+    "crm": 3,
+    "data enrichment": 4,
+    "go-to-market": 4,
+    "gtm": 4,
+    "hubspot": 2,
+    "intent data": 6,
+    "lead gen": 5,
+    "lead generation": 5,
+    "outbound": 5,
+    "pipeline": 4,
+    "prospecting": 4,
+    "revops": 4,
+    "sales": 3,
+    "sales ai": 5,
+    "sales automation": 5,
+    "sales engagement": 5,
+    "sales workflow": 4,
+    "salesforce": 2,
+    "sdr": 4,
+    "sequence": 2,
+    "timing signal": 5,
+    "timing signals": 5,
+    "workflow timing": 4,
+    "ai": 1,
+    "artificial intelligence": 1,
+    "automation": 1,
+    "generative": 1,
+}
+TREND_NEGATIVE_WEIGHTS = {
+    "actor": 4,
+    "album": 4,
+    "basketball": 4,
+    "budget deal": 4,
+    "celebrity": 6,
+    "consumer app": 5,
+    "election": 5,
+    "football": 4,
+    "gossip": 6,
+    "governor": 4,
+    "iphone": 4,
+    "movie": 5,
+    "music": 4,
+    "photo app": 5,
+    "politics": 5,
+    "recipe": 5,
+    "senate": 4,
+    "sports": 5,
+    "stock price": 3,
+}
 TREND_RELEVANCE_TERMS = {
+    *TREND_REQUIRED_RELEVANCE_TERMS,
+    *TREND_RELEVANCE_WEIGHTS,
     "ai",
     "a.i.",
     "artificial intelligence",
@@ -252,7 +351,8 @@ def refresh_web_trends_for_period(
         try:
             fallback_articles = gdelt_articles(fetch_gdelt_articles(timespan=gdelt_timespan, limit=limit * 4))
             stats["candidates_found"] += len(fallback_articles)
-            selected.extend(article for article in fallback_articles if article not in selected)
+            articles.extend(article for article in fallback_articles if article not in articles)
+            selected = select_web_trend_articles(articles, limit=limit)
             sources.append("GDELT")
         except Exception as exc:  # noqa: BLE001 - no-key fallback can also throttle.
             errors.append(f"{period} GDELT fallback failed: {exc}")
@@ -431,7 +531,7 @@ def select_web_trend_articles(
     selected: list[dict[str, object]] = []
     seen: set[str] = set()
     for article in sorted(articles, key=web_trend_rank_key, reverse=True):
-        if web_trend_relevance_score(article) <= 0:
+        if web_trend_relevance_score(article) < TREND_RELEVANCE_KEEP_THRESHOLD:
             continue
         title = clean_text(article.get("title"))
         url = clean_text(article.get("url") or article.get("link") or article.get("url_mobile"))
@@ -454,7 +554,24 @@ def web_trend_rank_key(article: dict[str, object]) -> tuple[int, int, int]:
 
 
 def web_trend_relevance_score(article: dict[str, object]) -> int:
-    text = " ".join(
+    text = article_relevance_text(article)
+    if not any(text_matches_term(text, term) for term in TREND_REQUIRED_RELEVANCE_TERMS):
+        return 0
+    positive = sum(
+        weight
+        for term, weight in TREND_RELEVANCE_WEIGHTS.items()
+        if text_matches_term(text, term)
+    )
+    negative = sum(
+        weight
+        for term, weight in TREND_NEGATIVE_WEIGHTS.items()
+        if text_matches_term(text, term)
+    )
+    return max(0, positive - negative)
+
+
+def article_relevance_text(article: dict[str, object]) -> str:
+    return " ".join(
         clean_text(value)
         for value in [
             article.get("title"),
@@ -462,9 +579,9 @@ def web_trend_relevance_score(article: dict[str, object]) -> int:
             article.get("snippet"),
             article.get("description"),
             article.get("trend_breakdown_text"),
+            article.get("sourceCommonName"),
         ]
     ).lower()
-    return sum(1 for term in TREND_RELEVANCE_TERMS if text_matches_term(text, term))
 
 
 def text_matches_term(text: str, term: str) -> bool:
@@ -497,22 +614,20 @@ def save_web_trend_articles(
         url = clean_text(article.get("url") or article.get("url_mobile"))
         if not title:
             continue
+        if web_trend_relevance_score(article) < TREND_RELEVANCE_KEEP_THRESHOLD:
+            continue
         dedupe_key = (url or title).lower()
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
-        trend = store.save_trend_item(web_trend_from_article(article, source_type=source_type))
-        if stats is not None:
-            stats["trends_stored"] += 1
+        trend = web_trend_from_article(article, source_type=source_type)
         if enrich and attempted_enrichments < max_enrichments and (provider or fetch_source_page):
             attempted_enrichments += 1
-            trend = store.save_trend_item(
-                enrich_trend_source(
-                    trend,
-                    article,
-                    provider=provider,
-                    fetch_source_page=fetch_source_page or fetch_source_page_text,
-                )
+            trend = enrich_trend_source(
+                trend,
+                article,
+                provider=provider,
+                fetch_source_page=fetch_source_page or fetch_source_page_text,
             )
             if stats is not None:
                 if trend.enrichment_status == "enriched":
@@ -521,6 +636,11 @@ def save_web_trend_articles(
                     stats["failed"] += 1
                 elif trend.enrichment_status == "partial":
                     stats["partial"] += 1
+        if trend.status != "unused":
+            continue
+        trend = store.save_trend_item(trend)
+        if stats is not None:
+            stats["trends_stored"] += 1
         saved.append(trend)
         if len(saved) >= limit:
             break
@@ -564,6 +684,19 @@ def enrich_trend_source(
             provider_error = f"digest failed: {exc}"
     if not digest:
         digest = fallback_trend_digest(trend, article, page)
+
+    if provider_digest and trend_digest_rejects(digest):
+        reason = clean_text(digest.get("reject_reason") or digest.get("relevance_reason")) or "Rejected by Trend Scout relevance gate."
+        return replace(
+            trend,
+            status="ignored",
+            why_it_matters=reason,
+            leadpoet_angle="",
+            source_confidence="low",
+            enriched_at=utc_now(),
+            enrichment_status="rejected",
+            enrichment_error=reason,
+        )
 
     has_source_detail = bool(page.text_excerpt or page.key_paragraphs or page.title or page.excerpt)
     enrichment_error = "; ".join(error for error in [page_error, provider_error, page.error] if error) or None
@@ -734,6 +867,12 @@ def build_trend_digest_prompt(trend: TrendItem, article: dict[str, object], page
     text_excerpt = truncate_text(page.text_excerpt or trend.source_text_excerpt or "", SOURCE_PROMPT_TEXT_CHARS)
     return f"""Create a concise Trend Scout digest for Gavin at Leadpoet.
 
+First decide whether this source is actually worth surfacing for Leadpoet.
+
+Keep only if it directly affects B2B GTM, outbound, lead generation, AI SDRs, sales workflows, buyer intent, account signals, pipeline prioritization, CRM/RevOps, data enrichment, or buyer timing.
+
+Reject if it is generic AI news, consumer tech, politics, entertainment, broad market chatter, or if the Leadpoet angle would need to be forced.
+
 Use source details for understanding, not copying. Do not quote long passages.
 
 Provider metadata:
@@ -746,9 +885,14 @@ Source text excerpt:
 {text_excerpt or "No source page text extracted."}
 
 Return compact JSON only with these keys:
-what_happened, what_is_new, why_it_matters, why_it_matters_to_gtm, leadpoet_angle, suggested_hooks, possible_post_angles, key_points, important_claims, source_confidence, caveats.
+keep, relevance_score, relevance_reason, reject_reason, what_happened, what_is_new, why_it_matters, why_it_matters_to_gtm, leadpoet_angle, suggested_hooks, possible_post_angles, key_points, important_claims, source_confidence, caveats.
 
-Keep each value specific and concise. suggested_hooks and possible_post_angles must be arrays."""
+Rules:
+- relevance_score is 0-10.
+- If keep is false or relevance_score is below 6, set leadpoet_angle to an empty string and explain reject_reason.
+- Do not invent a Leadpoet angle. If the source does not connect naturally to buyer timing, proprietary context, account signals, or sales workflow timing, reject it.
+- Keep each value specific and concise.
+- suggested_hooks and possible_post_angles must be arrays."""
 
 
 def parse_trend_digest(raw: str) -> dict[str, object]:
@@ -767,6 +911,16 @@ def parse_trend_digest(raw: str) -> dict[str, object]:
         except json.JSONDecodeError:
             return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def trend_digest_rejects(digest: dict[str, object]) -> bool:
+    keep = digest.get("keep")
+    if isinstance(keep, bool):
+        return not keep
+    if isinstance(keep, str) and keep.strip().lower() in {"false", "no", "reject"}:
+        return True
+    relevance_score = numeric_value(digest.get("relevance_score"))
+    return bool(relevance_score and relevance_score < 6)
 
 
 def fallback_trend_digest(trend: TrendItem, article: dict[str, object], page: SourcePageDetails) -> dict[str, object]:

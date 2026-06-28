@@ -10,7 +10,12 @@ from unittest.mock import patch
 from leadpoet_social_brain.core.models import ContextBundle, DraftRequest, TrendItem
 from leadpoet_social_brain.generation import build_generation_prompt
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
-from leadpoet_social_brain.trend_scout import WebTrendGroups, refresh_web_trends
+from leadpoet_social_brain.trend_scout import (
+    WebTrendGroups,
+    refresh_web_trends,
+    select_web_trend_articles,
+    web_trend_relevance_score,
+)
 from leadpoet_social_brain.web.app import handle_api_request
 
 
@@ -42,6 +47,43 @@ class FakeDigestProvider:
 class ScrapingdogTrendScoutTest(unittest.TestCase):
     def make_store(self, tmpdir: str) -> SQLiteStore:
         return SQLiteStore(Path(tmpdir) / "brain.sqlite3")
+
+    def test_relevance_gate_requires_gtm_specificity(self):
+        articles = [
+            {
+                "title": "OpenAI launches faster consumer photo model",
+                "summary": "A generic AI update for consumer image creation.",
+                "url": "https://example.com/generic-ai",
+            },
+            {
+                "title": "California budget deal mentions AI procurement",
+                "summary": "Governor and senate leaders reached a budget deal.",
+                "url": "https://example.com/budget",
+            },
+            {
+                "title": "AI SDR platforms add buyer intent signals",
+                "summary": "Outbound teams are using account signals to prioritize pipeline.",
+                "url": "https://example.com/ai-sdr",
+            },
+            {
+                "title": "CRM teams invest in data enrichment for lead generation",
+                "summary": "RevOps teams need better account context before outreach.",
+                "url": "https://example.com/crm-enrichment",
+            },
+        ]
+
+        selected = select_web_trend_articles(articles, limit=5)
+
+        self.assertEqual(
+            [article["title"] for article in selected],
+            [
+                "AI SDR platforms add buyer intent signals",
+                "CRM teams invest in data enrichment for lead generation",
+            ],
+        )
+        self.assertEqual(web_trend_relevance_score(articles[0]), 0)
+        self.assertEqual(web_trend_relevance_score(articles[1]), 0)
+        self.assertGreaterEqual(web_trend_relevance_score(articles[2]), 5)
 
     def test_scrapingdog_trends_fill_daily_and_weekly_with_relevant_news(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -207,9 +249,59 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
             self.assertIn("32% more qualified meetings", trend.important_claims_json or "")
             self.assertEqual(trend.source_confidence, "high")
             self.assertIn("Return compact JSON", provider.prompts[0])
+            self.assertIn("Keep only if it directly affects B2B GTM", provider.prompts[0])
+            self.assertIn("Do not invent a Leadpoet angle", provider.prompts[0])
             stored = store.get_trend_item(trend.id)
             self.assertIsNotNone(stored)
             self.assertEqual(stored.enrichment_status, "enriched")
+            store.close()
+
+    def test_provider_relevance_rejection_prevents_storage(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            provider = FakeDigestProvider(
+                response={
+                    "keep": False,
+                    "relevance_score": 3,
+                    "relevance_reason": "Generic AI vendor update without GTM workflow impact.",
+                    "reject_reason": "Leadpoet angle would be forced.",
+                    "what_happened": "",
+                    "what_is_new": "",
+                    "why_it_matters": "",
+                    "why_it_matters_to_gtm": "",
+                    "leadpoet_angle": "",
+                    "suggested_hooks": [],
+                    "possible_post_angles": [],
+                    "key_points": [],
+                    "important_claims": [],
+                    "source_confidence": "low",
+                    "caveats": "",
+                }
+            )
+
+            def fake_fetch(*, timespan: str, limit: int):
+                return [
+                    {
+                        "title": f"Sales AI vendor launches generic assistant {timespan}",
+                        "url": f"https://example.com/{timespan}/sales-ai",
+                        "sourceCommonName": "Example News",
+                        "summary": "Sales teams are mentioned, but the update has no buyer timing or workflow impact.",
+                    }
+                ]
+
+            groups = refresh_web_trends(
+                store,
+                fetch_articles=fake_fetch,
+                limit=1,
+                provider=provider,
+                fetch_source_page=lambda url: "<html><body><p>Sales AI assistant launched with generic features.</p></body></html>",
+            )
+
+            self.assertEqual(groups.daily, [])
+            self.assertEqual(groups.weekly, [])
+            self.assertEqual(groups.trends_stored, 0)
+            self.assertEqual(store.list_trends(status="unused"), [])
+            self.assertIn("relevance_score", provider.prompts[0])
             store.close()
 
     def test_trend_enrichment_failure_does_not_fail_refresh(self):
