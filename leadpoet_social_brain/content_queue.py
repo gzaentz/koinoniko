@@ -144,7 +144,7 @@ def create_post_x(
     topic: str = "Leadpoet",
     post_type: str = "founder_insight",
     use_trends: bool = False,
-    best_version: bool = False,
+    best_version: bool = True,
     scheduled_at: str | None = None,
     extra_context: str | None = None,
     use_patterns: bool = False,

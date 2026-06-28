@@ -811,6 +811,12 @@ In the web UI, `Create Post` includes:
 - `Pattern to use`
 - selected source chips that can be removed before generation
 
+Create Post uses the Best Version pipeline by default. A hidden strategist first turns the
+user's idea and selected context into a structured Post Intent, including the thesis,
+concrete detail, post shape, and evidence boundary. The natural writer drafts from that
+intent, and the evaluator rewrites once if the result is generic, unsupported, or too
+polished. The user only reviews the final queued post, not the internal brief.
+
 `Use in Post` on a trend or `Use Pattern` on a pattern opens Create Post with that source preselected. Generated output still enters the review queue; it does not publish automatically.
 
 ## Weekly Content Queue

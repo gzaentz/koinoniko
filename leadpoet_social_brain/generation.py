@@ -427,9 +427,17 @@ def build_strategy_prompt(
         positioning_rules=(active_rules or {}).get("positioning_rules", []),
         voice_rules=(active_rules or {}).get("voice_rules", []),
     )
-    return f"""You are helping Gavin decide the strongest X post angle for Leadpoet.
+    return f"""You are the hidden content strategist for Gavin's Leadpoet posts.
 
-Do not write the post yet. Decide what the post should accomplish.
+Do not write the post yet. Produce the structured Post Intent that the natural writer will use.
+
+Your job:
+- Turn the user's raw idea into a clear thesis, angle, and post shape.
+- Ground the post in supplied context, examples, trends, patterns, or the user's exact words.
+- Decide what the writer may safely imply and what it must not invent.
+- If there is no real anecdote, source, quote, metric, or lived event, set the post shape to observation/take instead of story.
+- Do not invent customer conversations, personal activities, research sessions, meetings, metrics, quotes, product facts, or examples.
+- Keep humor dry and grounded. Avoid jokes that become the point.
 
 Request:
 - Topic: {request.topic}
@@ -458,7 +466,16 @@ Analytics hints:
 {avoid_section}
 
 Return compact JSON only with these keys:
-core_point, intended_audience, why_timely, post_angle, hook_direction, what_to_avoid, success_criteria."""
+thesis, angle, intended_audience, reader_problem, why_this_is_worth_posting, concrete_detail, source_material, evidence_boundary, post_shape, hook_direction, tone_direction, claims_to_make, claims_to_avoid, forbidden_moves, success_criteria.
+
+Field guidance:
+- thesis: one plain sentence the post is trying to make true in the reader's head.
+- concrete_detail: one specific noun, mechanism, situation, or contrast from the request/context. If thin, use the best grounded mechanism and say it is thin.
+- source_material: what the writer is allowed to use as evidence.
+- evidence_boundary: what the writer must not pretend happened.
+- post_shape: one of observation, product lesson, teardown, market take, trend response, customer-inspired, short contrarian claim.
+- forbidden_moves: include unsupported first-person setup, fake anecdotes, generic AI hype, and any request-specific traps.
+- success_criteria: concise checklist for the evaluator."""
 
 
 def build_best_writer_prompt(
@@ -488,8 +505,10 @@ def build_best_writer_prompt(
 
 Prioritize exact Gavin examples, worked-reason notes, and the writing skills below over generic marketing instincts.
 
-Strategy:
+Hidden Post Intent from the strategist:
 {json.dumps(strategy_summary, indent=2)}
+
+Use this intent as the content source of truth. The strategist can infer the angle, but you may not invent evidence.
 
 Request:
 - Topic: {request.topic}
@@ -520,6 +539,13 @@ Writing and review instructions:
 {skill_text}
 
 {avoid_section}
+
+Grounding rules:
+- Do not write unsupported first-person setups like "I spent the morning...", "I was talking to...", "a customer told me...", or "we tested..." unless the Post Intent/source material explicitly supports them.
+- If no real anecdote is supplied, write an observation, take, teardown, or product lesson.
+- Keep one concrete detail from the Post Intent visible in the draft.
+- Do not add new stats, quotes, customer claims, product facts, or examples.
+- Humor is allowed only if it sharpens the thesis.
 
 Avoid corporate thought leadership, generic hype, fake profundity, em dashes, overly symmetrical phrasing, LinkedIn-style moral lessons, and "not just X, but Y" framing.
 Use Pattern mechanics only as structure. Do not copy source post wording or make the post feel derivative. Make it specific to Gavin/Leadpoet.
@@ -553,6 +579,9 @@ Original request:
 - Angle: {request.angle or "none"}
 - Audience: {request.audience or "Leadpoet's current audience"}
 
+Hidden Post Intent:
+{json.dumps(strategy_summary, indent=2)}
+
 Success criteria:
 {json.dumps(strategy_summary.get("success_criteria", ""), indent=2)}
 
@@ -570,12 +599,16 @@ Return compact JSON only with:
 ranked_drafts, quality_notes, warnings, suggested_final_version.
 
 Best Version evaluator should check:
+- strategy fidelity: the draft expresses the thesis and uses the concrete detail
+- evidence safety: no invented first-person anecdote, fake customer story, fake quote, fake metric, unsupported reading/research session, or unsupported product claim
+- specificity: at least one concrete noun, situation, mechanism, or contrast
+- substance: the draft is not just a vibe, joke, or generic AI take
 - no avoid phrases
 - no generic AI language
 - no forced CTA
 - no corporate launch tone
 
-If a draft uses an Avoid Phrase, revise away from it in suggested_final_version.
+If the best draft violates any check, rewrite it once in suggested_final_version while preserving the thesis. If a draft uses an Avoid Phrase, revise away from it in suggested_final_version.
 The suggested_final_version must be natural, specific, founder-led, concise, non-corporate, free of em dashes, {max_chars} characters or fewer, and complete."""
 
 
@@ -695,15 +728,50 @@ def parse_strategy_summary(raw: str) -> dict[str, object]:
     parsed = parse_json_object(raw)
     if isinstance(parsed, dict):
         return {
-            "core_point": str(parsed.get("core_point") or "").strip(),
+            "thesis": str(parsed.get("thesis") or parsed.get("core_point") or "").strip(),
+            "angle": str(parsed.get("angle") or parsed.get("post_angle") or "").strip(),
+            "core_point": str(parsed.get("core_point") or parsed.get("thesis") or "").strip(),
             "intended_audience": str(parsed.get("intended_audience") or "").strip(),
+            "reader_problem": str(parsed.get("reader_problem") or "").strip(),
             "why_timely": str(parsed.get("why_timely") or "").strip(),
-            "post_angle": str(parsed.get("post_angle") or "").strip(),
+            "why_this_is_worth_posting": str(
+                parsed.get("why_this_is_worth_posting") or parsed.get("why_timely") or ""
+            ).strip(),
+            "post_angle": str(parsed.get("post_angle") or parsed.get("angle") or "").strip(),
+            "concrete_detail": str(parsed.get("concrete_detail") or "").strip(),
+            "source_material": _strategy_value(parsed.get("source_material")),
+            "evidence_boundary": str(parsed.get("evidence_boundary") or "").strip(),
+            "post_shape": str(parsed.get("post_shape") or "").strip(),
             "hook_direction": str(parsed.get("hook_direction") or "").strip(),
+            "tone_direction": str(parsed.get("tone_direction") or "").strip(),
+            "claims_to_make": _strategy_list(parsed.get("claims_to_make")),
+            "claims_to_avoid": _strategy_list(parsed.get("claims_to_avoid")),
+            "forbidden_moves": _strategy_list(parsed.get("forbidden_moves")),
             "what_to_avoid": str(parsed.get("what_to_avoid") or "").strip(),
-            "success_criteria": parsed.get("success_criteria") or "",
+            "success_criteria": _strategy_value(parsed.get("success_criteria")) or "",
         }
     return {"raw": raw.strip()}
+
+
+def _strategy_value(value: object) -> object:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, dict)):
+        return value
+    return str(value).strip()
+
+
+def _strategy_list(value: object) -> list[object]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return [cleaned] if cleaned else []
+    return [value]
 
 
 def parse_evaluation_result(raw: str, draft_options: list[str]) -> tuple[str, str, dict[str, object]]:

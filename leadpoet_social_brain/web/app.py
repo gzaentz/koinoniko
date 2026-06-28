@@ -723,7 +723,7 @@ def route_api(
             topic=str(payload.get("topic") or "Leadpoet"),
             post_type=str(payload.get("post_type") or "founder_insight"),
             use_trends=bool_from_payload(payload, "use_trends", False),
-            best_version=bool_from_payload(payload, "best_version", False),
+            best_version=bool_from_payload(payload, "best_version", True),
             scheduled_at=clean_optional(payload.get("scheduled_at")),
             extra_context=clean_optional(payload.get("extra_context")),
             use_patterns=bool_from_payload(payload, "use_patterns", False),

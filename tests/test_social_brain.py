@@ -119,11 +119,22 @@ class RoleAwareProvider:
             return [
                 json.dumps(
                     {
+                        "thesis": "Sales AI needs account judgment, not more volume.",
+                        "angle": "timing beats automation volume",
                         "core_point": "Sales AI needs account judgment, not more volume.",
                         "intended_audience": "founders and sales leaders",
-                        "why_timely": "teams are questioning AI SDR volume",
+                        "reader_problem": "AI outbound looks polished even when targeting is shallow.",
+                        "why_this_is_worth_posting": "teams are questioning AI SDR volume",
+                        "concrete_detail": "buyer timing",
+                        "source_material": "User request and Leadpoet positioning context.",
+                        "evidence_boundary": "Do not imply Gavin personally read examples, spoke to customers, or ran a test.",
+                        "post_shape": "observation",
                         "post_angle": "timing beats automation volume",
                         "hook_direction": "plain contrast",
+                        "tone_direction": "dry, plainspoken, lightly opinionated",
+                        "claims_to_make": ["The useful sales AI edge is account judgment."],
+                        "claims_to_avoid": ["AI SDRs are useless."],
+                        "forbidden_moves": ["unsupported first-person setup", "fake anecdote", "generic AI hype"],
                         "what_to_avoid": "generic AI hype",
                         "success_criteria": "sounds specific and founder-led",
                     }
@@ -1098,7 +1109,14 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(snapshot["natural_writer_model"], "openrouter/writer")
             self.assertEqual(snapshot["evaluator_model"], "openrouter/evaluator")
             self.assertIn("strategy_summary", snapshot)
+            self.assertEqual(snapshot["strategy_summary"]["thesis"], "Sales AI needs account judgment, not more volume.")
+            self.assertEqual(snapshot["strategy_summary"]["concrete_detail"], "buyer timing")
+            self.assertIn("Do not imply Gavin personally read examples", snapshot["strategy_summary"]["evidence_boundary"])
             self.assertIn("quality_notes", snapshot)
+            self.assertIn("Produce the structured Post Intent", provider.calls[0]["prompt"])
+            self.assertIn("Hidden Post Intent from the strategist", provider.calls[1]["prompt"])
+            self.assertIn("unsupported first-person setups", provider.calls[1]["prompt"])
+            self.assertIn("evidence safety", provider.calls[2]["prompt"])
             self.assertIn("Best Version evaluator should check", provider.calls[2]["prompt"])
             self.assertIn("- game changer", provider.calls[2]["prompt"])
             self.assertIn("Most sales AI", drafts[0].text)
@@ -1216,10 +1234,11 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(result.item.topic, "Leadpoet")
             self.assertEqual(result.item.post_type, "founder_insight")
             self.assertIn("buyer timing", result.item.angle)
-            self.assertIn("Quality mode: Standard", result.item.reviewer_notes)
+            self.assertIn("Quality mode: Best Version", result.item.reviewer_notes)
             self.assertEqual(len(queued), 1)
             self.assertEqual(queued[0].id, result.item.id)
-            self.assertEqual(saved_draft.context_snapshot["quality_mode"], "standard")
+            self.assertEqual(saved_draft.context_snapshot["quality_mode"], "best_version")
+            self.assertIn("strategy_summary", saved_draft.context_snapshot)
             self.assertIn("User instruction: Write about why sales AI needs buyer timing", provider.prompts[0])
             store.close()
 
@@ -4570,6 +4589,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["item"]["status"], "needs_review")
             store = SQLiteStore(db_path)
             saved_draft = store.get_generated_draft(payload["item"]["draft_id"])
+            self.assertEqual(saved_draft.context_snapshot["quality_mode"], "best_version")
             self.assertEqual(saved_draft.context_snapshot["selected_viral_patterns"][0]["id"], pattern.id)
             store.close()
 
