@@ -1014,8 +1014,8 @@ main {
 
 .board-header {
   margin-bottom: 16px;
-  min-height: 34px;
-  align-items: center;
+  min-height: 0;
+  align-items: flex-start;
 }
 
 .board-header-actions {
