@@ -1025,7 +1025,9 @@ main {
 
 .queue-card {
   display: grid;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
 }
 
 .queue-card:active {
@@ -1037,9 +1039,10 @@ main {
   background: transparent;
   color: var(--ink);
   min-height: auto;
+  min-width: 0;
   padding: 0;
   display: grid;
-  gap: 10px;
+  gap: 7px;
   text-align: left;
   justify-content: stretch;
 }
@@ -1065,8 +1068,14 @@ main {
 .card-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  justify-self: end;
+}
+
+.card-actions button {
+  white-space: nowrap;
 }
 
 .empty-state {
@@ -2419,6 +2428,18 @@ main {
 
   .sidebar-toggle {
     display: none;
+  }
+
+  .queue-card {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .card-actions {
+    justify-self: start;
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .sidebar-collapsed .sidebar {
