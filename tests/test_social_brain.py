@@ -3436,6 +3436,17 @@ class SocialBrainTest(unittest.TestCase):
                 )
         self.assertEqual(exit_code, 1)
 
+    def test_railway_entrypoint_routes_cron_services_to_tasks(self):
+        from leadpoet_social_brain.web.railway_entrypoint import task_from_environment
+
+        railway_config = Path("railway.toml").read_text(encoding="utf-8")
+        self.assertIn("leadpoet_social_brain.web.railway_entrypoint", railway_config)
+        self.assertEqual(task_from_environment({"RAILWAY_SERVICE_NAME": "publish-due-x"}), "publish-due-x")
+        self.assertEqual(task_from_environment({"RAILWAY_SERVICE_NAME": "sync-x-posts"}), "sync-x-posts")
+        self.assertEqual(task_from_environment({"RAILWAY_SERVICE_NAME": "refresh-patterns"}), "refresh-patterns-weekly")
+        self.assertEqual(task_from_environment({"SOCIAL_BRAIN_TASK": "sync-x-metrics"}), "sync-x-metrics")
+        self.assertIsNone(task_from_environment({"RAILWAY_SERVICE_NAME": "koinoniko"}))
+
     def test_pattern_refresh_cli_defaults_to_weekly_and_supports_monthly(self):
         parser = build_cli_parser()
 

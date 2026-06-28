@@ -2,4 +2,4 @@
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "python -m leadpoet_social_brain.web.app --host 0.0.0.0"
+startCommand = "python -m leadpoet_social_brain.web.railway_entrypoint"

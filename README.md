@@ -413,10 +413,11 @@ This repo includes `railway.toml`:
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "python -m leadpoet_social_brain.web.app --host 0.0.0.0"
+startCommand = "python -m leadpoet_social_brain.web.railway_entrypoint"
 ```
 
 Railway provides `PORT` automatically. The app listens on that port in production.
+The checked-in `railway.toml` now points at `leadpoet_social_brain.web.railway_entrypoint`, which starts the web UI for the main service and runs one-shot task clients for Railway services named `publish-due-x`, `sync-x-posts`, `sync-x-metrics`, `refresh-trends`, or `refresh-patterns`. If a cron service has a different name, set `SOCIAL_BRAIN_TASK` to one of the supported task names.
 
 All product data lives in SQLite. On Railway, that means X posts, metric snapshots, Voice Examples, Koinoniko Voice, trends, Pattern Scout examples, drafts, queue items, sync metadata, model routing, and the web login persist only when the SQLite file is on the mounted volume.
 
