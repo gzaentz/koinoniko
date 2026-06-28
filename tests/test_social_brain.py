@@ -188,6 +188,11 @@ class FakeXWriteClient:
         )
 
 
+class FailingXWriteClient:
+    def post_tweet(self, text: str) -> XPostedTweet:
+        raise RuntimeError("X write failed")
+
+
 class SocialBrainTest(unittest.TestCase):
     def make_store(self, tmpdir: str) -> SQLiteStore:
         return SQLiteStore(Path(tmpdir) / "brain.sqlite3")
@@ -3392,6 +3397,21 @@ class SocialBrainTest(unittest.TestCase):
             "task-secret",
             {"limit": 50},
         )
+        with patch(
+            "leadpoet_social_brain.web.task_client.post_task",
+            return_value={"results": [{"error": "X write failed"}]},
+        ):
+            with redirect_stdout(io.StringIO()):
+                exit_code = task_client_main(
+                    [
+                        "publish-due-x",
+                        "--url",
+                        "https://example.com",
+                        "--secret",
+                        "task-secret",
+                    ]
+                )
+        self.assertEqual(exit_code, 1)
 
     def test_pattern_refresh_cli_defaults_to_weekly_and_supports_monthly(self):
         parser = build_cli_parser()
@@ -3597,6 +3617,7 @@ class SocialBrainTest(unittest.TestCase):
 
             self.assertEqual(status, 200)
             self.assertEqual(len(payload["results"]), 1)
+            self.assertEqual(payload["errors"], [])
             self.assertTrue(payload["results"][0]["posted"])
             self.assertEqual(payload["results"][0]["queue_item"]["id"], due.id)
             self.assertEqual(fake_client.posts, ["Due approved post."])
@@ -3604,6 +3625,41 @@ class SocialBrainTest(unittest.TestCase):
             store = SQLiteStore(db_path)
             self.assertEqual(store.get_content_queue_item(due.id).status, "posted")
             self.assertEqual(store.get_content_queue_item(future.id).status, "approved")
+            store.close()
+
+    def test_task_publish_due_x_surfaces_publish_errors(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            due = store.save_content_queue_item(
+                ContentQueueItem(
+                    text="Due approved post.",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-06-27T23:35:00+00:00",
+                    status="approved",
+                    approved_at=utc_now(),
+                )
+            )
+            store.close()
+
+            with patch("leadpoet_social_brain.web.app.XWriteClient.from_env", return_value=FailingXWriteClient()):
+                status, payload = handle_api_request(
+                    "POST",
+                    "/tasks/publish-due-x",
+                    json.dumps({"now": "2026-06-27T23:36:00+00:00", "limit": 20}),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["errors"], ["X write failed"])
+            self.assertEqual(payload["results"][0]["error"], "X write failed")
+            self.assertEqual(payload["results"][0]["queue_item"]["id"], due.id)
+
+            store = SQLiteStore(db_path)
+            failed = store.get_content_queue_item(due.id)
+            self.assertEqual(failed.status, "failed")
+            self.assertEqual(failed.failure_reason, "X write failed")
             store.close()
 
     def test_post_queue_item_requires_approval_and_creates_published_post(self):

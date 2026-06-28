@@ -49,7 +49,16 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(json.dumps(result, indent=2, sort_keys=True))
-    return 1 if result.get("errors") else 0
+    return 1 if task_result_has_errors(result) else 0
+
+
+def task_result_has_errors(result: dict[str, Any]) -> bool:
+    if result.get("errors"):
+        return True
+    for item in result.get("results", []):
+        if isinstance(item, dict) and item.get("error"):
+            return True
+    return False
 
 
 def post_task(base_url: str, task: str, secret: str, payload: dict[str, Any]) -> dict[str, Any]:

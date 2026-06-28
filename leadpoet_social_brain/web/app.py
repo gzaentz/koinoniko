@@ -823,7 +823,8 @@ def publish_due_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str
         limit=int(payload.get("limit") or 20),
         author=str(payload.get("author") or "Gavin"),
     )
-    return {"results": [publish_result_payload(result) for result in results]}
+    errors = [result.error for result in results if result.error]
+    return {"results": [publish_result_payload(result) for result in results], "errors": errors}
 
 
 def assistant_chat_response(store: SQLiteStore, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
