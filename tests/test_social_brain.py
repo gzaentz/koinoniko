@@ -364,7 +364,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('rel="icon" type="image/svg+xml" href="/static/koinoniko-favicon.svg"', index_html)
         self.assertIn('href="/static/styles.css?v=', index_html)
         self.assertIn('src="/static/app.js?v=', index_html)
-        self.assertIn("20260627-loading-polish", index_html)
+        self.assertIn("20260627-voice-detail-editor", index_html)
         self.assertIn("skeleton-card", index_html)
         self.assertIn("skeleton-line", styles_css)
         self.assertIn("renderInitialLoadingState", app_js)
@@ -639,6 +639,10 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("postVoiceSaveStatus", app_js)
         self.assertIn("savePostVoiceFromModal", app_js)
         self.assertIn("Save Voice Details", app_js)
+        self.assertIn("voice-detail-editor", app_js)
+        self.assertIn(".voice-detail-field textarea", styles_css)
+        self.assertNotIn("voice-example-fields", app_js + styles_css)
+        self.assertNotIn("voiceDetailInput", app_js)
         self.assertIn("compact-meta-row", app_js)
         self.assertIn("compact-metrics-row", app_js)
         self.assertIn("postFieldControl", app_js)
@@ -2817,7 +2821,9 @@ class SocialBrainTest(unittest.TestCase):
             )
             self.assertIn("dirty secret of intent data", provider.prompts[0])
             self.assertIn("- bookmarks: 40", provider.prompts[0])
-            self.assertIn("Current Koinoniko Voice:", provider.prompts[0])
+            self.assertIn("Current Voice:", provider.prompts[0])
+            self.assertNotIn("Current Koinoniko Voice:", provider.prompts[0])
+            self.assertNotIn("Koinoniko Voice Example", provider.prompts[0])
 
             store = SQLiteStore(db_path)
             note = store.notes_by_post_id([post.id])[post.id]
@@ -2884,9 +2890,9 @@ class SocialBrainTest(unittest.TestCase):
                     ),
                     json.dumps(
                         {
-                            "why_this_worked": "Strong because it turns outbound volume into a buyer timing problem in plain language.",
+                            "why_this_worked": "Strong because it turns outbound volume into a buyer timing problem in plain Koinoniko voice...",
                             "hook": "two-team contrast",
-                            "structure": "contrast, implication, sharper model",
+                            "structure": "contrast, implication, sharper model...",
                             "tone": "direct and founder-led",
                             "cta": "none",
                             "formatting": "short lines",
@@ -2903,14 +2909,18 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(len(provider.prompts), 2)
             self.assertIn("Return only valid JSON", provider.prompts[0])
             self.assertIn("why_this_worked", provider.prompts[1])
+            self.assertIn("Current Voice:", provider.prompts[0])
+            self.assertNotIn("Current Koinoniko Voice:", provider.prompts[0])
+            self.assertNotIn("Fill missing Voice Example details for Koinoniko", provider.prompts[0])
 
             store = SQLiteStore(db_path)
             notes = store.notes_by_post_id([older.id, newer.id])
             self.assertEqual(notes[newer.id].worked_reason, "Original human note.")
             self.assertEqual(notes[newer.id].hook, "specific observation")
             self.assertEqual(notes[newer.id].structure, "contrast between old signal and buyer timing")
-            self.assertEqual(notes[older.id].worked_reason, "Strong because it turns outbound volume into a buyer timing problem in plain language.")
+            self.assertEqual(notes[older.id].worked_reason, "Strong because it turns outbound volume into a buyer timing problem in plain Gavin/Leadpoet voice.")
             self.assertEqual(notes[older.id].hook, "two-team contrast")
+            self.assertEqual(notes[older.id].structure, "contrast, implication, sharper model.")
             self.assertEqual(notes[older.id].pattern_name, "weak default versus better model")
             current = store.list_context_sections(kinds={"style_guide"})[0]
             self.assertIn("Original human note.", current.content)

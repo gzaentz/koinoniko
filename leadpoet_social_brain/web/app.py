@@ -8,6 +8,7 @@ import html
 import json
 import mimetypes
 import os
+import re
 import secrets
 import time
 from collections import Counter
@@ -1649,7 +1650,7 @@ def build_voice_note_prompt(post: SocialPost, *, metrics: Any | None, current_vo
         for key, value in metric.items()
         if value is not None and key != "measured_at"
     ) or "- No metrics available."
-    return f"""Suggest a concise "Why this worked" note for this Koinoniko Voice Example.
+    return f"""Suggest a concise "Why this worked" note for this Voice Example.
 
 Post text:
 {post.text}
@@ -1660,30 +1661,28 @@ Post type: {post.post_type}
 Metrics:
 {metrics_text}
 
-Current Koinoniko Voice:
+Current Voice:
 {current_voice or "- No current Voice summary yet."}
 
 Focus on voice, structure, specificity, why it sounds like Gavin, and why the audience likely responded.
 Avoid generic notes like "This post performed well because it got engagement."
+Do not mention Koinoniko; that is only the platform name. Do not use ellipses or unfinished phrases.
 
 Return one concise paragraph, maximum 35 words. Do not include bullets, labels, or quotation marks."""
 
 
 def clean_suggested_voice_note(value: str) -> str:
-    cleaned = " ".join(str(value or "").strip().strip('"').strip("'").split())
-    if len(cleaned) <= 420:
-        return cleaned
-    return cleaned[:417].rstrip() + "..."
+    return clean_voice_detail_text(str(value or "").strip().strip('"').strip("'"), 600) or ""
 
 
 VOICE_AUTOFILL_FIELDS = {
-    "why_this_worked": ("worked_reason", 420),
-    "hook": ("hook", 90),
-    "structure": ("structure", 120),
-    "tone": ("tone", 90),
-    "cta": ("cta", 80),
-    "formatting": ("formatting", 90),
-    "pattern": ("pattern_name", 120),
+    "why_this_worked": ("worked_reason", 700),
+    "hook": ("hook", 260),
+    "structure": ("structure", 320),
+    "tone": ("tone", 260),
+    "cta": ("cta", 180),
+    "formatting": ("formatting", 260),
+    "pattern": ("pattern_name", 260),
 }
 
 
@@ -1778,7 +1777,7 @@ def build_voice_detail_prompt(
     }
     missing_json = json.dumps(missing_fields)
     existing_json = json.dumps({key: value for key, value in existing.items() if clean_optional(value)}, indent=2)
-    return f"""Fill missing Voice Example details for Koinoniko.
+    return f"""Fill missing Voice Example details.
 
 Post text:
 {post.text}
@@ -1792,7 +1791,7 @@ Metrics:
 Existing details:
 {existing_json or "{}"}
 
-Current Koinoniko Voice:
+Current Voice:
 {current_voice or "- No current Voice summary yet."}
 
 Return only valid JSON with exactly these missing keys:
@@ -1807,7 +1806,9 @@ Field guidance:
 - formatting: short description of line breaks, length, and layout.
 - pattern: reusable writing pattern name in plain language.
 
-Keep every value specific to this post. Avoid generic labels, hype, and internal database language."""
+Keep every value specific to this post. Avoid generic labels, hype, and internal database language.
+Do not mention Koinoniko; that is only the platform name.
+Every value must be a complete phrase or sentence. Never end with ellipses (...)."""
 
 
 def clean_voice_detail_suggestion(raw: str, allowed_fields: list[str]) -> dict[str, str]:
@@ -1822,8 +1823,30 @@ def clean_voice_detail_suggestion(raw: str, allowed_fields: list[str]) -> dict[s
         if not cleaned:
             continue
         limit = VOICE_AUTOFILL_FIELDS[key][1]
-        values[key] = truncate_payload_text(cleaned, limit) or cleaned
+        cleaned_detail = clean_voice_detail_text(cleaned, limit)
+        if cleaned_detail:
+            values[key] = cleaned_detail
     return values
+
+
+def clean_voice_detail_text(value: object, limit: int) -> str | None:
+    cleaned = clean_optional(value)
+    if not cleaned:
+        return None
+    cleaned = " ".join(cleaned.replace("\u2026", "...").split())
+    cleaned = re.sub(r"\bKoinoniko(?:'s)?\b", "Gavin/Leadpoet", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\.{3,}", ".", cleaned).strip()
+    cleaned = re.sub(r"\s+[.,;:]", lambda match: match.group(0).strip(), cleaned)
+    cleaned = cleaned.rstrip(" ,-;:")
+    if not cleaned:
+        return None
+    if len(cleaned) <= limit:
+        return cleaned
+    clipped = cleaned[:limit].rstrip()
+    boundary = max(clipped.rfind(". "), clipped.rfind("; "), clipped.rfind(", "), clipped.rfind(" "))
+    if boundary > int(limit * 0.65):
+        clipped = clipped[:boundary].rstrip()
+    return clipped.rstrip(" ,-;:") or None
 
 
 def merged_voice_note(note: PostNote, values: Mapping[str, str]) -> PostNote:
@@ -1971,18 +1994,25 @@ def save_post_voice_payload(store: SQLiteStore, post: SocialPost, payload: dict[
     note = store.save_note(
         PostNote(
             post_id=post.id,
-            worked_reason=value_or_current(payload, "why_this_worked", existing.worked_reason if existing else None),
-            pattern_name=value_or_current(payload, "pattern", existing.pattern_name if existing else None),
-            hook=value_or_current(payload, "hook", existing.hook if existing else None),
-            structure=value_or_current(payload, "structure", existing.structure if existing else None),
-            tone=value_or_current(payload, "tone", existing.tone if existing else None),
-            cta=value_or_current(payload, "cta", existing.cta if existing else None),
-            formatting=value_or_current(payload, "formatting", existing.formatting if existing else None),
+            worked_reason=voice_payload_value(payload, "why_this_worked", existing.worked_reason if existing else None),
+            pattern_name=voice_payload_value(payload, "pattern", existing.pattern_name if existing else None),
+            hook=voice_payload_value(payload, "hook", existing.hook if existing else None),
+            structure=voice_payload_value(payload, "structure", existing.structure if existing else None),
+            tone=voice_payload_value(payload, "tone", existing.tone if existing else None),
+            cta=voice_payload_value(payload, "cta", existing.cta if existing else None),
+            formatting=voice_payload_value(payload, "formatting", existing.formatting if existing else None),
             imitate=bool_from_payload(payload, "voice_example", existing.imitate if existing else False),
         )
     )
     metrics = store.latest_metrics_by_post_id([post.id]).get(post.id)
     return post_detail_payload(store, post, note=note, metrics=metrics)
+
+
+def voice_payload_value(payload: dict[str, Any], key: str, current: str | None) -> str | None:
+    if key not in payload:
+        return current
+    limit = VOICE_AUTOFILL_FIELDS.get(key, ("", 260))[1]
+    return clean_voice_detail_text(payload.get(key), limit)
 
 
 def post_detail_payload(
@@ -2073,7 +2103,7 @@ def voice_suggestion_reason(metrics: Any | None) -> str:
 
 def voice_post_payload(post: SocialPost, note: PostNote | None, metrics: Any | None) -> dict[str, Any]:
     payload = recent_post_payload(post, metrics, note)
-    payload["why_this_worked"] = note.worked_reason if note else None
+    payload["why_this_worked"] = clean_voice_detail_text(note.worked_reason, VOICE_AUTOFILL_FIELDS["why_this_worked"][1]) if note else None
     return payload
 
 
@@ -2692,13 +2722,13 @@ def recent_post_payload(post, metrics: Any | None, note: PostNote | None = None)
 def voice_note_payload(note: PostNote | None) -> dict[str, Any]:
     return {
         "is_voice_example": bool(note.imitate) if note else False,
-        "why_this_worked": note.worked_reason if note else None,
-        "hook": note.hook if note else None,
-        "structure": note.structure if note else None,
-        "tone": note.tone if note else None,
-        "cta": note.cta if note else None,
-        "formatting": note.formatting if note else None,
-        "pattern": note.pattern_name if note else None,
+        "why_this_worked": clean_voice_detail_text(note.worked_reason, VOICE_AUTOFILL_FIELDS["why_this_worked"][1]) if note else None,
+        "hook": clean_voice_detail_text(note.hook, VOICE_AUTOFILL_FIELDS["hook"][1]) if note else None,
+        "structure": clean_voice_detail_text(note.structure, VOICE_AUTOFILL_FIELDS["structure"][1]) if note else None,
+        "tone": clean_voice_detail_text(note.tone, VOICE_AUTOFILL_FIELDS["tone"][1]) if note else None,
+        "cta": clean_voice_detail_text(note.cta, VOICE_AUTOFILL_FIELDS["cta"][1]) if note else None,
+        "formatting": clean_voice_detail_text(note.formatting, VOICE_AUTOFILL_FIELDS["formatting"][1]) if note else None,
+        "pattern": clean_voice_detail_text(note.pattern_name, VOICE_AUTOFILL_FIELDS["pattern"][1]) if note else None,
         "updated_at": note.updated_at if note else None,
     }
 

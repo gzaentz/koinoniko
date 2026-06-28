@@ -552,6 +552,7 @@ function renderPostModal() {
   if (!post) return;
   const metrics = post.metrics || {};
   const voice = post.voice || {};
+  const hasSyncedDetails = hasVoiceDetailFields(voice);
   $("postModalTitle").textContent = post.summary || "Post details";
   $("postModalBody").innerHTML = `
     <div class="post-review-top">
@@ -579,8 +580,9 @@ function renderPostModal() {
       </label>
       <label id="postVoiceReasonField" class="voice-reason-field ${voice.is_voice_example ? "" : "hidden"}">
         Why keep this as a voice example?
-        <textarea id="postWhyWorked" rows="3" placeholder="Optional note for what Koinoniko should learn from this post." onblur="savePostVoiceFromModal({ quiet: true })">${escapeHtml(voice.why_this_worked || "")}</textarea>
+        <textarea id="postWhyWorked" rows="3" placeholder="Optional note for what to learn from this post." onblur="savePostVoiceFromModal({ quiet: true })">${escapeHtml(voice.why_this_worked || "")}</textarea>
       </label>
+      ${voice.is_voice_example && hasSyncedDetails ? voiceDetailsEditor(post) : ""}
       <span id="postVoiceSaveStatus" class="inline-save-status" aria-live="polite"></span>
     </section>
   `;
@@ -946,8 +948,10 @@ function closePostFieldEditor() {
 window.togglePostVoiceReason = () => {
   const checkbox = $("postVoiceExample");
   const field = $("postVoiceReasonField");
+  const details = $("postVoiceDetailsSection");
   if (!checkbox || !field) return;
   field.classList.toggle("hidden", !checkbox.checked);
+  if (details) details.classList.toggle("hidden", !checkbox.checked);
 };
 
 window.savePostVoiceFromModal = async ({ quiet = false } = {}) => {
@@ -967,7 +971,7 @@ async function savePostVoice({ quiet = false } = {}) {
       method: "POST",
       body: JSON.stringify({
         voice_example: checkbox.checked,
-        why_this_worked: $("postWhyWorked")?.value || "",
+        why_this_worked: $("postWhyWorked")?.value || post.voice?.why_this_worked || "",
       }),
     });
     state.postDetail = payload.post;
@@ -2263,22 +2267,6 @@ function voiceExampleCard(post, { removable = false } = {}) {
         <p class="voice-post-preview">${escapeHtml(summarize(post.text, 190))}</p>
         <p class="voice-why"><strong>Why this worked</strong><span>${escapeHtml(whyThisWorked || "No note yet.")}</span></p>
       </div>
-      <details class="advanced-fields voice-example-fields" id="${escapeAttr(voiceDetailPanelId(post.id))}">
-        <summary>Voice details</summary>
-        <div class="form-grid">
-          ${voiceDetailTextarea(post, "why_this_worked", "Why this worked", 3)}
-          ${voiceDetailInput(post, "hook", "Hook")}
-          ${voiceDetailInput(post, "structure", "Structure")}
-          ${voiceDetailInput(post, "tone", "Tone")}
-          ${voiceDetailInput(post, "cta", "CTA")}
-          ${voiceDetailInput(post, "formatting", "Formatting")}
-          ${voiceDetailInput(post, "pattern", "Pattern")}
-        </div>
-        <div class="actions left">
-          <button class="secondary" onclick='suggestWhyWorked(event, ${jsArg(post.id)})'>Suggest why this worked</button>
-          <button class="secondary" onclick='saveVoiceExampleDetails(event, ${jsArg(post.id)})'>Save Details</button>
-        </div>
-      </details>
       <div class="actions left">
         <button class="secondary" onclick='openPostDetails(${jsArg(post.id)})'>Open Post</button>
         ${post.url ? `<a class="button-link secondary-link" href="${escapeAttr(post.url)}" target="_blank" rel="noreferrer">Open on X</a>` : ""}
@@ -2288,17 +2276,34 @@ function voiceExampleCard(post, { removable = false } = {}) {
   `;
 }
 
-function voiceDetailInput(post, field, labelText) {
+function hasVoiceDetailFields(voice = {}) {
+  return ["hook", "structure", "tone", "cta", "formatting", "pattern"].some((field) => cleanString(voice[field]));
+}
+
+function voiceDetailsEditor(post) {
   return `
-    <label>${escapeHtml(labelText)}
-      <input id="${escapeAttr(voiceDetailFieldId(post.id, field))}" value="${escapeAttr(voiceDetailValue(post, field))}">
-    </label>
+    <section class="voice-detail-editor" id="postVoiceDetailsSection" aria-label="Voice details">
+      <div class="voice-detail-editor-header">
+        <h3>Voice details</h3>
+        <span>Synced from Update Voice</span>
+      </div>
+      ${voiceDetailTextarea(post, "hook", "Hook")}
+      ${voiceDetailTextarea(post, "structure", "Structure")}
+      ${voiceDetailTextarea(post, "tone", "Tone")}
+      ${voiceDetailTextarea(post, "cta", "CTA", 1)}
+      ${voiceDetailTextarea(post, "formatting", "Formatting")}
+      ${voiceDetailTextarea(post, "pattern", "Pattern")}
+      <div class="actions left">
+        <button class="secondary" onclick='suggestWhyWorked(event, ${jsArg(post.id)})'>Suggest why this worked</button>
+        <button class="secondary" onclick='saveVoiceExampleDetails(event, ${jsArg(post.id)})'>Save Details</button>
+      </div>
+    </section>
   `;
 }
 
-function voiceDetailTextarea(post, field, labelText, rows = 3) {
+function voiceDetailTextarea(post, field, labelText, rows = 2) {
   return `
-    <label class="full-span">${escapeHtml(labelText)}
+    <label class="voice-detail-field">${escapeHtml(labelText)}
       <textarea id="${escapeAttr(voiceDetailFieldId(post.id, field))}" rows="${escapeAttr(rows)}">${escapeHtml(voiceDetailValue(post, field))}</textarea>
     </label>
   `;
@@ -2306,10 +2311,6 @@ function voiceDetailTextarea(post, field, labelText, rows = 3) {
 
 function voiceDetailFieldId(postId, field) {
   return `voice-detail-${field}-${postId}`;
-}
-
-function voiceDetailPanelId(postId) {
-  return `voice-detail-panel-${postId}`;
 }
 
 function voiceDetailValue(post, field) {
@@ -2383,7 +2384,7 @@ window.saveVoiceExampleDetails = (event, id) => {
       method: "POST",
       body: JSON.stringify({
         voice_example: true,
-        why_this_worked: $(voiceDetailFieldId(id, "why_this_worked"))?.value || "",
+        why_this_worked: $("postWhyWorked")?.value || $(voiceDetailFieldId(id, "why_this_worked"))?.value || "",
         hook: $(voiceDetailFieldId(id, "hook"))?.value || "",
         structure: $(voiceDetailFieldId(id, "structure"))?.value || "",
         tone: $(voiceDetailFieldId(id, "tone"))?.value || "",
@@ -2394,6 +2395,7 @@ window.saveVoiceExampleDetails = (event, id) => {
     });
     if (state.postDetail?.id === id) {
       state.postDetail = payload.post;
+      renderPostModal();
     }
     showMessage(payload.message || "Voice details saved.");
     await refresh();
@@ -2408,9 +2410,7 @@ window.suggestWhyWorked = (event, id) => {
       method: "POST",
       body: JSON.stringify({ post_id: id }),
     });
-    const field = $(voiceDetailFieldId(id, "why_this_worked"));
-    const panel = $(voiceDetailPanelId(id));
-    if (panel) panel.open = true;
+    const field = $("postWhyWorked") || $(voiceDetailFieldId(id, "why_this_worked"));
     if (field) {
       field.value = payload.suggested_note || "";
       field.focus();

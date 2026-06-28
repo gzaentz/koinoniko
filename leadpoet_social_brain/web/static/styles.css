@@ -1772,7 +1772,58 @@ main {
 }
 
 .voice-reason-field {
-  max-width: 760px;
+  max-width: none;
+}
+
+.voice-detail-editor {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--soft);
+}
+
+.voice-detail-editor.hidden {
+  display: none;
+}
+
+.voice-detail-editor-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.voice-detail-editor-header h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.voice-detail-editor-header span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.voice-detail-field {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.voice-detail-field textarea {
+  min-height: 74px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.4;
+  text-transform: none;
 }
 
 .inline-save-status {
@@ -1783,30 +1834,6 @@ main {
 
 .inline-save-status.error {
   color: var(--ink);
-}
-
-.advanced-fields {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 12px;
-}
-
-.advanced-fields summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-weight: 700;
-}
-
-.advanced-fields .form-grid {
-  margin-top: 12px;
-}
-
-.voice-example-fields {
-  background: var(--soft);
-}
-
-.voice-example-fields .actions {
-  margin-top: 12px;
 }
 
 .secondary-link {
