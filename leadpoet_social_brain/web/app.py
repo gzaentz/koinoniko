@@ -42,6 +42,7 @@ from leadpoet_social_brain.content_queue import (
     weekly_report_text,
 )
 from leadpoet_social_brain.core.models import (
+    ContextSection,
     ContentQueueItem,
     PostNote,
     QueuedPostVersion,
@@ -117,8 +118,63 @@ X_DAILY_SYNC_KEY = "x_daily_sync"
 TRENDS_SYNC_KEY = "trends_sync"
 PATTERNS_SYNC_KEY = "patterns_sync"
 VOICE_CONTEXT_NAME = "learned_from_high_performers"
+FACT_CONTEXT_FIELDS = [
+    {
+        "kind": "writer",
+        "name": "writer_profile",
+        "title": "Writer / founder",
+        "description": "Background, point of view, lived experience, and credible lanes.",
+        "weight": 2.0,
+    },
+    {
+        "kind": "product",
+        "name": "company_product",
+        "title": "Company / product",
+        "description": "What the company/product does, who it helps, and what is true today.",
+        "weight": 1.8,
+    },
+    {
+        "kind": "audience",
+        "name": "target_audience",
+        "title": "Audience / ICP",
+        "description": "Who posts should be written for and what they care about.",
+        "weight": 1.6,
+    },
+    {
+        "kind": "positioning",
+        "name": "core_positioning",
+        "title": "Positioning",
+        "description": "Core beliefs, wedge, enemy, category, and differentiated point of view.",
+        "weight": 1.7,
+    },
+    {
+        "kind": "proof",
+        "name": "proof_points",
+        "title": "Proof points",
+        "description": "Specific claims, examples, metrics, customers, launches, or evidence allowed in posts.",
+        "weight": 1.4,
+    },
+    {
+        "kind": "priority",
+        "name": "current_priorities",
+        "title": "Current priorities",
+        "description": "What the account should emphasize right now.",
+        "weight": 1.3,
+    },
+    {
+        "kind": "guardrail",
+        "name": "fact_guardrails",
+        "title": "No-go facts / language",
+        "description": "Claims, phrases, or positioning the writer should avoid.",
+        "weight": 1.2,
+    },
+]
+FACT_CONTEXT_KINDS = {str(field["kind"]) for field in FACT_CONTEXT_FIELDS} | {
+    "bittensor",
+    "sales_llm_vision",
+}
 DEFAULT_TOPIC_OPTIONS = [
-    "Leadpoet",
+    "company/product",
     "sales LLMs",
     "Bittensor",
     "product",
@@ -616,6 +672,10 @@ def route_api(
         return 200, {"items": voice_suggestions_payload(store)}
     if method == "GET" and parts == ["api", "voice", "coverage"]:
         return 200, voice_coverage_payload(store)
+    if method == "GET" and parts == ["api", "voice", "facts"]:
+        return 200, context_facts_payload(store)
+    if method == "PATCH" and parts == ["api", "voice", "facts"]:
+        return 200, save_context_facts_payload(store, payload)
     if method == "GET" and parts == ["api", "voice", "rules"]:
         return 200, voice_rules_payload(store)
     if method == "PATCH" and parts == ["api", "voice", "rules"]:
@@ -700,7 +760,7 @@ def route_api(
     if method == "POST" and len(parts) == 4 and parts[:2] == ["api", "queue"] and parts[3] == "post-now":
         item = require_queue_item_for_web(store, parts[2])
         client = XWriteClient.from_env()
-        result = post_queue_item_x(store, client, item=item, author=str(payload.get("author") or "Gavin"))
+        result = post_queue_item_x(store, client, item=item, author=str(payload.get("author") or "workspace"))
         status = 200 if result.error is None else 400
         return status, {"result": publish_result_payload(result)}
     if method == "POST" and len(parts) == 4 and parts[:2] == ["api", "queue"] and parts[3] == "revise":
@@ -727,7 +787,7 @@ def route_api(
             store,
             SocialBrainGenerator(store, provider=provider),
             instruction=str(payload.get("instruction") or ""),
-            topic=str(payload.get("topic") or "Leadpoet"),
+            topic=str(payload.get("topic") or "uncategorized"),
             post_type=str(payload.get("post_type") or "founder_insight"),
             use_trends=bool_from_payload(payload, "use_trends", False),
             best_version=bool_from_payload(payload, "best_version", True),
@@ -828,7 +888,7 @@ def publish_due_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str
         client,
         now=clean_optional(payload.get("now")),
         limit=int(payload.get("limit") or 20),
-        author=str(payload.get("author") or "Gavin"),
+        author=str(payload.get("author") or "workspace"),
     )
     errors = [result.error for result in results if result.error]
     return {"results": [publish_result_payload(result) for result in results], "errors": errors}
@@ -1545,7 +1605,7 @@ def voice_status_payload(store: SQLiteStore) -> dict[str, Any]:
     if examples_count == 0:
         status = "needs_examples"
         label_text = "Needs examples"
-        description = "No Voice Examples yet. Mark a few strong posts so Koinoniko can learn Gavin's voice."
+        description = "No Voice Examples yet. Mark a few strong posts to build the Voice profile."
     elif current is None:
         status = "not_updated_yet"
         label_text = "Not updated yet"
@@ -1557,7 +1617,7 @@ def voice_status_payload(store: SQLiteStore) -> dict[str, Any]:
     else:
         status = "ready"
         label_text = "Ready"
-        description = "Koinoniko Voice is current."
+        description = "Voice is current."
     return {
         "status": status,
         "label": label_text,
@@ -1573,7 +1633,7 @@ def voice_current_payload(store: SQLiteStore, *, section=None) -> dict[str, Any]
     if not current:
         return {
             "exists": False,
-            "title": "Koinoniko Voice",
+            "title": "Voice Profile",
             "content": "",
             "sections": [],
             "updated_at": None,
@@ -1581,7 +1641,7 @@ def voice_current_payload(store: SQLiteStore, *, section=None) -> dict[str, Any]
         }
     return {
         "exists": True,
-        "title": "Koinoniko Voice",
+        "title": "Voice Profile",
         "content": current.content,
         "sections": voice_content_sections(current.content),
         "updated_at": current.updated_at,
@@ -1627,7 +1687,12 @@ def suggest_voice_note_response(store: SQLiteStore, post_id: str) -> tuple[int, 
         return 400, {"error": SUGGEST_NOTE_MISSING_PROVIDER_MESSAGE}
     metrics = store.latest_metrics_by_post_id([post.id]).get(post.id)
     current_voice = current_voice_section(store)
-    prompt = build_voice_note_prompt(post, metrics=metrics, current_voice=current_voice.content if current_voice else "")
+    prompt = build_voice_note_prompt(
+        post,
+        metrics=metrics,
+        current_voice=current_voice.content if current_voice else "",
+        fact_context=fact_context_prompt_text(store),
+    )
     try:
         suggestions = generate_with_provider(
             provider,
@@ -1643,7 +1708,13 @@ def suggest_voice_note_response(store: SQLiteStore, post_id: str) -> tuple[int, 
     return 200, {"suggested_note": suggested_note}
 
 
-def build_voice_note_prompt(post: SocialPost, *, metrics: Any | None, current_voice: str = "") -> str:
+def build_voice_note_prompt(
+    post: SocialPost,
+    *,
+    metrics: Any | None,
+    current_voice: str = "",
+    fact_context: str = "",
+) -> str:
     metric = metrics_payload(metrics)
     metrics_text = "\n".join(
         f"- {key}: {value}"
@@ -1664,7 +1735,11 @@ Metrics:
 Current Voice:
 {current_voice or "- No current Voice summary yet."}
 
-Focus on voice, structure, specificity, why it sounds like Gavin, and why the audience likely responded.
+Facts & Context:
+{fact_context or "- No saved facts/context yet."}
+
+Focus on voice, structure, specificity, and why the audience likely responded.
+Only reference writer, company, or product identity if it is explicitly present in Facts & Context or the post text.
 Avoid generic notes like "This post performed well because it got engagement."
 Do not mention Koinoniko; that is only the platform name. Do not use ellipses or unfinished phrases.
 
@@ -1717,6 +1792,7 @@ def autofill_voice_example_details(store: SQLiteStore) -> dict[str, Any]:
         return summary
     metrics_by_post_id = store.latest_metrics_by_post_id([post.id for post, _, _ in candidates])
     current_voice = current_voice_section(store)
+    fact_context = fact_context_prompt_text(store)
     model = resolve_model_routing(store, provider).default
     for post, note, missing in candidates:
         prompt = build_voice_detail_prompt(
@@ -1724,6 +1800,7 @@ def autofill_voice_example_details(store: SQLiteStore) -> dict[str, Any]:
             note=note,
             metrics=metrics_by_post_id.get(post.id),
             current_voice=current_voice.content if current_voice else "",
+            fact_context=fact_context,
             missing_fields=missing,
         )
         try:
@@ -1758,6 +1835,7 @@ def build_voice_detail_prompt(
     note: PostNote,
     metrics: Any | None,
     current_voice: str = "",
+    fact_context: str = "",
     missing_fields: list[str],
 ) -> str:
     metric = metrics_payload(metrics)
@@ -1794,11 +1872,14 @@ Existing details:
 Current Voice:
 {current_voice or "- No current Voice summary yet."}
 
+Facts & Context:
+{fact_context or "- No saved facts/context yet."}
+
 Return only valid JSON with exactly these missing keys:
 {missing_json}
 
 Field guidance:
-- why_this_worked: one concise sentence on why this is a strong Gavin/Leadpoet voice example.
+- why_this_worked: one concise sentence on why this is a strong Voice Example.
 - hook: short human-readable hook mechanic, not a slogan.
 - structure: short description of the post structure.
 - tone: short description of the tone.
@@ -1808,6 +1889,7 @@ Field guidance:
 
 Keep every value specific to this post. Avoid generic labels, hype, and internal database language.
 Do not mention Koinoniko; that is only the platform name.
+Only reference writer, company, or product identity if it is explicitly present in Facts & Context or the post text.
 Every value must be a complete phrase or sentence. Never end with ellipses (...)."""
 
 
@@ -1834,7 +1916,8 @@ def clean_voice_detail_text(value: object, limit: int) -> str | None:
     if not cleaned:
         return None
     cleaned = " ".join(cleaned.replace("\u2026", "...").split())
-    cleaned = re.sub(r"\bKoinoniko(?:'s)?\b", "Gavin/Leadpoet", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bKoinoniko(?:'s)?\s+voice\b", "this voice", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bKoinoniko(?:'s)?\b", "the platform", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\.{3,}", ".", cleaned).strip()
     cleaned = re.sub(r"\s+[.,;:]", lambda match: match.group(0).strip(), cleaned)
     cleaned = cleaned.rstrip(" ,-;:")
@@ -1891,6 +1974,131 @@ def coverage_rows(counts: Counter[str], defaults: list[str]) -> list[dict[str, A
         if name not in names:
             names.append(name)
     return [{"name": name, "count": int(counts.get(name, 0))} for name in names[:8]]
+
+
+def context_facts_payload(store: SQLiteStore) -> dict[str, Any]:
+    sections = store.list_context_sections(kinds=FACT_CONTEXT_KINDS, active_only=False)
+    by_key = {(section.kind, section.name): section for section in sections}
+    fields: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for field in FACT_CONTEXT_FIELDS:
+        key = (str(field["kind"]), str(field["name"]))
+        seen.add(key)
+        fields.append(context_fact_field_payload(field, by_key.get(key)))
+    for section in sections:
+        key = (section.kind, section.name)
+        if key in seen:
+            continue
+        fields.append(
+            {
+                "kind": section.kind,
+                "name": section.name,
+                "title": label_from_identifier(section.name),
+                "description": label_from_identifier(section.kind),
+                "content": section.content,
+                "active": section.active,
+                "weight": section.weight,
+                "updated_at": section.updated_at,
+                "legacy": True,
+            }
+        )
+    filled = sum(1 for field in fields if clean_optional(field.get("content")) and field.get("active", True))
+    return {
+        "items": fields,
+        "summary": f"{filled} fact section{'s' if filled != 1 else ''} saved" if filled else "No facts saved yet",
+    }
+
+
+def context_fact_field_payload(field: Mapping[str, Any], section: ContextSection | None) -> dict[str, Any]:
+    return {
+        "kind": str(field["kind"]),
+        "name": str(field["name"]),
+        "title": str(field["title"]),
+        "description": str(field["description"]),
+        "content": section.content if section else "",
+        "active": section.active if section else False,
+        "weight": float(field.get("weight") or (section.weight if section else 1.0)),
+        "updated_at": section.updated_at if section else None,
+        "legacy": False,
+    }
+
+
+def save_context_facts_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    existing = {
+        (section.kind, section.name): section
+        for section in store.list_context_sections(kinds=FACT_CONTEXT_KINDS, active_only=False)
+    }
+    known = {
+        (str(field["kind"]), str(field["name"])): field
+        for field in FACT_CONTEXT_FIELDS
+    }
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        raise ValueError("Facts payload must include items.")
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        kind = slug_value(item.get("kind"))
+        name = slug_value(item.get("name"))
+        if not kind or not name:
+            continue
+        if kind not in FACT_CONTEXT_KINDS and (kind, name) not in existing:
+            continue
+        field = known.get((kind, name), {})
+        current = existing.get((kind, name))
+        content = normalize_multiline_text(str(item.get("content") or ""))
+        active = bool(content)
+        store.save_context_section(
+            ContextSection(
+                kind=kind,
+                name=name,
+                content=content,
+                weight=float(field.get("weight") or (current.weight if current else item.get("weight") or 1.0)),
+                active=active,
+                id=current.id if current else new_id(),
+                created_at=current.created_at if current else utc_now(),
+            )
+        )
+    response = context_facts_payload(store)
+    response["message"] = "Facts & Context saved."
+    return response
+
+
+def label_from_identifier(value: object) -> str:
+    words = re.split(r"[_\-\s]+", str(value or "").strip())
+    return " ".join(word[:1].upper() + word[1:] for word in words if word) or "Context"
+
+
+def slug_value(value: object) -> str:
+    text = str(value or "").strip().lower().replace("-", "_")
+    return re.sub(r"[^a-z0-9_]", "", text)
+
+
+def normalize_multiline_text(value: str) -> str:
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in value.replace("\r\n", "\n").splitlines()]
+    cleaned: list[str] = []
+    previous_blank = False
+    for line in lines:
+        if not line:
+            if cleaned and not previous_blank:
+                cleaned.append("")
+            previous_blank = True
+            continue
+        cleaned.append(line)
+        previous_blank = False
+    return "\n".join(cleaned).strip()
+
+
+def fact_context_prompt_text(store: SQLiteStore) -> str:
+    sections = [
+        section
+        for section in store.list_context_sections(kinds=FACT_CONTEXT_KINDS)
+        if clean_optional(section.content)
+    ]
+    return "\n".join(
+        f"- {label_from_identifier(section.kind)} / {label_from_identifier(section.name)}: {section.content}"
+        for section in sections
+    )
 
 
 def voice_rules_payload(store: SQLiteStore) -> dict[str, Any]:
@@ -1970,12 +2178,12 @@ def voice_coverage_recommendation(topic_counts: Counter[str], type_counts: Count
     if examples_count < 3:
         return "Add 2-3 more Voice Examples across sales, product, and Bittensor before relying on Voice too heavily."
     if type_counts.get("product_update", 0) == 0:
-        return "Add 1-2 product update examples so Koinoniko can write stronger launch/product posts."
+        return "Add 1-2 product update examples so launch/product posts have stronger reference material."
     active_topics = [topic for topic, count in topic_counts.items() if count > 0]
     if len(active_topics) == 1:
         return f"Add 1-2 Voice Examples outside {active_topics[0]} so Voice does not overfit one lane."
     if type_counts.get("quote_tweet", 0) == 0 and examples_count >= 4:
-        return "Add one quote tweet example if you want Koinoniko to handle commentary posts better."
+        return "Add one quote tweet example if commentary posts should be part of the Voice profile."
     return "Voice coverage looks balanced enough for now."
 
 
@@ -2062,17 +2270,17 @@ def voice_content_sections(content: str) -> list[dict[str, Any]]:
         line = raw_line.strip()
         if not line:
             continue
-        if line in {"Observed Gavin/Leadpoet Writing Guide", "Koinoniko Voice"}:
+        if line in {"Observed Gavin/Leadpoet Writing Guide", "Koinoniko Voice", "Voice Profile"}:
             continue
         if line.endswith(":"):
             if current_title or current_lines:
-                sections.append({"title": current_title or "Koinoniko Voice", "items": current_lines})
+                sections.append({"title": current_title or "Voice Profile", "items": current_lines})
             current_title = line[:-1]
             current_lines = []
             continue
         current_lines.append(line[2:] if line.startswith("- ") else line)
     if current_title or current_lines:
-        sections.append({"title": current_title or "Koinoniko Voice", "items": current_lines})
+        sections.append({"title": current_title or "Voice Profile", "items": current_lines})
     return sections
 
 
@@ -2788,7 +2996,7 @@ def trend_from_payload(payload: dict[str, Any], *, existing: TrendItem | None = 
         title=value_or_existing(payload.get("title"), existing.title if existing else "Untitled trend"),
         source_url=value_or_existing(payload.get("source_url"), existing.source_url if existing else None),
         source_type=value_or_existing(payload.get("source_type"), existing.source_type if existing else "other"),
-        topic=value_or_existing(payload.get("topic"), existing.topic if existing else "Leadpoet"),
+        topic=value_or_existing(payload.get("topic"), existing.topic if existing else "uncategorized"),
         summary=value_or_existing(payload.get("summary"), existing.summary if existing else ""),
         why_it_matters=value_or_existing(payload.get("why_it_matters"), existing.why_it_matters if existing else ""),
         leadpoet_angle=value_or_existing(payload.get("leadpoet_angle"), existing.leadpoet_angle if existing else ""),

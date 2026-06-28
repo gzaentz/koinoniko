@@ -358,7 +358,7 @@ def build_generation_prompt(
     context = "\n".join(f"- {section.kind}/{section.name}: {section.content}" for section in bundle.positioning_sections)
     examples_text = "\n\n".join(_format_example(post, bundle) for post in bundle.examples)
     if not examples_text:
-        examples_text = "No examples yet. Lean on Leadpoet context and write naturally."
+        examples_text = "No examples yet. Lean on saved Facts & Context and write naturally."
     trends_text = "\n\n".join(_format_trend(trend) for trend in trends)
     patterns_text = "\n\n".join(_format_viral_pattern(pattern) for pattern in patterns)
     analytics = "\n".join(f"- {hint}" for hint in bundle.analytics_hints)
@@ -370,16 +370,16 @@ def build_generation_prompt(
         positioning_rules=(active_rules or {}).get("positioning_rules", []),
         voice_rules=(active_rules or {}).get("voice_rules", []),
     )
-    return f"""Write {request.platform.upper()} posts for Leadpoet.
+    return f"""Write {request.platform.upper()} posts for this workspace.
 
-Study these Gavin/Leadpoet examples first:
+Study these selected Voice Examples first:
 {examples_text}
 
-Leadpoet context:
-{context or "- No positioning context yet."}
+Facts & Context:
+{context or "- No saved facts/context yet."}
 
-Koinoniko Voice:
-{voice or "- No Koinoniko Voice profile yet."}
+Voice profile:
+{voice or "- No saved Voice profile yet."}
 
 {active_rules_section}
 {trend_section}
@@ -390,7 +390,7 @@ Request:
 - Topic: {request.topic}
 - Post type: {request.post_type}
 - Angle: {request.angle or "choose the strongest specific angle"}
-- Audience: {request.audience or "Leadpoet's current audience"}
+- Audience: {request.audience or "the saved target audience"}
 - Tone: {request.tone or "plain, sharp, useful"}
 - CTA: {request.call_to_action or "only include if it feels natural"}
 - Extra context: {request.extra_context or "none"}
@@ -401,11 +401,11 @@ Writing and review instructions:
 
 {avoid_section}
 
-Priority order: Koinoniko Voice, Leadpoet context, current trend/topic, Pattern mechanics, then platform rules.
+Priority order: Voice profile, Facts & Context, current trend/topic, Pattern mechanics, then platform rules.
 Pattern safety: Use the structure, not the wording. Do not copy source post wording, claims, examples, or framing directly. If a Pattern conflicts with Voice, Voice wins.
 
 Each variant must be {max_chars} characters or fewer and end as a complete thought.
-Return only draft post text variants, no commentary. Do not write a bland news summary. Make the post timely, specific, and founder-led."""
+Return only draft post text variants, no commentary. Do not write a bland news summary. Make the post timely, specific, and grounded in saved context."""
 
 
 def build_strategy_prompt(
@@ -427,7 +427,7 @@ def build_strategy_prompt(
         positioning_rules=(active_rules or {}).get("positioning_rules", []),
         voice_rules=(active_rules or {}).get("voice_rules", []),
     )
-    return f"""You are the hidden content strategist for Gavin's Leadpoet posts.
+    return f"""You are the hidden content strategist for this workspace's posts.
 
 Do not write the post yet. Produce the structured Post Intent that the natural writer will use.
 
@@ -443,15 +443,15 @@ Request:
 - Topic: {request.topic}
 - Post type: {request.post_type}
 - Angle: {request.angle or "choose the strongest specific angle"}
-- Audience: {request.audience or "Leadpoet's current audience"}
+- Audience: {request.audience or "the saved target audience"}
 - Extra context: {request.extra_context or "none"}
 
-Leadpoet context:
-{context or "- No positioning context yet."}
+Facts & Context:
+{context or "- No saved facts/context yet."}
 
 {active_rules_section}
 
-Gavin examples and worked-reason notes:
+Voice Examples and worked-reason notes:
 {examples_text or "No examples selected."}
 
 Trend context:
@@ -501,9 +501,9 @@ def build_best_writer_prompt(
         positioning_rules=(active_rules or {}).get("positioning_rules", []),
         voice_rules=(active_rules or {}).get("voice_rules", []),
     )
-    return f"""Write 3 X draft options for Gavin.
+    return f"""Write 3 X draft options for this workspace.
 
-Prioritize exact Gavin examples, worked-reason notes, and the writing skills below over generic marketing instincts.
+Prioritize exact Voice Examples, worked-reason notes, and the writing skills below over generic marketing instincts.
 
 Hidden Post Intent from the strategist:
 {json.dumps(strategy_summary, indent=2)}
@@ -518,11 +518,11 @@ Request:
 - Extra context: {request.extra_context or "none"}
 - Character limit: {max_chars}
 
-Exact Gavin/Leadpoet examples:
+Exact Voice Examples:
 {examples_text or "No examples selected."}
 
-Leadpoet context:
-{context or "- No positioning context yet."}
+Facts & Context:
+{context or "- No saved facts/context yet."}
 
 {active_rules_section}
 
@@ -548,7 +548,7 @@ Grounding rules:
 - Humor is allowed only if it sharpens the thesis.
 
 Avoid corporate thought leadership, generic hype, fake profundity, em dashes, overly symmetrical phrasing, LinkedIn-style moral lessons, and "not just X, but Y" framing.
-Use Pattern mechanics only as structure. Do not copy source post wording or make the post feel derivative. Make it specific to Gavin/Leadpoet.
+Use Pattern mechanics only as structure. Do not copy source post wording or make the post feel derivative. Make it specific to the saved Facts & Context.
 
 Each option must be {max_chars} characters or fewer and end as a complete thought.
 Return only draft post text variants. Separate variants with a line containing only ---."""
@@ -571,13 +571,13 @@ def build_evaluation_prompt(
         positioning_rules=(active_rules or {}).get("positioning_rules", []),
         voice_rules=(active_rules or {}).get("voice_rules", []),
     )
-    return f"""Choose the best X post for Gavin and clean it up lightly.
+    return f"""Choose the best X post for this workspace and clean it up lightly.
 
 Original request:
 - Topic: {request.topic}
 - Post type: {request.post_type}
 - Angle: {request.angle or "none"}
-- Audience: {request.audience or "Leadpoet's current audience"}
+- Audience: {request.audience or "the saved target audience"}
 
 Hidden Post Intent:
 {json.dumps(strategy_summary, indent=2)}
@@ -887,7 +887,7 @@ def build_length_repair_prompt(text: str, *, max_chars: int, repair_context: str
 
 Rules:
 - Preserve the core point.
-- Keep Gavin's plain, sharp voice.
+- Preserve the saved Voice profile.
 - End as a complete thought.
 - Do not end mid-sentence, mid-phrase, or with a dangling setup.
 - Return only the revised post text. No commentary.
@@ -914,12 +914,12 @@ def explain_influence(bundle: ContextBundle, *, trends: list[TrendItem], pattern
         parts.append(f"{len(patterns)} Pattern Scout mechanic(s)")
     if bundle.positioning_sections:
         kinds = sorted({section.kind for section in bundle.positioning_sections})
-        parts.append(f"Leadpoet context: {', '.join(kinds)}")
+        parts.append(f"facts/context: {', '.join(kinds)}")
     if bundle.analytics_hints:
         parts.append("recent performance hints")
     if trends:
         parts.append(f"{len(trends)} timely trend(s)")
-    return "Influenced by " + "; ".join(parts) + "." if parts else "Influenced by the base Koinoniko Voice rules."
+    return "Influenced by " + "; ".join(parts) + "." if parts else "Influenced by the saved Voice rules."
 
 
 def build_quality_notes(
@@ -929,12 +929,12 @@ def build_quality_notes(
     trends: list[TrendItem],
 ) -> str:
     angle = request.angle or request.topic
-    example_note = f"{len(bundle.examples)} example(s)" if bundle.examples else "base Leadpoet context"
+    example_note = f"{len(bundle.examples)} example(s)" if bundle.examples else "saved facts/context"
     trend_note = f" and {len(trends)} trend(s)" if trends else ""
     return (
         f"Fits the requested angle by centering '{angle}'. "
         f"Grounded in {example_note}{trend_note}. "
-        "Review for specificity, real point of view, natural Gavin voice, and inbound relevance."
+        "Review for specificity, real point of view, natural voice, and audience relevance."
     )
 
 
@@ -946,7 +946,7 @@ def _format_example(post, bundle: ContextBundle) -> str:
         post.text,
         "",
         "Why it worked:",
-        (note.worked_reason if note and note.worked_reason else "Strong example of Gavin/Leadpoet voice."),
+        (note.worked_reason if note and note.worked_reason else "Strong Voice Example."),
     ]
     if performance:
         parts.extend(["", "Performance:", performance])
@@ -983,14 +983,14 @@ def _format_trend(trend: TrendItem) -> str:
         "Why it matters to AI / sales / lead generation / GTM:",
         why_gtm,
         "",
-        "Leadpoet angle:",
+        "Saved angle:",
         trend.leadpoet_angle,
         "",
         "Suggested hooks:",
         "\n".join(f"- {hook}" for hook in hooks) if hooks else "- No hooks stored.",
         "",
         "Possible post angles:",
-        "\n".join(f"- {angle}" for angle in post_angles[:3]) if post_angles else "- Use the Leadpoet angle above.",
+        "\n".join(f"- {angle}" for angle in post_angles[:3]) if post_angles else "- Use the saved angle above.",
         "",
         "Source:",
         source_label,

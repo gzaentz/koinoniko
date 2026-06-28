@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from leadpoet_social_brain.analytics import build_analytics_summary
+from leadpoet_social_brain.context import POSITIONING_KINDS
 from leadpoet_social_brain.core.models import (
     AnalyticsSummary,
     ContentQueueItem,
@@ -29,12 +30,12 @@ ASSISTANT_MISSING_PROVIDER_MESSAGE = (
     "No LLM provider configured. Set a provider in Account before using Ask Koinoniko."
 )
 
-SYSTEM_INSTRUCTIONS = """You are Koinoniko, a content intelligence assistant for Gavin/Leadpoet.
+SYSTEM_INSTRUCTIONS = """You are Koinoniko, a content intelligence assistant for this workspace.
 Answer using the app's available data.
 Prioritize specificity over generic advice.
 Do not invent metrics, posts, trends, or patterns.
 If data is missing, say what is missing.
-Preserve Gavin's Voice.
+Preserve the saved Voice profile.
 Recommend actions, but do not perform writes without explicit confirmation.
 Be concise, useful, and direct.
 You are a content/data analyst, not a support chatbot."""
@@ -57,6 +58,7 @@ def build_assistant_context(store: SQLiteStore, question: str) -> dict[str, Any]
     active_trends = store.list_trends(status="unused", limit=12)
     active_patterns = store.list_viral_patterns(status="active", limit=12)
     sync_metadata = store.sync_metadata_by_key()
+    fact_sections = store.list_context_sections(kinds=POSITIONING_KINDS)
 
     context = {
         "question_intent": sorted(intent),
@@ -82,6 +84,15 @@ def build_assistant_context(store: SQLiteStore, question: str) -> dict[str, Any]
                 for post in voice_candidates(posts, notes, metrics)[:8]
             ],
         },
+        "facts_context": [
+            {
+                "kind": section.kind,
+                "name": section.name,
+                "content": truncate(section.content, 700),
+                "updated_at": section.updated_at,
+            }
+            for section in fact_sections
+        ],
         "recent_posts": [
             post_context(post, notes.get(post.id), metrics.get(post.id))
             for post in posts[:16]
@@ -210,7 +221,7 @@ def data_gaps(
     if posts and not metrics:
         gaps.append("No engagement metric snapshots are stored for the current posts.")
     if "voice" in intent and not voice_section_exists:
-        gaps.append("No current Koinoniko Voice summary has been built yet.")
+        gaps.append("No current Voice summary has been built yet.")
     if "queue" in intent and not queue:
         gaps.append("No queued or scheduled posts are currently stored.")
     if "trends" in intent and not trends:

@@ -10,7 +10,7 @@ VOICE_AVOID_PHRASES_SETTING = "voice.avoid_phrases"
 VOICE_POSITIONING_RULES_SETTING = "voice.positioning_rules"
 VOICE_RULES_SETTING = "voice.rules"
 VOICE_REVIEW_RULES_SETTING = "voice.review_rules"
-LEADPOET_INTENT_CONTEXT_NAME = "leadpoet_intent_layer_v0"
+POSITIONING_RULES_CONTEXT_NAME = "active_positioning_rules"
 DEFAULT_AVOID_PHRASES = [
     "game changer",
     "unlock",
@@ -23,18 +23,9 @@ DEFAULT_AVOID_PHRASES = [
 ]
 
 POSITIONING_RULES = [
-    (
-        "Leadpoet is the core intent layer: proprietary buyer context, timing signals, "
-        "and account-level intent."
-    ),
-    (
-        "Other tools, agents, and case studies are market proof that intent matters, "
-        "not the source of Leadpoet's unique wedge."
-    ),
-    (
-        "When referencing another product, validate the market shift, then pull the "
-        "point back to Leadpoet owning buyer timing and proprietary context."
-    ),
+    "Use saved Facts & Context as the source of truth for writer, company, product, audience, and positioning.",
+    "Do not invent company claims, founder background, customer proof, metrics, or product capabilities.",
+    "When referencing another product, trend, or case study, connect it back only to the saved positioning.",
 ]
 
 DEFAULT_VOICE_RULES = [
@@ -64,7 +55,7 @@ def save_positioning_rules(store: SQLiteStore, rules: list[object]) -> list[str]
     store.save_context_section(
         ContextSection(
             kind="positioning",
-            name=LEADPOET_INTENT_CONTEXT_NAME,
+            name=POSITIONING_RULES_CONTEXT_NAME,
             content=positioning_rules_context_content(normalized),
             weight=1.8,
         )
@@ -133,8 +124,8 @@ def normalize_rules(rules: list[object]) -> list[str]:
 
 def positioning_rules_context_content(rules: list[str]) -> str:
     if not rules:
-        return "Leadpoet positioning rules are currently empty."
-    return "Leadpoet positioning rules:\n" + "\n".join(f"- {rule}" for rule in rules)
+        return "Positioning rules are currently empty."
+    return "Positioning rules:\n" + "\n".join(f"- {rule}" for rule in rules)
 
 
 def review_filter_skill_content(rules: list[str]) -> str:
@@ -170,5 +161,5 @@ def avoid_phrases_prompt_section(phrases: list[str]) -> str:
         f"{lines}\n\n"
         "Instruction:\n"
         "Do not use these phrases or close variants. If the idea is useful, "
-        "rewrite it in plain Gavin-style language."
+        "rewrite it in plain saved-voice language."
     )

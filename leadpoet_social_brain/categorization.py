@@ -17,7 +17,7 @@ from leadpoet_social_brain.providers import DraftProvider
 TOPIC_OPTIONS = (
     "sales LLMs",
     "Bittensor",
-    "Leadpoet",
+    "company/product",
     "AI",
     "founder/company",
     UNCATEGORIZED_TOPIC,
@@ -46,9 +46,9 @@ Return only valid JSON with this exact shape:
 {{"topic":"<topic>","post_type":"<post_type>","confidence":0.0,"reason":"<short reason>"}}
 
 Allowed topics:
-- sales LLMs: sales AI, lead generation, GTM, pipeline, buyer context, Leadpoet's sales product.
+- sales LLMs: sales AI, lead generation, GTM, pipeline, buyer context, or sales product ideas.
 - Bittensor: Bittensor, TAO, subnets, validators, miners, incentives, subnet/company updates.
-- Leadpoet: company/product updates not clearly about the sales category.
+- company/product: company/product updates not clearly about another category.
 - AI: general AI that is not specifically sales or Bittensor.
 - founder/company: founder journey, hiring, fundraising, operating lessons, personal company building.
 - uncategorized: unclear or unrelated.
@@ -96,7 +96,9 @@ def normalize_topic(value: str, default: str) -> str:
         "gtm": "sales LLMs",
         "bittensor": "Bittensor",
         "tao": "Bittensor",
-        "leadpoet": "Leadpoet",
+        "leadpoet": "company/product",
+        "company/product": "company/product",
+        "product": "company/product",
         "ai": "AI",
         "founder": "founder/company",
         "company": "founder/company",

@@ -280,7 +280,7 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
 
         self.assertIn("What happened:\nAcme launched buyer-timing AI", prompt)
         self.assertIn("What is new:\nThe new part is workflow-level buyer timing.", prompt)
-        self.assertIn("Leadpoet angle:\nLeadpoet should explain", prompt)
+        self.assertIn("Saved angle:\nLeadpoet should explain", prompt)
         self.assertIn("Suggested hooks:", prompt)
         self.assertNotIn("COPY THIS RAW ARTICLE LANGUAGE", prompt)
 

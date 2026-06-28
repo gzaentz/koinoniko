@@ -7,9 +7,12 @@ from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 
 STYLE_KINDS = {"style_guide"}
 POSITIONING_KINDS = {
+    "writer",
     "product",
     "audience",
     "positioning",
+    "proof",
+    "guardrail",
     "bittensor",
     "sales_llm_vision",
     "priority",
@@ -61,7 +64,7 @@ class ContextManager:
         example_shapes = _writing_shapes_from_notes(notes.values())
         content = "\n".join(
             [
-                "Koinoniko Voice",
+                "Voice Profile",
                 "",
                 "Recurring voice traits:",
                 "- Plain, direct, and specific.",
@@ -104,7 +107,7 @@ class ContextManager:
             if (
                 lowered_topic in haystack
                 or post_type in haystack
-                or section.kind in {"product", "positioning", "audience", "priority"}
+                or section.kind in {"writer", "product", "positioning", "audience", "proof", "priority", "guardrail"}
             ):
                 selected.append(section)
         return selected[:8]

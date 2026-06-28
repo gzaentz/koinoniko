@@ -1818,87 +1818,59 @@ class SQLiteStore:
 def default_context_sections() -> list[ContextSection]:
     return [
         ContextSection(
-            kind="style_guide",
-            name="gavin_founder_voice_v0",
-            content=(
-                "Write like Gavin: first person when useful, direct, specific, and a little opinionated. "
-                "Prefer plain words over polished corporate phrasing. Make one clear point. "
-                "Use concrete nouns, short paragraphs, and a human rhythm. Avoid hype, generic AI language, "
-                "cliches, and em dashes."
-            ),
+            kind="writer",
+            name="writer_profile",
+            content="",
             weight=2.0,
+            active=False,
         ),
         ContextSection(
             kind="product",
-            name="leadpoet_product_v0",
-            content=(
-                "Leadpoet helps turn founder insight, company context, and buyer signals into better sales "
-                "language and inbound interest. Treat this as editable working context until the product "
-                "positioning is made more precise."
-            ),
-            weight=1.5,
+            name="company_product",
+            content="",
+            weight=1.8,
+            active=False,
         ),
         ContextSection(
             kind="audience",
-            name="primary_audiences_v0",
-            content=(
-                "Primary readers: founders, technical operators, B2B sales leaders, investors, and people "
-                "watching the Bittensor/subnet ecosystem."
-            ),
+            name="target_audience",
+            content="",
+            weight=1.6,
+            active=False,
         ),
         ContextSection(
             kind="positioning",
-            name="leadpoet_positioning_v0",
-            content=(
-                "Leadpoet should sound practical and ambitious: sales AI should know the buyer, the market, "
-                "the timing, and the company's real point of view. The enemy is generic automation dressed "
-                "up as intelligence."
-            ),
+            name="core_positioning",
+            content="",
+            weight=1.7,
+            active=False,
+        ),
+        ContextSection(
+            kind="proof",
+            name="proof_points",
+            content="",
             weight=1.4,
-        ),
-        ContextSection(
-            kind="bittensor",
-            name="bittensor_subnet_context_v0",
-            content=(
-                "When writing about Bittensor or subnets, explain the useful economic or technical point in "
-                "plain English. Avoid insider jargon unless the post is explicitly for the ecosystem."
-            ),
-        ),
-        ContextSection(
-            kind="sales_llm_vision",
-            name="sales_llm_vision_v0",
-            content=(
-                "The sales LLM vision: move from generic outreach to systems that understand buyer context, "
-                "specific pain, timing, trust, and why a conversation should happen now."
-            ),
-            weight=1.3,
+            active=False,
         ),
         ContextSection(
             kind="priority",
-            name="company_priorities_v0",
-            content=(
-                "Current priorities: make Leadpoet concrete, show product progress, explain why context "
-                "matters, and attract serious inbound from customers, partners, and investors."
-            ),
+            name="current_priorities",
+            content="",
+            weight=1.3,
+            active=False,
+        ),
+        ContextSection(
+            kind="guardrail",
+            name="fact_guardrails",
+            content="",
+            weight=1.2,
+            active=False,
         ),
     ]
 
 
 def required_context_sections() -> list[ContextSection]:
-    return [
-        ContextSection(
-            kind="positioning",
-            name="leadpoet_intent_layer_v0",
-            content=(
-                "Leadpoet is the core intent layer for sales LLMs: proprietary buyer context, "
-                "timing signals, and account-level intent. Other tools, agents, and case studies "
-                "are market proof that the world needs intent infrastructure, not the source of "
-                "Leadpoet's unique wedge. When a trend mentions another vendor, use it to validate "
-                "Leadpoet's thesis and pull the point back to Leadpoet."
-            ),
-            weight=1.8,
-        ),
-    ]
+    return []
 
 
 def draft_influences_for_post(post_id: str, draft: GeneratedDraft) -> list[PostInfluence]:
@@ -2103,7 +2075,7 @@ def default_patterns() -> list[Pattern]:
             name="enemy_then_better_model",
             category="structure",
             description=(
-                "Name the broken default, then give the sharper model Leadpoet believes in."
+                "Name the broken default, then give the sharper model the writer believes in."
             ),
         ),
         Pattern(

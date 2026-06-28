@@ -141,7 +141,7 @@ def create_post_x(
     generator: SocialBrainGenerator,
     *,
     instruction: str,
-    topic: str = "Leadpoet",
+    topic: str = "uncategorized",
     post_type: str = "founder_insight",
     use_trends: bool = False,
     best_version: bool = True,
@@ -154,7 +154,7 @@ def create_post_x(
     instruction = instruction.strip()
     if not instruction:
         raise ValueError("Post idea / instruction is required.")
-    topic = topic.strip() or "Leadpoet"
+    topic = topic.strip() or "uncategorized"
     post_type = post_type.strip() or "founder_insight"
     get_x_adapter().validate_post_type(post_type)
 
@@ -260,7 +260,7 @@ def revise_queued_post(
         positioning_rules=active_rules["positioning_rules"],
         voice_rules=active_rules["voice_rules"],
     )
-    prompt = f"""Revise this queued X post for Leadpoet.
+    prompt = f"""Revise this queued X post for this workspace.
 
 Original post:
 {item.text}
@@ -273,10 +273,10 @@ Post type: {item.post_type}
 Angle: {item.angle or "none"}
 Character limit: {adapter.rules.default_max_chars}
 
-Relevant Gavin/Leadpoet examples:
+Relevant Voice Examples:
 {examples}
 
-Relevant context:
+Relevant facts/context:
 {context or "- No context available."}
 
 {active_rules_text}
@@ -444,7 +444,7 @@ def publish_due_x(
     *,
     now: str | None = None,
     limit: int = 20,
-    author: str = "Gavin",
+    author: str = "workspace",
 ) -> list[PublishResult]:
     results: list[PublishResult] = []
     now_dt = _parse_datetime(now) if now else datetime.now(timezone.utc)
@@ -463,7 +463,7 @@ def post_queue_item_x(
     client: XWriteClient,
     *,
     item: ContentQueueItem,
-    author: str = "Gavin",
+    author: str = "workspace",
 ) -> PublishResult:
     if item.status != "approved":
         raise ValueError("Queued post must be approved before posting.")
@@ -635,7 +635,7 @@ def pick_trend_for_topic(
 def evergreen_angle(topic: str, index: int) -> str:
     defaults = [
         f"make one sharp founder-led point about {topic}",
-        f"explain the weak default in {topic} and the better Leadpoet view",
+        f"explain the weak default in {topic} and the better saved-context view",
         f"turn a practical {topic} lesson into an authority-building post",
     ]
     return defaults[index % len(defaults)]
@@ -720,7 +720,7 @@ def weekly_report_text(store: SQLiteStore, *, since_days: int) -> str:
         top_topics = ", ".join(topic for topic, _ in topics.most_common(3))
         lines.append(f"- Do more of the topics with signal: {top_topics}.")
     lines.append("- Keep using specific examples, buyer timing, and plain founder language.")
-    lines.append("- Avoid generic AI commentary unless it connects to a concrete Leadpoet point.")
+    lines.append("- Avoid generic AI commentary unless it connects to a concrete saved-context point.")
     return "\n".join(lines)
 
 

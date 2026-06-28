@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-voice-detail-editor">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-context-facts">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -226,6 +226,13 @@
             <div class="voice-panel-header">
               <h2>Context</h2>
             </div>
+            <button class="voice-context-card" id="voiceFactsButton" type="button" aria-label="Open Facts and Context">
+              <span>
+                <strong>Facts & Context</strong>
+                <small id="voiceFactsSummary">No facts saved yet</small>
+              </span>
+              <strong>Edit</strong>
+            </button>
             <button class="voice-context-card" id="voiceContextButton" type="button" aria-label="Open Voice Examples">
               <span id="voiceCoverageGrid" class="voice-coverage-block"></span>
               <strong>Voice Examples</strong>
@@ -382,6 +389,23 @@
       </div>
     </section>
 
+    <section class="modal hidden" id="voiceFactsModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="voiceFactsModal"></div>
+      <div class="modal-card wide voice-facts-modal-card">
+        <div class="modal-header">
+          <div>
+            <h2>Facts & Context</h2>
+          </div>
+          <button class="icon-button" data-close-modal="voiceFactsModal" aria-label="Close">x</button>
+        </div>
+        <div id="voiceFactsList" class="voice-facts-list"></div>
+        <div class="modal-actions voice-facts-actions">
+          <button id="voiceFactsSaveButton" type="button">Save Facts</button>
+          <span id="voiceFactsSaveStatus" class="inline-save-status" aria-live="polite"></span>
+        </div>
+      </div>
+    </section>
+
     <section class="modal hidden" id="voiceRulesModal" aria-hidden="true">
       <div class="modal-backdrop" data-close-modal="voiceRulesModal"></div>
       <div class="modal-card wide voice-rules-modal-card">
@@ -472,7 +496,7 @@
               <input
                 id="createPostTopic"
                 class="field-combo-input"
-                value="Leadpoet"
+                value="uncategorized"
                 autocomplete="off"
                 role="combobox"
                 aria-expanded="false"
@@ -633,6 +657,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260627-voice-detail-editor"></script>
+    <script src="/static/app.js?v=20260627-context-facts"></script>
   </body>
 </html>

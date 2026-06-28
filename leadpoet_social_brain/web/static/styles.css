@@ -1466,6 +1466,12 @@ main {
   overflow: auto;
 }
 
+.voice-facts-modal-card {
+  width: min(1120px, calc(100vw - 48px));
+  max-height: min(860px, calc(100vh - 48px));
+  overflow: auto;
+}
+
 .voice-context-tools {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(150px, 190px) minmax(150px, 190px);
@@ -1577,6 +1583,12 @@ main {
   gap: 4px;
 }
 
+.voice-context-card small {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
 .voice-context-card > strong,
 .voice-rules-card > strong {
   white-space: nowrap;
@@ -1591,6 +1603,45 @@ main {
 .voice-rule-group {
   display: grid;
   gap: 12px;
+}
+
+.voice-facts-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.voice-fact-field {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--white);
+  display: grid;
+  gap: 9px;
+}
+
+.voice-fact-field label {
+  display: grid;
+  gap: 4px;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.voice-fact-field small {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+  font-weight: 500;
+}
+
+.voice-fact-field textarea {
+  min-height: 118px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.voice-facts-actions {
+  align-items: center;
 }
 
 .voice-rules-list {
@@ -2679,6 +2730,10 @@ main {
   }
 
   .voice-context-tools {
+    grid-template-columns: 1fr;
+  }
+
+  .voice-facts-list {
     grid-template-columns: 1fr;
   }
 }

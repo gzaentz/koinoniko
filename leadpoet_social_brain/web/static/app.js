@@ -47,7 +47,7 @@ const state = {
 };
 
 const DEFAULT_TOPIC_OPTIONS = [
-  "Leadpoet",
+  "company/product",
   "sales LLMs",
   "Bittensor",
   "product",
@@ -1121,7 +1121,7 @@ window.openTrendDetails = (id) => {
     </div>
     ${trendSection("What happened", trend.summary)}
     ${trendSection("Why it matters", trend.why_it_matters)}
-    ${trendSection("Leadpoet angle", trend.leadpoet_angle)}
+    ${trendSection("Saved angle", trend.leadpoet_angle)}
     ${trendListSection("Suggested hook", trendHookList(trend))}
     ${trendSection("Source", trend.source_url ? `<a href="${escapeAttr(trend.source_url)}" target="_blank" rel="noreferrer">${escapeHtml(trend.source_author || trend.source_title || trend.source_url)}</a>` : escapeHtml(trend.source_author || "No source URL stored."), true)}
     <details class="trend-detail-section source-details">
@@ -1143,7 +1143,7 @@ window.useTrendInPost = (event, id) => {
   state.selectedTrendForCreate = trend;
   state.selectedPatternForCreate = null;
   $("createPostInstruction").value = trend.leadpoet_angle || trend.title || "";
-  $("createPostTopic").value = trend.topic || "Leadpoet";
+  $("createPostTopic").value = trend.topic || "uncategorized";
   renderCreatePostPatternHint();
   openCreatePostModal();
 };
@@ -1355,7 +1355,7 @@ window.usePatternInPost = (event, id) => {
   const pattern = state.patternDetail?.id === id ? state.patternDetail : findPatternItem(id);
   if (!pattern) return;
   state.selectedPatternForCreate = pattern;
-  $("createPostTopic").value = pattern.topic || $("createPostTopic").value || "Leadpoet";
+  $("createPostTopic").value = pattern.topic || $("createPostTopic").value || "uncategorized";
   if (!$("createPostInstruction").value.trim()) {
     $("createPostInstruction").value = pattern.structure || pattern.pattern_name || "";
   }
@@ -1584,13 +1584,13 @@ function renderQueueModal() {
       <button class="quiet-button" onclick='skipQueue(event, ${jsArg(item.id)})'>Skip</button>
     </div>
     <div class="revision-box">
-      <label>AI instruction<textarea id="revisionInstruction" rows="3" placeholder="Make it sharper, less corporate, or tie it more directly to Leadpoet."></textarea></label>
+      <label>AI instruction<textarea id="revisionInstruction" rows="3" placeholder="Make it sharper, less corporate, or tie it more directly to saved context."></textarea></label>
       <div class="intent-actions">
         <button class="secondary" onclick='reviseWithPreset(event, "Make this more natural and less polished.")' ${canUseAI ? "" : "disabled"}>Make More Natural</button>
         <button class="secondary" onclick='reviseWithPreset(event, "Make this sharper and more opinionated.")' ${canUseAI ? "" : "disabled"}>Make Sharper</button>
-        <button class="secondary" onclick='reviseWithPreset(event, "Make this more founder-led and personal to Gavin.")' ${canUseAI ? "" : "disabled"}>Make More Founder-Led</button>
+        <button class="secondary" onclick='reviseWithPreset(event, "Make this more founder-led and specific.")' ${canUseAI ? "" : "disabled"}>Make More Founder-Led</button>
         <button class="secondary" onclick='reviseWithPreset(event, "Shorten this while keeping the point.")' ${canUseAI ? "" : "disabled"}>Shorten</button>
-        <button class="secondary" onclick='reviseWithPreset(event, "Tie this more clearly to Leadpoet without making it salesy.")' ${canUseAI ? "" : "disabled"}>Tie More to Leadpoet</button>
+        <button class="secondary" onclick='reviseWithPreset(event, "Tie this more clearly to saved facts and context without making it salesy.")' ${canUseAI ? "" : "disabled"}>Tie More to Context</button>
         <button class="secondary" onclick='reviseWithPreset(event, "Generate the strongest final version of this queued post.", true)' ${canUseAI ? "" : "disabled"}>Generate Best Version</button>
       </div>
       <div id="revisionList" class="revision-list">${revisionList(item.versions || [])}</div>
@@ -1791,7 +1791,7 @@ async function createPost() {
     method: "POST",
     body: JSON.stringify({
       instruction,
-      topic: $("createPostTopic").value || "Leadpoet",
+      topic: $("createPostTopic").value || "uncategorized",
       post_type: $("createPostType").value || "founder_insight",
       use_trends: Boolean(trendId),
       trend_ids: trendId ? [trendId] : [],
@@ -1856,7 +1856,7 @@ async function syncPosts() {
     body: JSON.stringify({
       username: DEFAULT_SYNC_USERNAME,
       limit: 25,
-      ...(autoCategorize ? { auto_categorize: true } : { default_topic: "Leadpoet" }),
+      ...(autoCategorize ? { auto_categorize: true } : { default_topic: "uncategorized" }),
       default_post_type: "founder_insight",
       exclude_replies: true,
       exclude_retweets: true,
@@ -1885,7 +1885,7 @@ async function syncAllXData() {
       username: DEFAULT_SYNC_USERNAME,
       post_limit: 25,
       metrics_limit: 250,
-      ...(autoCategorize ? { auto_categorize: true } : { default_topic: "Leadpoet" }),
+      ...(autoCategorize ? { auto_categorize: true } : { default_topic: "uncategorized" }),
       default_post_type: "founder_insight",
       exclude_replies: true,
       exclude_retweets: true,
@@ -1928,12 +1928,13 @@ async function refreshAfterAccountAction() {
 }
 
 async function loadVoice() {
-  const [status, current, examples, suggestions, coverage, rules, avoidPhrases] = await Promise.all([
+  const [status, current, examples, suggestions, coverage, facts, rules, avoidPhrases] = await Promise.all([
     api("/api/voice/status"),
     api("/api/voice/current"),
     api("/api/voice/examples"),
     api("/api/voice/suggestions"),
     api("/api/voice/coverage"),
+    api("/api/voice/facts"),
     api("/api/voice/rules"),
     api("/api/voice/avoid-phrases"),
   ]);
@@ -1943,6 +1944,7 @@ async function loadVoice() {
     examples: examples.items || [],
     suggestions: suggestions.items || [],
     coverage,
+    facts,
     rules,
     avoidPhrases: avoidPhrases.items || [],
   };
@@ -1954,6 +1956,7 @@ function renderVoice() {
   const status = state.voice?.status || {};
   $("updateVoiceButton").disabled = status.status === "needs_examples";
   renderCurrentVoice();
+  renderVoiceFacts();
   renderVoiceCoverage();
   renderVoiceRules();
   renderVoiceTopicOptions();
@@ -1996,6 +1999,8 @@ function renderVoiceLoading() {
     <span class="skeleton-line medium"></span>
     <span class="skeleton-line long"></span>
   `;
+  $("voiceFactsSummary").innerHTML = `<span class="skeleton-line medium"></span>`;
+  if ($("voiceFactsList")) $("voiceFactsList").innerHTML = skeletonCards(4, "voice-fact-field");
   $("voiceRulesCount").innerHTML = `<span class="skeleton-line short"></span>`;
   $("voiceRulesSummary").innerHTML = `<span class="skeleton-line medium"></span>`;
 }
@@ -2089,6 +2094,60 @@ function renderVoiceCoverage() {
         voiceCoverageLine("Post types covered", postTypes.map((item) => ({ ...item, name: label(item.name) }))),
       ].join("")
     : `<p class="empty-copy compact">Add a few Voice Examples to see coverage.</p>`;
+}
+
+function renderVoiceFacts() {
+  const facts = state.voice?.facts || {};
+  const items = facts.items || [];
+  $("voiceFactsSummary").textContent = facts.summary || "No facts saved yet";
+  $("voiceFactsList").innerHTML = items.length
+    ? items.map(voiceFactField).join("")
+    : `<p class="empty-copy compact">No fact fields loaded.</p>`;
+}
+
+function voiceFactField(item) {
+  return `
+    <article class="voice-fact-field">
+      <label for="${escapeAttr(voiceFactFieldId(item))}">
+        <span>${escapeHtml(item.title || label(item.name || item.kind || "Context"))}</span>
+        <small>${escapeHtml(item.description || "")}</small>
+      </label>
+      <textarea
+        id="${escapeAttr(voiceFactFieldId(item))}"
+        data-fact-kind="${escapeAttr(item.kind || "")}"
+        data-fact-name="${escapeAttr(item.name || "")}"
+        data-fact-weight="${escapeAttr(item.weight ?? 1)}"
+        rows="5"
+      >${escapeHtml(item.content || "")}</textarea>
+    </article>
+  `;
+}
+
+function voiceFactFieldId(item) {
+  return `voice-fact-${String(item.kind || "context").replace(/[^a-z0-9_-]/gi, "-")}-${String(item.name || "field").replace(/[^a-z0-9_-]/gi, "-")}`;
+}
+
+async function saveVoiceFacts() {
+  const items = Array.from(document.querySelectorAll("[data-fact-kind][data-fact-name]")).map((field) => ({
+    kind: field.dataset.factKind || "",
+    name: field.dataset.factName || "",
+    weight: Number(field.dataset.factWeight || 1),
+    content: field.value,
+  }));
+  const payload = await api("/api/voice/facts", {
+    method: "PATCH",
+    body: JSON.stringify({ items }),
+  });
+  state.voice.facts = payload;
+  renderVoiceFacts();
+  setVoiceFactsSaveStatus("Saved");
+  showMessage(payload.message || "Facts & Context saved.");
+}
+
+function setVoiceFactsSaveStatus(text, isError = false) {
+  const status = $("voiceFactsSaveStatus");
+  status.textContent = text || "";
+  status.classList.toggle("error", isError);
 }
 
 function voiceCoverageLine(title, items) {
@@ -2228,7 +2287,7 @@ function renderVoiceExamples() {
   const examples = filteredVoiceExamples();
   $("voiceExamplesList").innerHTML = examples.length
     ? examples.map((post) => voiceExampleCard(post, { removable: true })).join("")
-    : `<p class="empty-copy">No Voice Examples yet. Mark a few strong posts so Koinoniko can learn Gavin's voice.</p>`;
+    : `<p class="empty-copy">No Voice Examples yet. Mark a few strong posts to build the Voice profile.</p>`;
 }
 
 function filteredVoiceExamples() {
@@ -2959,7 +3018,7 @@ function renderAssistantDrawer() {
   messageList.classList.toggle("has-chat", Boolean(messages.length));
   messageList.innerHTML = messages.length
     ? messages.join("")
-    : `<div class="assistant-empty">Ask what is working, what feels weak, or what Gavin should post next.</div>`;
+    : `<div class="assistant-empty">Ask what is working, what feels weak, or what to post next.</div>`;
   $("assistantSendButton").disabled = state.assistant.loading;
   scrollAssistantToBottom();
 }
@@ -3280,7 +3339,9 @@ function setup() {
   ["voiceSearch", "voiceTopicFilter", "voiceSort"].forEach((id) => {
     $(id).addEventListener("input", renderVoiceExamples);
   });
+  $("voiceFactsButton").addEventListener("click", () => openModal("voiceFactsModal"));
   $("voiceContextButton").addEventListener("click", () => openModal("voiceContextModal"));
+  $("voiceFactsSaveButton").addEventListener("click", (event) => runButton(event.currentTarget, "Saving...", saveVoiceFacts));
   $("voiceRulesButton").addEventListener("click", () => openModal("voiceRulesModal"));
   $("voiceRulesSaveButton").addEventListener("click", (event) => runButton(event.currentTarget, "Saving...", saveVoiceRules));
   $("voiceAvoidAddButton").addEventListener("click", addAvoidPhrase);

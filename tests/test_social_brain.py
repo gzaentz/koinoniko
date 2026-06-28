@@ -140,13 +140,13 @@ class RoleAwareProvider:
                     }
                 )
             ]
-        if "Write 3 X draft options for Gavin" in prompt:
+        if "Write 3 X draft options for this workspace" in prompt:
             return [
                 "Most sales AI still acts like more volume is the product.\n\nThe useful version knows why this account cares today.",
                 "The hard part of sales AI is not sending.\n\nIt is knowing which buyer has a real reason to listen.",
                 "A sales LLM should not make outbound louder.\n\nIt should make timing obvious.",
             ][:variants]
-        if "Choose the best X post for Gavin" in prompt:
+        if "Choose the best X post for this workspace" in prompt:
             return [
                 json.dumps(
                     {
@@ -364,7 +364,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('rel="icon" type="image/svg+xml" href="/static/koinoniko-favicon.svg"', index_html)
         self.assertIn('href="/static/styles.css?v=', index_html)
         self.assertIn('src="/static/app.js?v=', index_html)
-        self.assertIn("20260627-voice-detail-editor", index_html)
+        self.assertIn("20260627-context-facts", index_html)
         self.assertIn("skeleton-card", index_html)
         self.assertIn("skeleton-line", styles_css)
         self.assertIn("renderInitialLoadingState", app_js)
@@ -395,6 +395,12 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("Voice Examples", index_html)
         self.assertIn("Update Voice", index_html)
         self.assertIn("<h2>Context</h2>", index_html)
+        self.assertIn("Facts & Context", index_html)
+        self.assertIn('id="voiceFactsButton"', index_html)
+        self.assertIn('id="voiceFactsModal"', index_html)
+        self.assertIn('id="voiceFactsSaveButton"', index_html)
+        self.assertIn("/api/voice/facts", app_js)
+        self.assertIn("renderVoiceFacts", app_js)
         self.assertIn('<h2 id="voiceRulesTitle">Rules</h2>', index_html)
         self.assertNotIn("Voice Coverage", index_html)
         self.assertIn("Active Writing Rules", index_html)
@@ -889,7 +895,7 @@ class SocialBrainTest(unittest.TestCase):
         bittensor_paths = [asset.path for asset in generation_skills(platform="x", post_type="bittensor_update")]
 
         self.assertEqual(skill.path, "skills/global_voice.md")
-        self.assertIn("Write like Gavin personally wrote it.", skill.content)
+        self.assertIn("Write like the saved Voice profile", skill.content)
         self.assertEqual(len(skill.sha256), 64)
         self.assertEqual(
             paths,
@@ -923,8 +929,8 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("# Founder Insight", prompt)
             self.assertIn("## skills/review_filter.md", prompt)
             self.assertIn("# Review Filter", prompt)
-            self.assertIn("Leadpoet is the core intent layer", prompt)
-            self.assertIn("Do not frame another tool, agent, or case study as owning Leadpoet's core intent advantage", prompt)
+            self.assertIn("Use saved Facts & Context as the source of truth", prompt)
+            self.assertIn("Do not frame another tool, agent, or case study as owning the workspace's core advantage", prompt)
             store.close()
 
     def test_generation_prompt_is_example_first_not_label_heavy(self):
@@ -956,12 +962,14 @@ class SocialBrainTest(unittest.TestCase):
                 )
             )
 
-            self.assertIn("Study these Gavin/Leadpoet examples first:", prompt)
+            self.assertIn("Study these selected Voice Examples first:", prompt)
             self.assertIn("Example:\nMost sales AI is still mail merge", prompt)
             self.assertIn("Why it worked:\nIt named a weak default", prompt)
             self.assertIn("Performance:\n1000 impressions", prompt)
+            self.assertIn("Facts & Context:", prompt)
+            self.assertIn("Voice profile:", prompt)
             self.assertNotIn("Labels:", prompt)
-            self.assertLess(prompt.index("Study these Gavin/Leadpoet examples first:"), prompt.index("Writing and review instructions:"))
+            self.assertLess(prompt.index("Study these selected Voice Examples first:"), prompt.index("Writing and review instructions:"))
             store.close()
 
     def test_ingest_x_post_stores_metrics_and_notes(self):
@@ -1159,7 +1167,7 @@ class SocialBrainTest(unittest.TestCase):
 
             section = ContextManager(store).rebuild_style_guide_from_examples()
 
-            self.assertIn("Koinoniko Voice", section.content)
+            self.assertIn("Voice Profile", section.content)
             self.assertIn("Reusable writing principles", section.content)
             self.assertNotIn("Repeated patterns to consider", section.content)
             store.close()
@@ -1561,7 +1569,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotIn(secret, json.dumps(context))
             self.assertNotIn(secret, prompt)
             self.assertIn("No X posts are stored yet.", context["data_gaps"])
-            self.assertIn("No current Koinoniko Voice summary has been built yet.", context["data_gaps"])
+            self.assertIn("No current Voice summary has been built yet.", context["data_gaps"])
             store.close()
 
     def test_task_endpoint_requires_configured_token(self):
@@ -2076,7 +2084,7 @@ class SocialBrainTest(unittest.TestCase):
             type_values = {item["value"] for item in post_types["items"]}
             self.assertIn("sales LLMs", topic_values)
             self.assertIn("technical depth", topic_values)
-            self.assertIn("Leadpoet", topic_values)
+            self.assertIn("company/product", topic_values)
             self.assertIn("Bittensor", topic_values)
             self.assertIn("founder/company", topic_values)
             self.assertIn("uncategorized", topic_values)
@@ -2688,7 +2696,7 @@ class SocialBrainTest(unittest.TestCase):
             status, current = handle_api_request("GET", "/api/voice/current", db_path=db_path)
             self.assertEqual(status, 200)
             self.assertTrue(current["exists"])
-            self.assertEqual(current["title"], "Koinoniko Voice")
+            self.assertEqual(current["title"], "Voice Profile")
 
     def test_voice_save_preserves_unspecified_note_fields_and_can_unmark(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2735,6 +2743,53 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(voice["cta"], "none")
             self.assertEqual(voice["formatting"], "single_paragraph")
             self.assertEqual(voice["pattern"], "enemy_then_better_model")
+
+    def test_voice_facts_context_can_be_saved_and_used_in_generation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.seed_defaults()
+            store.close()
+
+            status, initial = handle_api_request("GET", "/api/voice/facts", db_path=db_path)
+            self.assertEqual(status, 200)
+            initial_keys = {(item["kind"], item["name"]) for item in initial["items"]}
+            self.assertIn(("writer", "writer_profile"), initial_keys)
+            self.assertIn(("product", "company_product"), initial_keys)
+
+            status, saved = handle_api_request(
+                "PATCH",
+                "/api/voice/facts",
+                json.dumps(
+                    {
+                        "items": [
+                            {
+                                "kind": "writer",
+                                "name": "writer_profile",
+                                "content": "Alex writes from direct founder/operator experience.",
+                            },
+                            {
+                                "kind": "product",
+                                "name": "company_product",
+                                "content": "Acme helps sales teams use buyer timing signals.",
+                            },
+                        ]
+                    }
+                ),
+                db_path=db_path,
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(saved["summary"], "2 fact sections saved")
+
+            store = SQLiteStore(db_path)
+            prompt = SocialBrainGenerator(store).build_prompt(
+                DraftRequest(platform="x", topic="sales LLMs", post_type="founder_insight")
+            )
+            self.assertIn("Facts & Context:", prompt)
+            self.assertIn("Alex writes from direct founder/operator experience.", prompt)
+            self.assertIn("Acme helps sales teams use buyer timing signals.", prompt)
+            self.assertNotIn("Gavin/Leadpoet", prompt)
+            store.close()
 
     def test_voice_examples_and_suggestions_exclude_selected_examples(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2918,7 +2973,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(notes[newer.id].worked_reason, "Original human note.")
             self.assertEqual(notes[newer.id].hook, "specific observation")
             self.assertEqual(notes[newer.id].structure, "contrast between old signal and buyer timing")
-            self.assertEqual(notes[older.id].worked_reason, "Strong because it turns outbound volume into a buyer timing problem in plain Gavin/Leadpoet voice.")
+            self.assertEqual(notes[older.id].worked_reason, "Strong because it turns outbound volume into a buyer timing problem in plain this voice.")
             self.assertEqual(notes[older.id].hook, "two-team contrast")
             self.assertEqual(notes[older.id].structure, "contrast, implication, sharper model.")
             self.assertEqual(notes[older.id].pattern_name, "weak default versus better model")
@@ -2981,10 +3036,10 @@ class SocialBrainTest(unittest.TestCase):
             self.assertGreaterEqual(payload["rules_count"], 10)
             self.assertFalse(any("description" in group for group in payload["groups"]))
             self.assertTrue(
-                any("core intent layer" in item for item in groups["Positioning Rules"]["items"])
+                any("Facts & Context" in item for item in groups["Positioning Rules"]["items"])
             )
             self.assertTrue(
-                any("owning Leadpoet's core intent advantage" in item for item in groups["Review Filters"]["items"])
+                any("workspace's core advantage" in item for item in groups["Review Filters"]["items"])
             )
 
             status, saved = handle_api_request(
@@ -3017,7 +3072,7 @@ class SocialBrainTest(unittest.TestCase):
             store = SQLiteStore(db_path)
             context = [
                 section for section in store.list_context_sections(kinds={"positioning"})
-                if section.name == "leadpoet_intent_layer_v0"
+                if section.name == "active_positioning_rules"
             ][0]
             self.assertIn("Leadpoet owns buyer timing", context.content)
             prompt = SocialBrainGenerator(store).build_prompt(
@@ -3117,7 +3172,7 @@ class SocialBrainTest(unittest.TestCase):
                 )
             )
 
-            self.assertIn("Koinoniko Voice:", prompt)
+            self.assertIn("Voice profile:", prompt)
             self.assertNotIn("Observed style guide:", prompt)
             store.close()
 

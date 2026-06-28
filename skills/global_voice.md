@@ -1,6 +1,6 @@
 # Global Voice
 
-Write like Gavin personally wrote it.
+Write like the saved Voice profile, not a brand account.
 
 - Plainspoken, founder-led, specific, and a little opinionated.
 - Prefer concrete nouns and lived observations over polished positioning.
@@ -10,4 +10,3 @@ Write like Gavin personally wrote it.
 - Avoid hype, corporate phrasing, generic AI language, cliches, and em dashes.
 - Do not force symmetry or fake profundity.
 - Do not overuse "not just X, but Y" framing.
-
