@@ -11,6 +11,7 @@ const ASSISTANT_FALLBACK_STARTERS = [
 
 const state = {
   view: "dashboard",
+  booting: true,
   dashboard: null,
   analytics: null,
   status: null,
@@ -293,6 +294,7 @@ async function refresh() {
   state.analytics = analytics;
   state.reviewItems = review;
   state.scheduledItems = scheduled.items || [];
+  state.booting = false;
   updateGlobalControls();
   renderCurrentView();
 }
@@ -307,8 +309,14 @@ async function loadQueueStatuses(statuses) {
 function renderCurrentView() {
   if (state.view === "dashboard") renderDashboard();
   if (state.view === "reviewer") renderReviewer();
-  if (state.view === "voice") loadVoice().catch((error) => showMessage(error.message, true));
-  if (state.view === "account") loadAccount().catch((error) => showMessage(error.message, true));
+  if (state.view === "voice") {
+    if (!state.voice) renderVoiceLoading();
+    loadVoice().catch((error) => showMessage(error.message, true));
+  }
+  if (state.view === "account") {
+    if (!state.account) renderAccountLoading();
+    loadAccount().catch((error) => showMessage(error.message, true));
+  }
 }
 
 function updateGlobalControls() {
@@ -330,6 +338,10 @@ function updateGlobalControls() {
 }
 
 function renderDashboard() {
+  if (!state.dashboard) {
+    renderDashboardLoading();
+    return;
+  }
   renderRecentPosts();
   renderDashboardTrends();
   renderDashboardPatterns();
@@ -338,6 +350,10 @@ function renderDashboard() {
 function renderRecentPosts() {
   const tbody = $("recentPostsTable");
   renderRecentPostSortHeaders();
+  if (!state.dashboard) {
+    tbody.innerHTML = skeletonTableRows(6);
+    return;
+  }
   const posts = filteredRecentPosts();
   if (!posts.length) {
     tbody.innerHTML = `
@@ -976,6 +992,12 @@ function setPostVoiceSaveStatus(text, isError = false) {
 }
 
 function renderDashboardTrends() {
+  if (!state.dashboard) {
+    $("trendDailyButton").classList.toggle("active", state.selectedTrendWindow === "daily");
+    $("trendWeeklyButton").classList.toggle("active", state.selectedTrendWindow === "weekly");
+    $("trendList").innerHTML = skeletonCards(2, "trend-row");
+    return;
+  }
   const groups = state.dashboard?.trend_groups || {};
   $("trendDailyButton").classList.toggle("active", state.selectedTrendWindow === "daily");
   $("trendWeeklyButton").classList.toggle("active", state.selectedTrendWindow === "weekly");
@@ -1025,6 +1047,12 @@ function trendRelevanceText(item) {
 }
 
 function renderDashboardPatterns() {
+  if (!state.dashboard) {
+    $("patternWeeklyButton").classList.toggle("active", state.selectedPatternWindow === "weekly");
+    $("patternMonthlyButton").classList.toggle("active", state.selectedPatternWindow === "monthly");
+    $("patternList").innerHTML = skeletonCards(2, "pattern-card");
+    return;
+  }
   const groups = state.dashboard?.pattern_groups || {};
   $("patternWeeklyButton").classList.toggle("active", state.selectedPatternWindow === "weekly");
   $("patternMonthlyButton").classList.toggle("active", state.selectedPatternWindow === "monthly");
@@ -1435,6 +1463,11 @@ function renderReviewer() {
   closeReviewAddMenu();
   $("reviewCount").textContent = String(state.reviewItems.length);
   $("scheduledCount").textContent = String(state.scheduledItems.length);
+  if (state.booting && !state.status) {
+    $("reviewList").innerHTML = skeletonCards(2, "queue-card");
+    $("scheduledList").innerHTML = skeletonCards(1, "queue-card");
+    return;
+  }
   $("reviewList").innerHTML = state.reviewItems.length
     ? state.reviewItems.map((item) => queueCard(item, "review")).join("")
     : "";
@@ -1922,6 +1955,82 @@ function renderVoice() {
   renderVoiceTopicOptions();
   renderVoiceExamples();
   renderVoiceSuggestions();
+}
+
+function renderInitialLoadingState() {
+  renderDashboardLoading();
+  renderReviewerLoading();
+  renderVoiceLoading();
+  renderAccountLoading();
+}
+
+function renderDashboardLoading() {
+  renderRecentPostSortHeaders();
+  $("trendList").innerHTML = skeletonCards(2, "trend-row");
+  $("patternList").innerHTML = skeletonCards(2, "pattern-card");
+  $("recentPostsTable").innerHTML = skeletonTableRows(6);
+}
+
+function renderReviewerLoading() {
+  $("reviewCount").textContent = "";
+  $("scheduledCount").textContent = "";
+  $("reviewList").innerHTML = skeletonCards(2, "queue-card");
+  $("scheduledList").innerHTML = skeletonCards(1, "queue-card");
+}
+
+function renderVoiceLoading() {
+  $("updateVoiceButton").disabled = true;
+  $("currentVoiceSummary").innerHTML = `
+    <article class="voice-summary-section skeleton-card" aria-hidden="true">
+      <span class="skeleton-line medium"></span>
+      <span class="skeleton-line long"></span>
+      <span class="skeleton-line long"></span>
+      <span class="skeleton-line short"></span>
+    </article>
+  `;
+  $("voiceCoverageGrid").innerHTML = `
+    <span class="skeleton-line medium"></span>
+    <span class="skeleton-line long"></span>
+  `;
+  $("voiceRulesCount").innerHTML = `<span class="skeleton-line short"></span>`;
+  $("voiceRulesSummary").innerHTML = `<span class="skeleton-line medium"></span>`;
+}
+
+function renderAccountLoading() {
+  ["accountConnectionsSummary", "accountModelSummary", "accountSyncSummary", "accountUserSummary"].forEach((id) => {
+    const node = $(id);
+    if (node) node.innerHTML = `<span class="skeleton-line medium"></span>`;
+  });
+  if ($("accountStatusGrid")) $("accountStatusGrid").innerHTML = skeletonSettingsRows(4);
+  if ($("accountSyncGrid")) $("accountSyncGrid").innerHTML = skeletonSettingsRows(4);
+  if ($("accountSecurityBlock")) $("accountSecurityBlock").innerHTML = skeletonSettingsRows(1);
+}
+
+function skeletonCards(count, className = "queue-card") {
+  return Array.from({ length: count }, (_, index) => `
+    <article class="${escapeAttr(className)} skeleton-card" aria-hidden="true">
+      <span class="skeleton-line ${index % 2 ? "medium" : "long"}"></span>
+      <span class="skeleton-line ${index % 2 ? "long" : "medium"}"></span>
+      <span class="skeleton-line short"></span>
+    </article>
+  `).join("");
+}
+
+function skeletonTableRows(count) {
+  return Array.from({ length: count }, (_, index) => `
+    <tr class="skeleton-table-row" aria-hidden="true">
+      <td colspan="12"><span class="skeleton-line ${index % 2 ? "medium" : "long"}"></span></td>
+    </tr>
+  `).join("");
+}
+
+function skeletonSettingsRows(count) {
+  return Array.from({ length: count }, () => `
+    <article class="skeleton-settings-row skeleton-card" aria-hidden="true">
+      <span class="skeleton-line medium"></span>
+      <span class="skeleton-line long"></span>
+    </article>
+  `).join("");
 }
 
 function renderCurrentVoice() {
@@ -3291,6 +3400,7 @@ function setup() {
   const monday = new Date();
   monday.setDate(monday.getDate() + ((8 - monday.getDay()) % 7 || 7));
   $("planWeekStart").value = monday.toISOString().slice(0, 10);
+  renderInitialLoadingState();
   refresh().catch((error) => showMessage(error.message, true));
 }
 

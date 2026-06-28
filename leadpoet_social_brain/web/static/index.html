@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-top-aligned-view-headings">
+    <link rel="stylesheet" href="/static/styles.css?v=20260627-loading-polish">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -97,7 +97,18 @@
                 <button class="secondary" id="trendWeeklyButton" type="button">Weekly</button>
               </div>
             </div>
-            <div id="trendList" class="trend-list trend-scroll"></div>
+            <div id="trendList" class="trend-list trend-scroll">
+              <article class="trend-row skeleton-card" aria-hidden="true">
+                <span class="skeleton-line short"></span>
+                <span class="skeleton-line long"></span>
+                <span class="skeleton-line medium"></span>
+              </article>
+              <article class="trend-row skeleton-card" aria-hidden="true">
+                <span class="skeleton-line short"></span>
+                <span class="skeleton-line long"></span>
+                <span class="skeleton-line medium"></span>
+              </article>
+            </div>
           </section>
 
           <section class="panel patterns-panel">
@@ -110,7 +121,18 @@
                 <button class="secondary" id="patternMonthlyButton" type="button">Monthly</button>
               </div>
             </div>
-            <div id="patternList" class="pattern-list trend-scroll"></div>
+            <div id="patternList" class="pattern-list trend-scroll">
+              <article class="pattern-card skeleton-card" aria-hidden="true">
+                <span class="skeleton-line short"></span>
+                <span class="skeleton-line long"></span>
+                <span class="skeleton-line medium"></span>
+              </article>
+              <article class="pattern-card skeleton-card" aria-hidden="true">
+                <span class="skeleton-line short"></span>
+                <span class="skeleton-line long"></span>
+                <span class="skeleton-line medium"></span>
+              </article>
+            </div>
           </section>
         </div>
 
@@ -147,7 +169,17 @@
                   <th data-sort-key="link"><button type="button" class="table-sort-button">Link<span class="sort-indicator" aria-hidden="true"></span></button></th>
                 </tr>
               </thead>
-              <tbody id="recentPostsTable"></tbody>
+              <tbody id="recentPostsTable">
+                <tr class="skeleton-table-row" aria-hidden="true">
+                  <td colspan="12"><span class="skeleton-line long"></span></td>
+                </tr>
+                <tr class="skeleton-table-row" aria-hidden="true">
+                  <td colspan="12"><span class="skeleton-line medium"></span></td>
+                </tr>
+                <tr class="skeleton-table-row" aria-hidden="true">
+                  <td colspan="12"><span class="skeleton-line long"></span></td>
+                </tr>
+              </tbody>
             </table>
           </div>
         </section>
@@ -601,6 +633,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260627-top-aligned-view-headings"></script>
+    <script src="/static/app.js?v=20260627-loading-polish"></script>
   </body>
 </html>
