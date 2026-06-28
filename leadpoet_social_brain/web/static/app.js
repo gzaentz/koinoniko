@@ -1855,7 +1855,6 @@ async function syncPosts() {
     method: "POST",
     body: JSON.stringify({
       username: DEFAULT_SYNC_USERNAME,
-      limit: 25,
       ...(autoCategorize ? { auto_categorize: true } : { default_topic: "uncategorized" }),
       default_post_type: "founder_insight",
       exclude_replies: true,
@@ -1883,7 +1882,6 @@ async function syncAllXData() {
     method: "POST",
     body: JSON.stringify({
       username: DEFAULT_SYNC_USERNAME,
-      post_limit: 25,
       metrics_limit: 250,
       ...(autoCategorize ? { auto_categorize: true } : { default_topic: "uncategorized" }),
       default_post_type: "founder_insight",
@@ -2421,7 +2419,9 @@ async function updateVoice() {
     body: "{}",
   });
   await loadVoice();
-  showMessage(payload.message || "Voice updated.");
+  const autoFilled = payload.auto_filled || {};
+  const hasAutoFillIssue = Number(autoFilled.skipped || 0) > 0 || (autoFilled.errors || []).length > 0;
+  showMessage(payload.message || "Voice updated.", hasAutoFillIssue);
 }
 
 window.markSuggestedVoiceExample = (event, id) => {

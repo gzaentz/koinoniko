@@ -110,6 +110,7 @@ LLM_MODEL_SETTING = MODEL_SETTING_KEYS["default"]
 DEFAULT_AUTH_USERNAME = DEFAULT_WEB_AUTH_USERNAME
 DEFAULT_X_SYNC_USERNAME = "gavinzaentz"
 DEFAULT_X_POST_SYNC_LIMIT = 3200
+DEFAULT_DASHBOARD_POST_LIMIT = 250
 DAILY_X_POST_SYNC_LIMIT = 25
 X_POST_INCREMENTAL_LOOKBACK_MINUTES = 10
 X_POSTS_SYNC_KEY = "x_posts_sync"
@@ -693,11 +694,8 @@ def route_api(
         autofill = autofill_voice_example_details(store)
         section = ContextManager(store).rebuild_style_guide_from_examples(limit=limit)
         status = voice_status_payload(store)
-        message = "Voice updated from selected examples."
-        if autofill["updated"]:
-            message = f"Voice updated and filled details for {autofill['updated']} Voice Example(s)."
         return 200, {
-            "message": message,
+            "message": voice_update_message(autofill),
             "examples_used": status["examples_count"],
             "auto_filled": autofill,
             "current": voice_current_payload(store, section=section),
@@ -1819,6 +1817,23 @@ def autofill_voice_example_details(store: SQLiteStore) -> dict[str, Any]:
     return summary
 
 
+def voice_update_message(autofill: dict[str, Any]) -> str:
+    updated = int(autofill.get("updated") or 0)
+    skipped = int(autofill.get("skipped") or 0)
+    needed = int(autofill.get("needed") or 0)
+    errors = [str(error) for error in autofill.get("errors", []) if str(error)]
+    if updated and not skipped and not errors:
+        return f"Voice updated and filled details for {updated} Voice Example(s)."
+    if updated and (skipped or errors):
+        message = f"Voice updated and filled details for {updated} Voice Example(s), but skipped {skipped}."
+        return f"{message} {errors[0]}" if errors else message
+    if needed and errors:
+        return f"Voice updated, but Voice Example details were not filled: {errors[0]}"
+    if needed and skipped:
+        return f"Voice updated, but {skipped} Voice Example(s) still need details."
+    return "Voice updated from selected examples."
+
+
 def missing_voice_detail_fields(note: PostNote | None) -> list[str]:
     if not note:
         return list(VOICE_AUTOFILL_FIELDS)
@@ -2375,7 +2390,7 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
         if item.status == "approved" and parse_dt(item.scheduled_at) <= datetime.now(timezone.utc)
     ][:10]
     analytics = build_analytics_summary(store)
-    recent_posts = store.list_posts(platform="x", limit=None)
+    recent_posts = store.list_posts(platform="x", limit=DEFAULT_DASHBOARD_POST_LIMIT)
     latest_metrics = store.latest_metrics_by_post_id([post.id for post in recent_posts])
     notes = store.notes_by_post_id([post.id for post in recent_posts])
     trend_groups = web_trend_groups(store)

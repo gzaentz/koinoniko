@@ -9,6 +9,9 @@ import urllib.request
 from typing import Any
 
 
+TASK_TIMEOUT_ENV = "SOCIAL_BRAIN_TASK_TIMEOUT"
+DEFAULT_TASK_TIMEOUT_SECONDS = 180
+
 TASK_DEFAULTS: dict[str, dict[str, Any]] = {
     "sync-x-posts": {"limit": 25},
     "sync-x-metrics": {"since_days": 30, "limit": 250},
@@ -26,6 +29,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("task", choices=sorted(TASK_DEFAULTS))
     parser.add_argument("--url", default=os.getenv("SOCIAL_BRAIN_URL", ""))
     parser.add_argument("--secret", default=os.getenv("TASK_SECRET", ""))
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=task_timeout_from_env(),
+        help=f"HTTP timeout in seconds. Defaults to {TASK_TIMEOUT_ENV} or {DEFAULT_TASK_TIMEOUT_SECONDS}.",
+    )
     parser.add_argument("--payload", default="", help="Optional JSON object to merge into the request body.")
     args = parser.parse_args(argv)
 
@@ -43,13 +52,24 @@ def main(argv: list[str] | None = None) -> int:
         payload.update(override)
 
     try:
-        result = post_task(base_url, args.task, args.secret, payload)
+        result = post_task(base_url, args.task, args.secret, payload, timeout_seconds=args.timeout)
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
     print(json.dumps(result, indent=2, sort_keys=True))
     return 1 if task_result_has_errors(args.task, result) else 0
+
+
+def task_timeout_from_env() -> int:
+    raw = os.getenv(TASK_TIMEOUT_ENV)
+    if not raw:
+        return DEFAULT_TASK_TIMEOUT_SECONDS
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_TASK_TIMEOUT_SECONDS
+    return max(1, value)
 
 
 def task_result_has_errors(task: str, result: dict[str, Any]) -> bool:
@@ -65,7 +85,14 @@ def task_result_has_errors(task: str, result: dict[str, Any]) -> bool:
     return False
 
 
-def post_task(base_url: str, task: str, secret: str, payload: dict[str, Any]) -> dict[str, Any]:
+def post_task(
+    base_url: str,
+    task: str,
+    secret: str,
+    payload: dict[str, Any],
+    *,
+    timeout_seconds: int = DEFAULT_TASK_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
     body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         f"{base_url}/tasks/{task}",
@@ -78,7 +105,7 @@ def post_task(base_url: str, task: str, secret: str, payload: dict[str, Any]) ->
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body_text = exc.read().decode("utf-8", errors="replace")

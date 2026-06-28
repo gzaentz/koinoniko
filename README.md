@@ -507,6 +507,7 @@ Set these variables on each Cron service:
 ```bash
 SOCIAL_BRAIN_URL="https://<app-domain>"
 TASK_SECRET="<same TASK_SECRET as the web app>"
+SOCIAL_BRAIN_TASK_TIMEOUT="180"
 ```
 
 For one simpler hourly job:

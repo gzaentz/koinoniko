@@ -75,6 +75,7 @@ from leadpoet_social_brain.web.app import (
     validate_session_cookie_value,
     verify_credentials,
 )
+from leadpoet_social_brain.web import task_client
 from leadpoet_social_brain.web.task_client import TASK_DEFAULTS, main as task_client_main
 
 
@@ -2634,11 +2635,11 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(metadata.summary["daily_trends"], 1)
             store.close()
 
-    def test_web_dashboard_returns_all_posts(self):
+    def test_web_dashboard_caps_recent_posts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"
             store = SQLiteStore(db_path)
-            for index in range(101):
+            for index in range(251):
                 ingest_x_post(
                     store,
                     text=f"Stored dashboard post {index}",
@@ -2653,7 +2654,7 @@ class SocialBrainTest(unittest.TestCase):
             status, payload = handle_api_request("GET", "/api/dashboard", db_path=db_path)
 
             self.assertEqual(status, 200)
-            self.assertEqual(len(payload["recent_posts"]), 101)
+            self.assertEqual(len(payload["recent_posts"]), 250)
 
     def test_web_sync_x_user_endpoint_can_auto_categorize(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2802,7 +2803,7 @@ class SocialBrainTest(unittest.TestCase):
 
             status, updated = handle_api_request("POST", "/api/voice/update", b"{}", db_path=db_path)
             self.assertEqual(status, 200)
-            self.assertEqual(updated["message"], "Voice updated from selected examples.")
+            self.assertIn("Voice updated, but Voice Example details were not filled", updated["message"])
             self.assertEqual(updated["examples_used"], 1)
             self.assertTrue(updated["current"]["exists"])
             self.assertIn("Reusable writing principles", {section["title"] for section in updated["current"]["sections"]})
@@ -3674,6 +3675,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(TASK_DEFAULTS["refresh-trends"], {"limit": 5})
         self.assertEqual(TASK_DEFAULTS["refresh-patterns"], {"limit": 5, "window": "weekly"})
         self.assertEqual(TASK_DEFAULTS["refresh-patterns-weekly"], {"limit": 5, "windows": ["weekly", "monthly"]})
+        self.assertEqual(task_client.DEFAULT_TASK_TIMEOUT_SECONDS, 180)
         with patch(
             "leadpoet_social_brain.web.task_client.post_task",
             return_value={"ok": True, "errors": []},
@@ -3696,6 +3698,7 @@ class SocialBrainTest(unittest.TestCase):
             "sync-x-posts",
             "task-secret",
             {"limit": 50},
+            timeout_seconds=180,
         )
         with patch(
             "leadpoet_social_brain.web.task_client.post_task",
