@@ -2825,6 +2825,90 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(saved["post"]["voice"]["why_this_worked"], payload["suggested_note"])
 
+    def test_voice_update_autofills_missing_voice_example_details(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            older = ingest_x_post(
+                store,
+                text="Two sales teams want to grow pipeline with outbound. One buys more leads. The other learns buyer timing.",
+                url="https://x.com/gavin/status/voice-autofill-older",
+                date="2026-06-23",
+                author="Gavin",
+                topic="sales LLMs",
+                post_type="founder_insight",
+                metrics=EngagementMetrics(impressions=2200, likes=80, replies=5, reposts=10, bookmarks=24),
+                imitate=True,
+            )
+            newer = ingest_x_post(
+                store,
+                text="Intent data should tell you why this account cares today, not that someone clicked an article last month.",
+                url="https://x.com/gavin/status/voice-autofill-newer",
+                date="2026-06-24",
+                author="Gavin",
+                topic="sales LLMs",
+                post_type="founder_insight",
+                metrics=EngagementMetrics(impressions=3000, likes=100, replies=8, reposts=12, bookmarks=40),
+                imitate=True,
+            )
+            store.save_note(
+                PostNote(
+                    post_id=newer.id,
+                    worked_reason="Original human note.",
+                    hook="specific observation",
+                    imitate=True,
+                )
+            )
+            store.close()
+
+            provider = SequentialProvider(
+                [
+                    json.dumps(
+                        {
+                            "why_this_worked": "Should not replace the human note.",
+                            "hook": "should not replace hook",
+                            "structure": "contrast between old signal and buyer timing",
+                            "tone": "plainspoken and skeptical",
+                            "cta": "none",
+                            "formatting": "short two-line contrast",
+                            "pattern": "old signal versus real timing",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "why_this_worked": "Strong because it turns outbound volume into a buyer timing problem in plain language.",
+                            "hook": "two-team contrast",
+                            "structure": "contrast, implication, sharper model",
+                            "tone": "direct and founder-led",
+                            "cta": "none",
+                            "formatting": "short lines",
+                            "pattern": "weak default versus better model",
+                        }
+                    ),
+                ]
+            )
+            with patch("leadpoet_social_brain.web.app.load_configured_provider", return_value=provider):
+                status, payload = handle_api_request("POST", "/api/voice/update", b"{}", db_path=db_path)
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["auto_filled"]["updated"], 2)
+            self.assertEqual(len(provider.prompts), 2)
+            self.assertIn("Return only valid JSON", provider.prompts[0])
+            self.assertIn("why_this_worked", provider.prompts[1])
+
+            store = SQLiteStore(db_path)
+            notes = store.notes_by_post_id([older.id, newer.id])
+            self.assertEqual(notes[newer.id].worked_reason, "Original human note.")
+            self.assertEqual(notes[newer.id].hook, "specific observation")
+            self.assertEqual(notes[newer.id].structure, "contrast between old signal and buyer timing")
+            self.assertEqual(notes[older.id].worked_reason, "Strong because it turns outbound volume into a buyer timing problem in plain language.")
+            self.assertEqual(notes[older.id].hook, "two-team contrast")
+            self.assertEqual(notes[older.id].pattern_name, "weak default versus better model")
+            current = store.list_context_sections(kinds={"style_guide"})[0]
+            self.assertIn("Original human note.", current.content)
+            self.assertIn("Strong because it turns outbound volume", current.content)
+            store.close()
+
     def test_voice_coverage_counts_and_recommendations(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"

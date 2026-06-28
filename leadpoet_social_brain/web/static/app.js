@@ -2247,11 +2247,12 @@ function voicePerformanceSignal(post) {
 }
 
 async function updateVoice() {
-  await api("/api/voice/update", {
+  const payload = await api("/api/voice/update", {
     method: "POST",
     body: "{}",
   });
   await loadVoice();
+  showMessage(payload.message || "Voice updated.");
 }
 
 window.markSuggestedVoiceExample = (event, id) => {

@@ -51,7 +51,7 @@ from leadpoet_social_brain.core.models import (
     new_id,
     utc_now,
 )
-from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
+from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator, parse_json_object
 from leadpoet_social_brain.pattern_scout import (
     PATTERN_REFRESH_MISSING_PROVIDER,
     PATTERN_REFRESH_MISSING_SCRAPINGDOG,
@@ -150,6 +150,7 @@ TASK_SECRET_REQUIRED_MESSAGE = "Task authentication required."
 MISSING_X_READ_CREDENTIALS_MESSAGE = "X read credentials missing. Set X_BEARER_TOKEN."
 CREATE_POST_MISSING_PROVIDER_MESSAGE = "No LLM provider configured. Set provider before creating posts."
 SUGGEST_NOTE_MISSING_PROVIDER_MESSAGE = "No LLM provider configured. Set a provider before suggesting notes."
+VOICE_AUTOFILL_MISSING_PROVIDER_MESSAGE = "No LLM provider configured. Set a provider before auto-filling Voice details."
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -628,11 +629,16 @@ def route_api(
         return 200, {"items": taxonomy_options_payload(store, "post_type", DEFAULT_POST_TYPE_OPTIONS)}
     if method == "POST" and parts == ["api", "voice", "update"]:
         limit = int(payload.get("limit") or 12)
+        autofill = autofill_voice_example_details(store)
         section = ContextManager(store).rebuild_style_guide_from_examples(limit=limit)
         status = voice_status_payload(store)
+        message = "Voice updated from selected examples."
+        if autofill["updated"]:
+            message = f"Voice updated and filled details for {autofill['updated']} Voice Example(s)."
         return 200, {
-            "message": "Voice updated from selected examples.",
+            "message": message,
             "examples_used": status["examples_count"],
+            "auto_filled": autofill,
             "current": voice_current_payload(store, section=section),
             "status": voice_status_payload(store),
         }
@@ -1668,6 +1674,170 @@ def clean_suggested_voice_note(value: str) -> str:
     if len(cleaned) <= 420:
         return cleaned
     return cleaned[:417].rstrip() + "..."
+
+
+VOICE_AUTOFILL_FIELDS = {
+    "why_this_worked": ("worked_reason", 420),
+    "hook": ("hook", 90),
+    "structure": ("structure", 120),
+    "tone": ("tone", 90),
+    "cta": ("cta", 80),
+    "formatting": ("formatting", 90),
+    "pattern": ("pattern_name", 120),
+}
+
+
+def autofill_voice_example_details(store: SQLiteStore) -> dict[str, Any]:
+    examples = voice_example_posts(store)
+    notes = store.notes_by_post_id([post.id for post in examples])
+    candidates = [
+        (post, note, missing_voice_detail_fields(note))
+        for post in examples
+        if (note := notes.get(post.id)) and note.imitate
+    ]
+    candidates = [(post, note, missing) for post, note, missing in candidates if missing]
+    summary: dict[str, Any] = {
+        "checked": len(examples),
+        "needed": len(candidates),
+        "updated": 0,
+        "skipped": 0,
+        "errors": [],
+        "provider_required": bool(candidates),
+    }
+    if not candidates:
+        return summary
+    try:
+        provider = load_configured_provider(store)
+    except Exception as exc:  # noqa: BLE001 - keep Voice rebuild available even if provider setup is bad.
+        summary["skipped"] = len(candidates)
+        summary["errors"].append(str(exc))
+        return summary
+    if not provider:
+        summary["skipped"] = len(candidates)
+        summary["errors"].append(VOICE_AUTOFILL_MISSING_PROVIDER_MESSAGE)
+        return summary
+    metrics_by_post_id = store.latest_metrics_by_post_id([post.id for post, _, _ in candidates])
+    current_voice = current_voice_section(store)
+    model = resolve_model_routing(store, provider).default
+    for post, note, missing in candidates:
+        prompt = build_voice_detail_prompt(
+            post,
+            note=note,
+            metrics=metrics_by_post_id.get(post.id),
+            current_voice=current_voice.content if current_voice else "",
+            missing_fields=missing,
+        )
+        try:
+            raw = generate_with_provider(provider, prompt, variants=1, model=model)[0]
+        except Exception as exc:  # noqa: BLE001 - keep filling the rest of the examples.
+            summary["skipped"] += 1
+            summary["errors"].append(f"{post_summary(post.text, max_length=64)}: {exc}")
+            continue
+        values = clean_voice_detail_suggestion(raw, missing)
+        if not values:
+            summary["skipped"] += 1
+            summary["errors"].append(f"{post_summary(post.text, max_length=64)}: provider returned no usable Voice details")
+            continue
+        store.save_note(merged_voice_note(note, values))
+        summary["updated"] += 1
+    return summary
+
+
+def missing_voice_detail_fields(note: PostNote | None) -> list[str]:
+    if not note:
+        return list(VOICE_AUTOFILL_FIELDS)
+    missing: list[str] = []
+    for payload_key, (note_attr, _) in VOICE_AUTOFILL_FIELDS.items():
+        if clean_optional(getattr(note, note_attr, None)) is None:
+            missing.append(payload_key)
+    return missing
+
+
+def build_voice_detail_prompt(
+    post: SocialPost,
+    *,
+    note: PostNote,
+    metrics: Any | None,
+    current_voice: str = "",
+    missing_fields: list[str],
+) -> str:
+    metric = metrics_payload(metrics)
+    metrics_text = "\n".join(
+        f"- {key}: {value}"
+        for key, value in metric.items()
+        if value is not None and key != "measured_at"
+    ) or "- No metrics available."
+    existing = {
+        "why_this_worked": note.worked_reason,
+        "hook": note.hook,
+        "structure": note.structure,
+        "tone": note.tone,
+        "cta": note.cta,
+        "formatting": note.formatting,
+        "pattern": note.pattern_name,
+    }
+    missing_json = json.dumps(missing_fields)
+    existing_json = json.dumps({key: value for key, value in existing.items() if clean_optional(value)}, indent=2)
+    return f"""Fill missing Voice Example details for Koinoniko.
+
+Post text:
+{post.text}
+
+Topic: {post.topic}
+Post type: {post.post_type}
+
+Metrics:
+{metrics_text}
+
+Existing details:
+{existing_json or "{}"}
+
+Current Koinoniko Voice:
+{current_voice or "- No current Voice summary yet."}
+
+Return only valid JSON with exactly these missing keys:
+{missing_json}
+
+Field guidance:
+- why_this_worked: one concise sentence on why this is a strong Gavin/Leadpoet voice example.
+- hook: short human-readable hook mechanic, not a slogan.
+- structure: short description of the post structure.
+- tone: short description of the tone.
+- cta: CTA style, or "none" if there is no CTA.
+- formatting: short description of line breaks, length, and layout.
+- pattern: reusable writing pattern name in plain language.
+
+Keep every value specific to this post. Avoid generic labels, hype, and internal database language."""
+
+
+def clean_voice_detail_suggestion(raw: str, allowed_fields: list[str]) -> dict[str, str]:
+    parsed = parse_json_object(raw)
+    if not isinstance(parsed, dict):
+        return {}
+    values: dict[str, str] = {}
+    for key in allowed_fields:
+        if key not in VOICE_AUTOFILL_FIELDS:
+            continue
+        cleaned = clean_optional(parsed.get(key))
+        if not cleaned:
+            continue
+        limit = VOICE_AUTOFILL_FIELDS[key][1]
+        values[key] = truncate_payload_text(cleaned, limit) or cleaned
+    return values
+
+
+def merged_voice_note(note: PostNote, values: Mapping[str, str]) -> PostNote:
+    return PostNote(
+        post_id=note.post_id,
+        worked_reason=note.worked_reason or values.get("why_this_worked"),
+        pattern_name=note.pattern_name or values.get("pattern"),
+        hook=note.hook or values.get("hook"),
+        structure=note.structure or values.get("structure"),
+        tone=note.tone or values.get("tone"),
+        cta=note.cta or values.get("cta"),
+        formatting=note.formatting or values.get("formatting"),
+        imitate=note.imitate,
+    )
 
 
 def voice_coverage_payload(store: SQLiteStore) -> dict[str, Any]:
