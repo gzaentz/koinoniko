@@ -34,6 +34,19 @@ DEFAULT_VOICE_RULES = [
     "Practical enough that a buyer or investor can see the business point.",
 ]
 
+REQUIRED_REVIEW_RULES = [
+    (
+        "If a trend, company, product, or case study is used, explain the exact mechanism "
+        "that transfers to saved Facts & Context; do not rely on 'same problem' or 'part to watch' shorthand."
+    ),
+    "Reject drafts that could apply to any workspace after swapping company or product names.",
+    (
+        "A post-worthy draft must answer why this is worth posting now: concrete reader payoff, "
+        "timely trigger, or saved-context proof."
+    ),
+    "Do not use a news item as a topical peg unless the insight depends on a specific fact from that item.",
+]
+
 
 def load_avoid_phrases(store: SQLiteStore) -> list[str]:
     return load_rules_setting(store, VOICE_AVOID_PHRASES_SETTING, DEFAULT_AVOID_PHRASES)
@@ -77,7 +90,7 @@ def save_voice_rules_override(store: SQLiteStore, rules: list[object]) -> list[s
 
 
 def load_review_rules(store: SQLiteStore, default_rules: list[str]) -> list[str]:
-    return load_rules_setting(store, VOICE_REVIEW_RULES_SETTING, default_rules)
+    return with_required_review_rules(load_rules_setting(store, VOICE_REVIEW_RULES_SETTING, default_rules))
 
 
 def save_review_rules(store: SQLiteStore, rules: list[object]) -> list[str]:
@@ -120,6 +133,10 @@ def normalize_rules(rules: list[object]) -> list[str]:
         seen.add(key)
         normalized.append(cleaned)
     return normalized[:40]
+
+
+def with_required_review_rules(rules: list[str]) -> list[str]:
+    return normalize_rules([*rules, *REQUIRED_REVIEW_RULES])
 
 
 def positioning_rules_context_content(rules: list[str]) -> str:

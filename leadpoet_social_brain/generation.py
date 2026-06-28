@@ -434,6 +434,8 @@ Do not write the post yet. Produce the structured Post Intent that the natural w
 Your job:
 - Turn the user's raw idea into a clear thesis, angle, and post shape.
 - Ground the post in supplied context, examples, trends, patterns, or the user's exact words.
+- If using a trend, company, product, or case study, name the exact mechanism that transfers into the saved context.
+- If the source-to-context bridge is weak, do not force the trend; choose a grounded observation/take instead.
 - Decide what the writer may safely imply and what it must not invent.
 - If there is no real anecdote, source, quote, metric, or lived event, set the post shape to observation/take instead of story.
 - Do not invent customer conversations, personal activities, research sessions, meetings, metrics, quotes, product facts, or examples.
@@ -466,16 +468,17 @@ Analytics hints:
 {avoid_section}
 
 Return compact JSON only with these keys:
-thesis, angle, intended_audience, reader_problem, why_this_is_worth_posting, concrete_detail, source_material, evidence_boundary, post_shape, hook_direction, tone_direction, claims_to_make, claims_to_avoid, forbidden_moves, success_criteria.
+thesis, angle, intended_audience, reader_problem, why_this_is_worth_posting, concrete_detail, source_material, source_bridge, evidence_boundary, post_shape, hook_direction, tone_direction, claims_to_make, claims_to_avoid, forbidden_moves, success_criteria.
 
 Field guidance:
 - thesis: one plain sentence the post is trying to make true in the reader's head.
 - concrete_detail: one specific noun, mechanism, situation, or contrast from the request/context. If thin, use the best grounded mechanism and say it is thin.
 - source_material: what the writer is allowed to use as evidence.
+- source_bridge: the specific source fact -> mechanism -> saved context connection. If the bridge is weak, say it is weak and tell the writer not to use the source.
 - evidence_boundary: what the writer must not pretend happened.
 - post_shape: one of observation, product lesson, teardown, market take, trend response, customer-inspired, short contrarian claim.
-- forbidden_moves: include unsupported first-person setup, fake anecdotes, generic AI hype, and any request-specific traps.
-- success_criteria: concise checklist for the evaluator."""
+- forbidden_moves: include unsupported first-person setup, fake anecdotes, generic AI hype, shallow topical pegs, unexplained "same problem" bridges, and any request-specific traps.
+- success_criteria: concise checklist for the evaluator. It must include source bridge strength, saved-context specificity, and why the post is worth publishing now."""
 
 
 def build_best_writer_prompt(
@@ -544,6 +547,9 @@ Grounding rules:
 - Do not write unsupported first-person setups like "I spent the morning...", "I was talking to...", "a customer told me...", or "we tested..." unless the Post Intent/source material explicitly supports them.
 - If no real anecdote is supplied, write an observation, take, teardown, or product lesson.
 - Keep one concrete detail from the Post Intent visible in the draft.
+- If using Trend context or another named company/product/case study, make the bridge explicit: source fact -> transferable mechanism -> saved reader/product context.
+- Do not use "same problem", "part to watch", or similar shorthand unless the draft immediately names the concrete mechanism and why it matters.
+- If the source bridge is weak or generic, do not force the source; write a grounded evergreen post from saved Facts & Context instead.
 - Do not add new stats, quotes, customer claims, product facts, or examples.
 - Humor is allowed only if it sharpens the thesis.
 
@@ -600,6 +606,9 @@ ranked_drafts, quality_notes, warnings, suggested_final_version.
 
 Best Version evaluator should check:
 - strategy fidelity: the draft expresses the thesis and uses the concrete detail
+- post-worthiness: there is a clear reason this should be posted now, not just because a topical source exists
+- source bridge: any trend/company/product/case study reference states the transferable mechanism, not just a loose analogy
+- generic swap test: the draft would still be specific if company and product names were removed; if it could apply to any workspace, fail it
 - evidence safety: no invented first-person anecdote, fake customer story, fake quote, fake metric, unsupported reading/research session, or unsupported product claim
 - specificity: at least one concrete noun, situation, mechanism, or contrast
 - substance: the draft is not just a vibe, joke, or generic AI take
@@ -608,7 +617,7 @@ Best Version evaluator should check:
 - no forced CTA
 - no corporate launch tone
 
-If the best draft violates any check, rewrite it once in suggested_final_version while preserving the thesis. If a draft uses an Avoid Phrase, revise away from it in suggested_final_version.
+If the best draft violates any check, rewrite it once in suggested_final_version while preserving the thesis. If no draft has a real source bridge or post-worthy point, include "not_post_worthy" in warnings and rewrite toward the strongest grounded evergreen point. If a draft uses an Avoid Phrase, revise away from it in suggested_final_version.
 The suggested_final_version must be natural, specific, founder-led, concise, non-corporate, free of em dashes, {max_chars} characters or fewer, and complete."""
 
 
@@ -740,6 +749,7 @@ def parse_strategy_summary(raw: str) -> dict[str, object]:
             "post_angle": str(parsed.get("post_angle") or parsed.get("angle") or "").strip(),
             "concrete_detail": str(parsed.get("concrete_detail") or "").strip(),
             "source_material": _strategy_value(parsed.get("source_material")),
+            "source_bridge": str(parsed.get("source_bridge") or "").strip(),
             "evidence_boundary": str(parsed.get("evidence_boundary") or "").strip(),
             "post_shape": str(parsed.get("post_shape") or "").strip(),
             "hook_direction": str(parsed.get("hook_direction") or "").strip(),

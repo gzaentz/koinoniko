@@ -931,6 +931,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("# Review Filter", prompt)
             self.assertIn("Use saved Facts & Context as the source of truth", prompt)
             self.assertIn("Do not frame another tool, agent, or case study as owning the workspace's core advantage", prompt)
+            self.assertIn("explain the exact mechanism that transfers to saved Facts & Context", prompt)
             store.close()
 
     def test_generation_prompt_is_example_first_not_label_heavy(self):
@@ -1139,9 +1140,14 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Do not imply Gavin personally read examples", snapshot["strategy_summary"]["evidence_boundary"])
             self.assertIn("quality_notes", snapshot)
             self.assertIn("Produce the structured Post Intent", provider.calls[0]["prompt"])
+            self.assertIn("source_bridge", provider.calls[0]["prompt"])
+            self.assertIn("shallow topical pegs", provider.calls[0]["prompt"])
             self.assertIn("Hidden Post Intent from the strategist", provider.calls[1]["prompt"])
             self.assertIn("unsupported first-person setups", provider.calls[1]["prompt"])
+            self.assertIn("make the bridge explicit", provider.calls[1]["prompt"])
             self.assertIn("evidence safety", provider.calls[2]["prompt"])
+            self.assertIn("post-worthiness", provider.calls[2]["prompt"])
+            self.assertIn("generic swap test", provider.calls[2]["prompt"])
             self.assertIn("Best Version evaluator should check", provider.calls[2]["prompt"])
             self.assertIn("- game changer", provider.calls[2]["prompt"])
             self.assertIn("Most sales AI", drafts[0].text)
@@ -1212,6 +1218,65 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(queued[0].trend_ids, [trend.id])
             self.assertIn("Why worth publishing", queued[0].reviewer_notes)
             self.assertEqual(saved_draft.context_snapshot["selected_trends"][0]["id"], trend.id)
+            store.close()
+
+    def test_plan_week_x_surfaces_best_version_quality_warnings(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            store.save_trend_item(
+                TrendItem(
+                    title="Thin AI agent trend",
+                    source_type="news",
+                    topic="sales LLMs",
+                    summary="A company is adding AI agents to operations.",
+                    why_it_matters="Could connect to sales context if the bridge is real.",
+                    leadpoet_angle="Tie the signal back to account context.",
+                    date=utc_now(),
+                )
+            )
+            provider = SequentialProvider(
+                [
+                    json.dumps(
+                        {
+                            "thesis": "Account context matters.",
+                            "why_this_is_worth_posting": "weak topical bridge",
+                            "concrete_detail": "account context",
+                            "source_bridge": "weak",
+                            "evidence_boundary": "Do not invent proof.",
+                            "success_criteria": "Requires a real bridge.",
+                        }
+                    ),
+                    "Company has AI agents. Sales has the same problem.",
+                    "The part to watch is context.",
+                    "More sending is easy.",
+                    json.dumps(
+                        {
+                            "ranked_drafts": [1, 2, 3],
+                            "quality_notes": "No real source bridge.",
+                            "warnings": ["not_post_worthy"],
+                            "suggested_final_version": "Sales teams do not need another way to send more.\n\nThey need a better reason to know this account is worth attention now.",
+                        }
+                    ),
+                ]
+            )
+
+            result = plan_week_x(
+                store,
+                SocialBrainGenerator(store, provider=provider),
+                week_start="2026-06-29",
+                posts=1,
+                use_trends=True,
+                trend_window_days=30,
+                topic_mix="sales LLMs:1",
+                cadence="daily_mornings",
+                default_post_type="founder_insight",
+                variants_per_slot=1,
+                best_version=True,
+            )
+
+            self.assertTrue(any("Slot 1: Quality warning" in warning for warning in result.warnings))
+            self.assertIn("Quality warnings:", result.queued[0].reviewer_notes)
             store.close()
 
     def test_plan_week_x_requires_evergreen_opt_in_when_trends_missing(self):
@@ -1324,6 +1389,56 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(result.warnings, ["No relevant unused trends found. Created an evergreen post instead."])
             self.assertEqual(result.item.status, "needs_review")
             self.assertEqual(result.item.trend_ids, [])
+            store.close()
+
+    def test_create_post_x_surfaces_best_version_quality_warnings(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            strategy = json.dumps(
+                {
+                    "thesis": "Buyer timing beats generic volume.",
+                    "angle": "weak topical peg",
+                    "why_this_is_worth_posting": "thin trend bridge",
+                    "concrete_detail": "buyer timing",
+                    "source_material": "User request",
+                    "source_bridge": "weak",
+                    "evidence_boundary": "Do not invent proof.",
+                    "post_shape": "observation",
+                    "forbidden_moves": ["shallow topical peg"],
+                    "success_criteria": "Requires a real source bridge.",
+                }
+            )
+            evaluation = json.dumps(
+                {
+                    "ranked_drafts": [1, 2, 3],
+                    "quality_notes": "The source bridge is too loose.",
+                    "warnings": ["not_post_worthy", "source bridge is weak"],
+                    "suggested_final_version": "Sales AI does not need another volume lever.\n\nIt needs a better reason to choose this account this week.",
+                }
+            )
+            provider = SequentialProvider(
+                [
+                    strategy,
+                    "Ericsson has AI agents. Sales has the same problem.",
+                    "The part to watch is context.",
+                    "More sending is easy. Timing is hard.",
+                    evaluation,
+                ]
+            )
+
+            result = create_post_x(
+                store,
+                SocialBrainGenerator(store, provider=provider),
+                instruction="Use this trend angle.",
+                topic="sales LLMs",
+                post_type="founder_insight",
+            )
+
+            self.assertTrue(any("no draft had a strong source bridge" in warning for warning in result.warnings))
+            self.assertTrue(any("source bridge is weak" in warning for warning in result.warnings))
+            self.assertIn("Quality warnings:", result.item.reviewer_notes)
+            self.assertIn("source bridge is weak", result.item.reviewer_notes)
             store.close()
 
     def test_update_and_approve_queued_post_cli(self):
@@ -3041,6 +3156,9 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(
                 any("workspace's core advantage" in item for item in groups["Review Filters"]["items"])
             )
+            self.assertTrue(
+                any("worth posting now" in item for item in groups["Review Filters"]["items"])
+            )
 
             status, saved = handle_api_request(
                 "PATCH",
@@ -3081,6 +3199,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Leadpoet owns buyer timing and proprietary account intent.", prompt)
             self.assertIn("Write like Gavin saw the problem himself.", prompt)
             self.assertIn("Reject drafts that make another tool sound like Leadpoet.", prompt)
+            self.assertIn("worth posting now", prompt)
             store.close()
 
     def test_voice_avoid_phrases_can_load_save_and_appear_in_prompts(self):

@@ -118,6 +118,8 @@ def plan_week_x(
             best_version=best_version,
         )
         draft = drafts[0]
+        quality_warnings = draft_quality_warnings(draft)
+        warnings.extend(f"Slot {index + 1}: Quality warning: {warning}" for warning in quality_warnings)
         item = store.save_content_queue_item(
             ContentQueueItem(
                 platform="x",
@@ -129,7 +131,7 @@ def plan_week_x(
                 trend_ids=[trend.id] if trend else [],
                 scheduled_at=scheduled_times[index].isoformat(),
                 status="needs_review",
-                reviewer_notes=queue_notes(draft.explanation, trend),
+                reviewer_notes=queue_notes(draft.explanation, trend, quality_warnings=quality_warnings),
             )
         )
         queued.append(item)
@@ -189,6 +191,7 @@ def create_post_x(
         pattern_ids=pattern_ids or [],
     )
     draft = generator.generate(request, variants=1, best_version=best_version)[0]
+    warnings.extend(f"Quality warning: {warning}" for warning in draft_quality_warnings(draft))
     trend_ids = selected_trend_ids(draft, selected_trends)
     item = store.save_content_queue_item(
         ContentQueueItem(
@@ -641,10 +644,12 @@ def evergreen_angle(topic: str, index: int) -> str:
     return defaults[index % len(defaults)]
 
 
-def queue_notes(explanation: str, trend: TrendItem | None) -> str:
+def queue_notes(explanation: str, trend: TrendItem | None, *, quality_warnings: list[str] | None = None) -> str:
     pieces = [f"Why worth publishing: {explanation}"]
     if trend:
         pieces.append(f"Trend/source used: {trend.title}")
+    if quality_warnings:
+        pieces.append("Quality warnings: " + "; ".join(quality_warnings))
     return "\n".join(pieces)
 
 
@@ -662,7 +667,31 @@ def create_post_notes(
     ]
     if trends:
         pieces.append("Trend/source used: " + ", ".join(trend.title for trend in trends))
+    warnings = draft_quality_warnings(draft)
+    if warnings:
+        pieces.append("Quality warnings: " + "; ".join(warnings))
     return "\n".join(pieces)
+
+
+def draft_quality_warnings(draft: GeneratedDraft) -> list[str]:
+    return [format_quality_warning(warning) for warning in evaluation_warnings(draft)]
+
+
+def evaluation_warnings(draft: GeneratedDraft) -> list[str]:
+    snapshot = draft.context_snapshot or {}
+    evaluation = snapshot.get("evaluation") if isinstance(snapshot, dict) else None
+    if not isinstance(evaluation, dict):
+        return []
+    warnings = evaluation.get("warnings")
+    if not isinstance(warnings, list):
+        return []
+    return [" ".join(str(warning or "").split()) for warning in warnings if str(warning or "").strip()]
+
+
+def format_quality_warning(warning: str) -> str:
+    if warning == "not_post_worthy":
+        return "no draft had a strong source bridge or post-worthy point; review closely."
+    return warning.removeprefix("Quality warning:").strip()
 
 
 def selected_trend_ids(draft: GeneratedDraft, fallback: list[TrendItem]) -> list[str]:
