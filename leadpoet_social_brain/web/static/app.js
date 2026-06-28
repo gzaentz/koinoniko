@@ -1437,10 +1437,10 @@ function renderReviewer() {
   $("scheduledCount").textContent = String(state.scheduledItems.length);
   $("reviewList").innerHTML = state.reviewItems.length
     ? state.reviewItems.map((item) => queueCard(item, "review")).join("")
-    : reviewEmptyState();
+    : "";
   $("scheduledList").innerHTML = state.scheduledItems.length
     ? state.scheduledItems.map((item) => queueCard(item, "scheduled")).join("")
-    : emptyState("No approved posts scheduled yet.");
+    : "";
 }
 
 function queueCard(item, column) {
@@ -2705,14 +2705,6 @@ window.openTrendsModal = async () => {
 
 function findQueueItem(id) {
   return [...state.reviewItems, ...state.scheduledItems].find((item) => item.id === id);
-}
-
-function emptyState(text) {
-  return `<div class="empty-state">${escapeHtml(text)}</div>`;
-}
-
-function reviewEmptyState() {
-  return emptyState("No posts to review.");
 }
 
 function setReviewAddMenuOpen(open) {

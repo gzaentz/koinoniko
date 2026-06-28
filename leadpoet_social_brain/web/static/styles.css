@@ -511,7 +511,6 @@ main {
 }
 
 .panel-header,
-.board-header,
 .voice-panel-header {
   align-items: flex-start;
 }
@@ -952,6 +951,7 @@ main {
 .board-header {
   margin-bottom: 16px;
   min-height: 34px;
+  align-items: center;
 }
 
 .board-header-actions {
@@ -989,6 +989,8 @@ main {
 .board-add-button {
   font-size: 20px;
   line-height: 1;
+  align-items: center;
+  justify-content: center;
 }
 
 .action-menu {
@@ -1021,6 +1023,15 @@ main {
   padding: 3px 8px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.count-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  min-width: 28px;
+  min-height: 28px;
 }
 
 .queue-card {
