@@ -11,6 +11,7 @@ from leadpoet_social_brain.core.models import ContextBundle, DraftRequest, Trend
 from leadpoet_social_brain.generation import build_generation_prompt
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 from leadpoet_social_brain.trend_scout import (
+    MISSING_SCRAPINGDOG_TRENDS_MESSAGE,
     WebTrendGroups,
     refresh_web_trends,
     select_web_trend_articles,
@@ -124,8 +125,7 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
                         "leadpoet_social_brain.trend_scout.fetch_scrapingdog_google_news",
                         side_effect=fake_google_news,
                     ):
-                        with patch("leadpoet_social_brain.trend_scout.fetch_gdelt_articles", return_value=[]):
-                            groups = refresh_web_trends(store)
+                        groups = refresh_web_trends(store)
 
             self.assertEqual(len(groups.daily), 5)
             self.assertEqual(len(groups.weekly), 5)
@@ -135,20 +135,22 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
             self.assertFalse(any("Celebrity gossip" in trend.title for trend in groups.daily))
             store.close()
 
-    def test_scrapingdog_refresh_keeps_gdelt_fallback_and_reports_errors(self):
+    def test_scrapingdog_missing_key_reports_clear_warning(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
 
-            def fake_gdelt(*, timespan: str, limit: int):
-                return [
-                    {
-                        "title": f"{timespan} AI sales trend {index}",
-                        "url": f"https://example.com/{timespan}/{index}",
-                        "seendate": "20260626120000",
-                        "sourceCommonName": "Example News",
-                    }
-                    for index in range(7)
-                ]
+            with patch.dict(os.environ, {}, clear=True):
+                groups = refresh_web_trends(store)
+
+            self.assertEqual(groups.daily, [])
+            self.assertEqual(groups.weekly, [])
+            self.assertEqual(groups.errors, [MISSING_SCRAPINGDOG_TRENDS_MESSAGE])
+            self.assertEqual(groups.trends_stored, 0)
+            store.close()
+
+    def test_scrapingdog_refresh_has_no_third_party_fallback(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
 
             with patch.dict(os.environ, {"SCRAPINGDOG_API_KEY": "dog-key"}, clear=False):
                 with patch(
@@ -159,14 +161,13 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
                         "leadpoet_social_brain.trend_scout.fetch_scrapingdog_google_news",
                         side_effect=RuntimeError("news unavailable"),
                     ):
-                        with patch("leadpoet_social_brain.trend_scout.fetch_gdelt_articles", side_effect=fake_gdelt):
-                            groups = refresh_web_trends(store)
+                        groups = refresh_web_trends(store)
 
-            self.assertEqual(len(groups.daily), 5)
-            self.assertEqual(len(groups.weekly), 5)
+            self.assertEqual(groups.daily, [])
+            self.assertEqual(groups.weekly, [])
             self.assertTrue(any("Scrapingdog Google Trends failed" in error for error in groups.errors))
             self.assertTrue(any("Scrapingdog Google News failed" in error for error in groups.errors))
-            self.assertIn("GDELT", groups.sources)
+            self.assertEqual(groups.sources, [])
             store.close()
 
     def test_web_trends_refresh_endpoint_returns_warnings_and_sources(self):
@@ -185,7 +186,7 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
                 daily=[daily],
                 weekly=[],
                 errors=["weekly Scrapingdog Google Trends failed: HTTP 429 Too Many Requests"],
-                sources=["Scrapingdog Google Trends", "GDELT"],
+                sources=["Scrapingdog Google Trends"],
             )
 
             with patch("leadpoet_social_brain.web.app.refresh_web_trends", return_value=groups):

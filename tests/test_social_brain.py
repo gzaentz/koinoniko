@@ -2611,7 +2611,7 @@ class SocialBrainTest(unittest.TestCase):
                         leadpoet_angle="Connect it to context.",
                     )
                 ],
-                errors=["weekly GDELT fallback failed: HTTP 429 Too Many Requests"],
+                errors=["weekly Scrapingdog Google News failed: HTTP 429 Too Many Requests"],
                 sources=["Scrapingdog Google Trends"],
             )
 
@@ -3705,6 +3705,44 @@ class SocialBrainTest(unittest.TestCase):
                 exit_code = task_client_main(
                     [
                         "publish-due-x",
+                        "--url",
+                        "https://example.com",
+                        "--secret",
+                        "task-secret",
+                    ]
+                )
+        self.assertEqual(exit_code, 1)
+        with patch(
+            "leadpoet_social_brain.web.task_client.post_task",
+            return_value={
+                "errors": ["daily Scrapingdog Google News failed: HTTP Error 429 Too Many Requests"],
+                "sync": {"status": "partial"},
+                "trends_stored": 1,
+            },
+        ):
+            with redirect_stdout(io.StringIO()):
+                exit_code = task_client_main(
+                    [
+                        "refresh-trends",
+                        "--url",
+                        "https://example.com",
+                        "--secret",
+                        "task-secret",
+                    ]
+                )
+        self.assertEqual(exit_code, 0)
+        with patch(
+            "leadpoet_social_brain.web.task_client.post_task",
+            return_value={
+                "errors": ["ScrapingDog API key is not configured; trend refresh skipped."],
+                "sync": {"status": "partial"},
+                "trends_stored": 0,
+            },
+        ):
+            with redirect_stdout(io.StringIO()):
+                exit_code = task_client_main(
+                    [
+                        "refresh-trends",
                         "--url",
                         "https://example.com",
                         "--secret",

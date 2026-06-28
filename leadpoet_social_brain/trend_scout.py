@@ -18,11 +18,11 @@ from leadpoet_social_brain.providers import DraftProvider, generate_with_provide
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 
 
-GDELT_DOC_API_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 SCRAPINGDOG_API_KEY_ENV = "SCRAPINGDOG_API_KEY"
 SCRAPINGDOG_API_KEY_ALT_ENV = "SCRAPING_DOG_API_KEY"
 SCRAPINGDOG_TRENDS_URL = "https://api.scrapingdog.com/google_trends/trending_now"
 SCRAPINGDOG_NEWS_URL = "https://api.scrapingdog.com/google_news"
+MISSING_SCRAPINGDOG_TRENDS_MESSAGE = "ScrapingDog API key is not configured; trend refresh skipped."
 SCRAPINGDOG_TIMEOUT_SECONDS = 45
 SOURCE_FETCH_TIMEOUT_SECONDS = 8
 SOURCE_TEXT_EXCERPT_CHARS = 3500
@@ -30,11 +30,6 @@ SOURCE_PROMPT_TEXT_CHARS = 5000
 SOURCE_EXCERPT_CHARS = 700
 WEB_DAILY_SOURCE_TYPE = "web_daily"
 WEB_WEEKLY_SOURCE_TYPE = "web_weekly"
-WEB_TREND_QUERY = (
-    '("AI SDR" OR "sales AI" OR "outbound AI" OR "GTM AI" OR "sales automation" '
-    'OR "sales engagement" OR "lead generation" OR "lead gen" OR "buyer intent" '
-    'OR "intent data" OR "account signals" OR RevOps OR CRM)'
-)
 SCRAPINGDOG_NEWS_QUERY = (
     '("AI SDR" OR "sales AI" OR "outbound AI" OR "GTM AI" OR "sales automation" '
     'OR "sales engagement" OR "lead generation" OR "lead gen" OR "buyer intent" '
@@ -200,7 +195,7 @@ def refresh_web_trends(
     fetch_source_page: FetchSourcePage | None = None,
 ) -> WebTrendGroups:
     if fetch_articles:
-        return refresh_gdelt_web_trends(
+        return refresh_injected_web_trends(
             store,
             fetch_articles=fetch_articles,
             limit=limit,
@@ -214,12 +209,14 @@ def refresh_web_trends(
     sources: list[str] = []
     stats = empty_refresh_stats()
     api_key = scrapingdog_api_key()
+    if not api_key:
+        errors.append(MISSING_SCRAPINGDOG_TRENDS_MESSAGE)
+        return WebTrendGroups(daily=[], weekly=[], errors=errors, sources=sources, **stats)
     daily = refresh_web_trends_for_period(
         store,
         period="daily",
         source_type=WEB_DAILY_SOURCE_TYPE,
         scrapingdog_hours=24,
-        gdelt_timespan="1d",
         limit=limit,
         scrapingdog_api_key=api_key or None,
         errors=errors,
@@ -235,7 +232,6 @@ def refresh_web_trends(
         period="weekly",
         source_type=WEB_WEEKLY_SOURCE_TYPE,
         scrapingdog_hours=168,
-        gdelt_timespan="7d",
         limit=limit,
         scrapingdog_api_key=api_key or None,
         errors=errors,
@@ -257,21 +253,20 @@ def scrapingdog_configured() -> bool:
     return bool(scrapingdog_api_key())
 
 
-def refresh_gdelt_web_trends(
+def refresh_injected_web_trends(
     store: SQLiteStore,
     *,
-    fetch_articles: FetchArticles | None = None,
+    fetch_articles: FetchArticles,
     limit: int = 5,
     provider: DraftProvider | None = None,
     enrich: bool = True,
     enrich_limit: int | None = None,
     fetch_source_page: FetchSourcePage | None = None,
 ) -> WebTrendGroups:
-    fetch = fetch_articles or fetch_gdelt_articles
     stats = empty_refresh_stats()
     daily = save_web_trend_articles(
         store,
-        articles=fetch(timespan="1d", limit=limit * 4),
+        articles=fetch_articles(timespan="1d", limit=limit * 4),
         source_type=WEB_DAILY_SOURCE_TYPE,
         limit=limit,
         stats=stats,
@@ -283,7 +278,7 @@ def refresh_gdelt_web_trends(
     )
     weekly = save_web_trend_articles(
         store,
-        articles=fetch(timespan="7d", limit=limit * 4),
+        articles=fetch_articles(timespan="7d", limit=limit * 4),
         source_type=WEB_WEEKLY_SOURCE_TYPE,
         limit=limit,
         stats=stats,
@@ -293,7 +288,7 @@ def refresh_gdelt_web_trends(
         fetch_source_page=fetch_source_page,
         count_candidates=True,
     )
-    return WebTrendGroups(daily=daily, weekly=weekly, sources=["GDELT"], **stats)
+    return WebTrendGroups(daily=daily, weekly=weekly, sources=["Injected test source"], **stats)
 
 
 def refresh_web_trends_for_period(
@@ -302,7 +297,6 @@ def refresh_web_trends_for_period(
     period: str,
     source_type: str,
     scrapingdog_hours: int,
-    gdelt_timespan: str,
     limit: int,
     scrapingdog_api_key: str | None,
     errors: list[str],
@@ -347,15 +341,6 @@ def refresh_web_trends_for_period(
 
     stats["candidates_found"] += len(articles)
     selected = select_web_trend_articles(articles, limit=limit)
-    if len(selected) < limit:
-        try:
-            fallback_articles = gdelt_articles(fetch_gdelt_articles(timespan=gdelt_timespan, limit=limit * 4))
-            stats["candidates_found"] += len(fallback_articles)
-            articles.extend(article for article in fallback_articles if article not in articles)
-            selected = select_web_trend_articles(articles, limit=limit)
-            sources.append("GDELT")
-        except Exception as exc:  # noqa: BLE001 - no-key fallback can also throttle.
-            errors.append(f"{period} GDELT fallback failed: {exc}")
     return save_web_trend_articles(
         store,
         articles=selected,
@@ -436,29 +421,6 @@ def fetch_json(url: str, params: dict[str, str], *, timeout: int) -> dict[str, o
     return payload
 
 
-def fetch_gdelt_articles(*, timespan: str, limit: int = 20) -> list[dict[str, object]]:
-    query = urlencode(
-        {
-            "query": WEB_TREND_QUERY,
-            "mode": "artlist",
-            "format": "json",
-            "maxrecords": str(limit),
-            "sort": "hybridrel",
-            "timespan": timespan,
-        }
-    )
-    request = Request(
-        f"{GDELT_DOC_API_URL}?{query}",
-        headers={"User-Agent": "KoinonikoTrendScout/1.0"},
-    )
-    with urlopen(request, timeout=8) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-    articles = payload.get("articles", [])
-    if not isinstance(articles, list):
-        return []
-    return [article for article in articles if isinstance(article, dict)]
-
-
 def scrapingdog_trending_articles(
     searches: list[dict[str, object]],
     *,
@@ -517,10 +479,6 @@ def scrapingdog_news_articles(results: list[dict[str, object]]) -> list[dict[str
             }
         )
     return articles
-
-
-def gdelt_articles(articles: list[dict[str, object]]) -> list[dict[str, object]]:
-    return [{**article, "provider": "gdelt"} for article in articles]
 
 
 def select_web_trend_articles(
@@ -1041,7 +999,7 @@ def web_trend_from_article(article: dict[str, object], *, source_type: str) -> T
         or article.get("sourceCountry")
         or "web"
     )
-    provider = clean_text(article.get("provider")) or "gdelt"
+    provider = clean_text(article.get("provider")) or "web"
     topic = classify_topic(title)
     period = "daily" if source_type == WEB_DAILY_SOURCE_TYPE else "weekly"
     date_value = normalize_article_date(article.get("seendate") or article.get("date"))
@@ -1159,7 +1117,7 @@ def provider_label(provider: str) -> str:
         return "Scrapingdog Google Trends"
     if provider == "scrapingdog_google_news":
         return "Scrapingdog Google News"
-    return "GDELT"
+    return "Web"
 
 
 def unique_texts(values: list[str]) -> list[str]:

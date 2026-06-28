@@ -49,10 +49,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(json.dumps(result, indent=2, sort_keys=True))
-    return 1 if task_result_has_errors(result) else 0
+    return 1 if task_result_has_errors(args.task, result) else 0
 
 
-def task_result_has_errors(result: dict[str, Any]) -> bool:
+def task_result_has_errors(task: str, result: dict[str, Any]) -> bool:
+    sync = result.get("sync")
+    stored_trends = int(result.get("trends_stored") or 0)
+    if task == "refresh-trends" and stored_trends > 0 and isinstance(sync, dict) and sync.get("status") in {"partial", "success"}:
+        return False
     if result.get("errors"):
         return True
     for item in result.get("results", []):
