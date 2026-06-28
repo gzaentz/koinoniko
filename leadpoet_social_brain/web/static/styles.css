@@ -1022,6 +1022,11 @@ main {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  transform: translateY(-4px);
+}
+
+.board-header > .count-pill {
+  transform: translateY(-3px);
 }
 
 #reviewerView.view.active {
