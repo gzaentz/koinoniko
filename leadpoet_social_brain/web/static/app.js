@@ -1696,11 +1696,32 @@ window.moveToReview = (event, id) => {
 };
 
 window.skipQueue = (event, id) => {
-  runButton(event.currentTarget, "Skipping...", async () => {
-    await api(`/api/queue/${encodeURIComponent(id)}/skip`, { method: "POST", body: "{}" });
-    showMessage("Post skipped.");
+  event?.preventDefault();
+  const previousReviewItems = state.reviewItems;
+  const previousScheduledItems = state.scheduledItems;
+  const previousQueueDetail = state.queueDetail;
+  state.reviewItems = state.reviewItems.filter((item) => item.id !== id);
+  state.scheduledItems = state.scheduledItems.filter((item) => item.id !== id);
+  if (state.queueDetail?.id === id) {
+    state.queueDetail = null;
     closeModal("queueModal");
-    await refresh();
+  }
+  if (state.view === "reviewer") renderReviewer();
+  updateGlobalControls();
+
+  (async () => {
+    await api(`/api/queue/${encodeURIComponent(id)}/skip`, { method: "POST", body: "{}" });
+  })().catch((error) => {
+    state.reviewItems = previousReviewItems;
+    state.scheduledItems = previousScheduledItems;
+    state.queueDetail = previousQueueDetail;
+    if (state.view === "reviewer") renderReviewer();
+    if (previousQueueDetail?.id === id) {
+      openModal("queueModal");
+      renderQueueModal();
+    }
+    updateGlobalControls();
+    showMessage(error.message, true);
   });
 };
 

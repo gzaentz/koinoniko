@@ -463,6 +463,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn(">Post now</button>", app_js)
         self.assertIn("cleanString(item.angle)", app_js)
         self.assertIn("Scheduled not set", app_js)
+        self.assertNotIn("Skipping...", app_js)
         self.assertIn(".card-open h3", styles_css)
         self.assertIn("text-overflow: ellipsis", styles_css)
         self.assertIn("white-space: nowrap", styles_css)
