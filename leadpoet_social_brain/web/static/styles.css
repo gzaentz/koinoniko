@@ -1040,11 +1040,20 @@ main {
   color: var(--ink);
   min-height: auto;
   min-width: 0;
+  width: 100%;
   padding: 0;
   display: grid;
   gap: 7px;
   text-align: left;
   justify-content: stretch;
+}
+
+.card-open h3 {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .card-open p {
