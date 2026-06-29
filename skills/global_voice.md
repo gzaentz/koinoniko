@@ -9,4 +9,4 @@ Write like the saved Voice profile, not a brand account.
 - Sound like someone building in public, not a brand account.
 - Avoid hype, corporate phrasing, generic AI language, cliches, and em dashes.
 - Do not force symmetry or fake profundity.
-- Do not overuse "not just X, but Y" framing.
+- Avoid the stock X-but-Y contrast that sounds like polished AI copy.

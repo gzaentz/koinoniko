@@ -164,6 +164,41 @@ class RoleAwareProvider:
         return ["Default routed draft about buyer timing."][:variants]
 
 
+def strategy_json(**overrides):
+    payload = {
+        "thesis": "Sales AI needs account judgment, not volume.",
+        "angle": "buyer timing beats volume",
+        "core_point": "Sales AI needs account judgment, not volume.",
+        "intended_audience": "founders and sales leaders",
+        "reader_problem": "Outbound tools automate before they know timing.",
+        "why_this_is_worth_posting": "AI SDR volume is getting attention.",
+        "concrete_detail": "buyer timing",
+        "source_material": "User request and Leadpoet context.",
+        "source_bridge": "Sales AI trend -> need for buyer timing -> Leadpoet intent layer.",
+        "evidence_boundary": "No invented customer stories or private metrics.",
+        "post_shape": "observation",
+        "hook_direction": "plain contrast",
+        "tone_direction": "plain founder-led",
+        "claims_to_make": ["Leadpoet centers buyer timing."],
+        "claims_to_avoid": ["AI SDRs are useless."],
+        "forbidden_moves": ["fake anecdote", "generic AI hype"],
+        "success_criteria": "specific, grounded, and tied to Leadpoet.",
+    }
+    payload.update(overrides)
+    return json.dumps(payload)
+
+
+def evaluation_json(final_text: str, *, warnings: list[str] | None = None):
+    return json.dumps(
+        {
+            "ranked_drafts": [1, 2, 3],
+            "quality_notes": "Specific, grounded, and not corporate.",
+            "warnings": warnings or [],
+            "suggested_final_version": final_text,
+        }
+    )
+
+
 class FakeXApiClient:
     def __init__(self, tweets, metrics_by_id=None):
         self.tweets = tweets
@@ -1096,6 +1131,110 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(all(skill.get("sha256") for skill in saved_draft.context_snapshot["skills"]))
             store.close()
 
+    def test_generation_retries_when_writer_options_are_unusable(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = SequentialProvider(
+                [
+                    strategy_json(),
+                    "",
+                    "",
+                    "",
+                    "Leadpoet is useful when sales AI knows which account is moving now.",
+                    evaluation_json("Leadpoet is useful when sales AI knows which account is moving now."),
+                ]
+            )
+
+            drafts = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="buyer timing beats volume",
+                )
+            )
+
+            self.assertEqual(drafts[0].text, "Leadpoet is useful when sales AI knows which account is moving now.")
+            self.assertEqual(len(provider.prompts), 4)
+            self.assertIn("previous draft options were not usable", provider.prompts[2])
+            store.close()
+
+    def test_generation_repairs_banned_not_just_phrase_before_saving(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = SequentialProvider(
+                [
+                    strategy_json(),
+                    "Leadpoet ranks accounts by live signals.",
+                    "Leadpoet shows buyer timing.",
+                    "Leadpoet makes intent usable.",
+                    evaluation_json(
+                        "Leadpoet is not just a title filter. It is a timing system.",
+                        warnings=["avoid stock framing"],
+                    ),
+                    "Leadpoet ranks accounts by live signals instead of title filters.",
+                ]
+            )
+
+            drafts = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="Leadpoet",
+                    post_type="product_update",
+                    angle="live signals beat title filters",
+                )
+            )
+
+            self.assertEqual(drafts[0].text, "Leadpoet ranks accounts by live signals instead of title filters.")
+            self.assertNotIn("not just", drafts[0].text.lower())
+            self.assertIn('Do not include the exact words "not just".', provider.prompts[-1])
+            saved_draft = store.get_generated_draft(drafts[0].id)
+            self.assertEqual(saved_draft.text, drafts[0].text)
+            store.close()
+
+    def test_generation_repairs_refusal_style_final_into_publishable_post(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = SequentialProvider(
+                [
+                    strategy_json(),
+                    "Leadpoet turns buyer timing into the starting point.",
+                    "Leadpoet makes account context useful before outreach starts.",
+                    "Leadpoet is the intent layer before the sequence layer.",
+                    evaluation_json(
+                        "Cannot proceed. No product update supplied. Provide: shipped feature name.",
+                        warnings=[
+                            "product_update_missing_concrete_change",
+                            "all_drafts_unpublishable",
+                            "violates_publishable_output_requirement",
+                        ],
+                    ),
+                    "Leadpoet product belief: the useful sales AI layer starts with buyer timing, not sequence volume.",
+                ]
+            )
+
+            drafts = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="Leadpoet",
+                    post_type="product_update",
+                    angle="No hype, no launch theater.",
+                )
+            )
+
+            self.assertNotIn("cannot proceed", drafts[0].text.lower())
+            self.assertNotIn("provide:", drafts[0].text.lower())
+            self.assertIn("Leadpoet", drafts[0].text)
+            self.assertIn("Return a publishable post.", provider.prompts[-1])
+            warnings = drafts[0].context_snapshot["evaluation"]["warnings"]
+            self.assertIn("product_update_missing_concrete_change", warnings)
+            self.assertNotIn("all_drafts_unpublishable", warnings)
+            self.assertNotIn("violates_publishable_output_requirement", warnings)
+            store.close()
+
     def test_generation_uses_default_model_for_all_roles_when_roles_are_blank(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -1364,6 +1503,8 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(saved_draft.context_snapshot["quality_mode"], "quality_review")
             self.assertIn("strategy_summary", saved_draft.context_snapshot)
             self.assertIn("User instruction: Write about why sales AI needs buyer timing", provider.prompts[0])
+            self.assertIn("Create one complete standalone X post for review.", provider.prompts[0])
+            self.assertNotIn("Content Reviewer", "\n".join(provider.prompts))
             store.close()
 
     def test_create_post_x_uses_selected_trend_ids(self):

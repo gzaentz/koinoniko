@@ -177,7 +177,7 @@ def create_post_x(
         warnings.append("No relevant unused trends found. Created an evergreen post instead.")
 
     context_parts = [
-        "One-off/interim Content Reviewer post. Write a complete standalone X post.",
+        "Create one complete standalone X post for review.",
         f"User instruction: {instruction}",
     ]
     if extra_context and extra_context.strip():
@@ -662,8 +662,14 @@ def evaluation_warnings(draft: GeneratedDraft) -> list[str]:
 
 
 def format_quality_warning(warning: str) -> str:
-    if warning == "not_post_worthy":
+    if warning == "not_post_worthy" or warning.startswith("not_post_worthy:"):
         return "no draft had a strong source bridge or post-worthy point; review closely."
+    if warning.startswith("product_truthfulness:"):
+        return "request did not include a concrete shipped change; final draft was reframed as a product belief."
+    if warning.startswith("reframed_as_product_belief:"):
+        return "reframed as a product belief from saved context."
+    if warning in {"product_update_missing_concrete_change", "no_concrete_product_change_supplied"}:
+        return "request did not include a concrete product change; review specificity."
     return warning.removeprefix("Quality warning:").strip()
 
 

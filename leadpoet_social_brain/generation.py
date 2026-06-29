@@ -141,22 +141,29 @@ class SocialBrainGenerator:
             variants=3,
             model=model_routing.natural_writer,
         )
-        cleaned_options: list[str] = []
-        for raw in draft_options:
-            try:
-                text = fit_generated_text_to_limit(
-                    self.provider,
-                    raw,
-                    max_chars=max_chars,
-                    model=model_routing.natural_writer,
-                    repair_context="quality-reviewed X draft option",
-                )
-            except ValueError:
-                continue
-            if text:
-                cleaned_options.append(text)
+        cleaned_options = clean_draft_options(
+            self.provider,
+            draft_options,
+            max_chars=max_chars,
+            model=model_routing.natural_writer,
+            repair_context="quality-reviewed X draft option",
+        )
         if not cleaned_options:
-            raise ValueError("Provider did not return usable draft text.")
+            retry_options = generate_with_provider(
+                self.provider,
+                build_writer_retry_prompt(writer_prompt, max_chars=max_chars),
+                variants=1,
+                model=model_routing.natural_writer,
+            )
+            cleaned_options = clean_draft_options(
+                self.provider,
+                retry_options,
+                max_chars=max_chars,
+                model=model_routing.natural_writer,
+                repair_context="quality-reviewed X draft retry",
+            )
+            if not cleaned_options:
+                raise ValueError("Provider did not return usable draft text.")
         evaluation_prompt = build_evaluation_prompt(
             request,
             skills=skills,
@@ -191,6 +198,7 @@ class SocialBrainGenerator:
             max_chars=max_chars,
             model=model_routing.natural_writer,
         )
+        repaired_successfully = text != final_text and not rule_warnings
         if rule_warnings:
             existing_warnings = evaluation.get("warnings") if isinstance(evaluation, dict) else []
             evaluation = {
@@ -204,6 +212,7 @@ class SocialBrainGenerator:
                     *rule_warnings,
                 ],
             }
+        evaluation = clean_evaluation_warnings_after_repair(evaluation, repaired_successfully=repaired_successfully)
         adapter.validate_text(text, max_chars=max_chars)
         notes = quality_notes or build_quality_notes(request, bundle, trends=trends)
         draft = GeneratedDraft(
@@ -459,6 +468,7 @@ Your job:
 - Decide what the writer may safely imply and what it must not invent.
 - If there is no real anecdote, source, quote, metric, or lived event, set the post shape to observation/take instead of story.
 - Do not invent customer conversations, personal activities, research sessions, meetings, metrics, quotes, product facts, or examples.
+- For product_update and launch posts, do not invent shipped features, integrations, launch timing, product metrics, or "now live" claims. If the request does not supply a concrete product change, tell the writer to use saved product context as a product belief instead of a fake announcement.
 - Keep humor dry and grounded. Avoid jokes that become the point.
 
 Request:
@@ -573,9 +583,10 @@ Grounding rules:
 - Do not use "same problem", "part to watch", or similar shorthand unless the draft immediately names the concrete mechanism and why it matters.
 - If the source bridge is weak or generic, do not force the source; write a grounded evergreen post from saved Facts & Context instead.
 - Do not add new stats, quotes, customer claims, product facts, or examples.
+- For product_update and launch posts, only announce a shipped change if the request or saved context names that change. If no specific change is supplied, make it a concrete product belief or capability from saved context.
 - Humor is allowed only if it sharpens the thesis.
 
-Avoid corporate thought leadership, generic hype, fake profundity, em dashes, overly symmetrical phrasing, LinkedIn-style moral lessons, and "not just X, but Y" framing.
+Avoid corporate thought leadership, generic hype, fake profundity, em dashes, overly symmetrical phrasing, LinkedIn-style moral lessons, and stock X-but-Y framing.
 Use Pattern mechanics only as structure. Do not copy source post wording or make the post feel derivative. Make it specific to the saved Facts & Context.
 
 Each option must be {max_chars} characters or fewer and end as a complete thought.
@@ -632,19 +643,21 @@ ranked_drafts, quality_notes, warnings, suggested_final_version.
 
 Final evaluator should check:
 - strategy fidelity: the draft expresses the thesis and uses the concrete detail
-- post-worthiness: there is a clear reason this should be posted now, not just because a topical source exists
-- source bridge: any trend/company/product/case study reference states the transferable mechanism, not just a loose analogy
+- post-worthiness: there is a clear reason this should be posted now; a topical source by itself is not enough
+- source bridge: any trend/company/product/case study reference states the transferable mechanism instead of relying on a loose analogy
 - positioning fidelity: if saved Facts & Context names a company/product as owning the core wedge, the final draft must frame that company/product as the source of the wedge
 - generic swap test: the draft would still be specific if company and product names were removed; if it could apply to any workspace, fail it
 - evidence safety: no invented first-person anecdote, fake customer story, fake quote, fake metric, unsupported reading/research session, or unsupported product claim
 - specificity: at least one concrete noun, situation, mechanism, or contrast
-- substance: the draft is not just a vibe, joke, or generic AI take
+- substance: the draft has a real point, not a vibe, joke, or generic AI take
 - no avoid phrases
 - no generic AI language
 - no forced CTA
 - no corporate launch tone
+- product truthfulness: product_update and launch drafts must not invent shipped features, integrations, launch timing, or "now live" claims unless the request or saved context supplied them
+- publishable output: the final text must be an actual post, never a refusal, caveat, instruction to provide more details, or internal quality note
 
-If the best draft violates any check, rewrite it once in suggested_final_version while preserving the thesis. If no draft has a real source bridge or post-worthy point, include "not_post_worthy" in warnings and rewrite toward the strongest grounded evergreen point. If a draft uses an Avoid Phrase, revise away from it in suggested_final_version.
+If the best draft violates any check, rewrite it once in suggested_final_version while preserving the thesis. If no draft has a real source bridge or post-worthy point, include "not_post_worthy" in warnings and rewrite toward the strongest grounded evergreen point. If product specifics are missing, write a product belief grounded in saved context rather than asking for more details. If a draft uses an Avoid Phrase, revise away from it in suggested_final_version.
 The suggested_final_version must be natural, specific, founder-led, match the requested length form, non-corporate, free of em dashes, {max_chars} characters or fewer, and complete."""
 
 
@@ -823,6 +836,30 @@ def parse_evaluation_result(raw: str, draft_options: list[str]) -> tuple[str, st
     return draft_options[0], raw.strip(), {"raw": raw.strip()}
 
 
+STALE_REPAIRED_WARNING_LABELS = {
+    "all_drafts_unpublishable",
+    "no_usable_draft_submitted",
+    "violates_publishable_output_requirement",
+}
+
+
+def clean_evaluation_warnings_after_repair(
+    evaluation: dict[str, object],
+    *,
+    repaired_successfully: bool,
+) -> dict[str, object]:
+    if not repaired_successfully:
+        return evaluation
+    warnings = evaluation.get("warnings")
+    if not isinstance(warnings, list):
+        return evaluation
+    cleaned = [
+        warning for warning in warnings
+        if " ".join(str(warning or "").split()) not in STALE_REPAIRED_WARNING_LABELS
+    ]
+    return {**evaluation, "warnings": cleaned}
+
+
 def repair_draft_against_rules(
     provider: DraftProvider,
     text: str,
@@ -843,32 +880,34 @@ def repair_draft_against_rules(
         avoid_phrases=avoid_phrases,
         active_rules=active_rules,
     )
-    if not violations:
-        return text, []
-    repair_prompt = build_rule_repair_prompt(
-        text,
-        violations=violations,
-        request=request,
-        bundle=bundle,
-        max_chars=max_chars,
-    )
-    repaired_raw = generate_with_provider(provider, repair_prompt, variants=1, model=model)[0]
-    repaired = fit_generated_text_to_limit(
-        provider,
-        repaired_raw,
-        max_chars=max_chars,
-        model=model,
-        repair_context="rule-repaired X post",
-    )
-    remaining = draft_rule_violations(
-        repaired,
-        request,
-        bundle,
-        trends=trends,
-        avoid_phrases=avoid_phrases,
-        active_rules=active_rules,
-    )
-    return repaired, remaining
+    repaired = text
+    for _ in range(2):
+        if not violations:
+            return repaired, []
+        repair_prompt = build_rule_repair_prompt(
+            repaired,
+            violations=violations,
+            request=request,
+            bundle=bundle,
+            max_chars=max_chars,
+        )
+        repaired_raw = generate_with_provider(provider, repair_prompt, variants=1, model=model)[0]
+        repaired = fit_generated_text_to_limit(
+            provider,
+            repaired_raw,
+            max_chars=max_chars,
+            model=model,
+            repair_context="rule-repaired X post",
+        )
+        violations = draft_rule_violations(
+            repaired,
+            request,
+            bundle,
+            trends=trends,
+            avoid_phrases=avoid_phrases,
+            active_rules=active_rules,
+        )
+    return repaired, violations
 
 
 def draft_rule_violations(
@@ -896,6 +935,8 @@ def draft_rule_violations(
         violations.append("remove em dash")
     if re.search(r"\b(i do not|i don't) know enough about leadpoet\b", lowered):
         violations.append("remove model uncertainty about Leadpoet; use saved context or make a narrower claim")
+    if re.search(r"\b(cannot proceed|no product update supplied|provide:|provide more details|need more details|to write this post)\b", lowered):
+        violations.append("return a publishable post, not a refusal, caveat, or request for more details")
     anchor = workspace_anchor_name(bundle, active_rules)
     if anchor and should_require_anchor(request, trends) and anchor.lower() not in lowered:
         violations.append(f"anchor the point to {anchor} as the source of the core wedge")
@@ -968,6 +1009,9 @@ Rules:
 - Make it sound natural and founder-written.
 - Do not make it more polished or corporate.
 - Do not add unsupported claims, anecdotes, proof, metrics, or customer stories.
+- Do not include the exact words "not just".
+- Do not refuse, caveat, or ask for more details. Return a publishable post.
+- If product detail is missing, write a product belief from saved Facts & Context instead of a fake announcement.
 - Stay under {max_chars} characters.
 - End as a complete thought.
 
@@ -1059,6 +1103,46 @@ def _selected_pattern_refs(bundle: ContextBundle) -> list[dict[str, object]]:
     return refs
 
 
+def clean_draft_options(
+    provider: DraftProvider,
+    raw_options: list[str],
+    *,
+    max_chars: int,
+    model: str | None,
+    repair_context: str,
+) -> list[str]:
+    cleaned_options: list[str] = []
+    for raw in raw_options:
+        try:
+            text = fit_generated_text_to_limit(
+                provider,
+                raw,
+                max_chars=max_chars,
+                model=model,
+                repair_context=repair_context,
+            )
+        except ValueError:
+            continue
+        if text:
+            cleaned_options.append(text)
+    return cleaned_options
+
+
+def build_writer_retry_prompt(writer_prompt: str, *, max_chars: int) -> str:
+    return f"""{writer_prompt}
+
+The previous draft options were not usable.
+
+Return one complete X post only.
+Rules:
+- Stay under {max_chars} characters.
+- Use the saved Facts & Context.
+- Keep the Leadpoet/source bridge explicit when the topic is sales, AI, intent, product, launch, or investor-facing.
+- Do not include avoid phrases, em dashes, markdown, numbering labels, or commentary.
+- Do not invent shipped features, customer stories, product metrics, launch timing, or private proof.
+- Do not refuse or ask the user for missing details. If product specifics are thin, write a product belief from saved context."""
+
+
 def fit_generated_text_to_limit(
     provider: DraftProvider,
     text: str,
@@ -1102,6 +1186,8 @@ Original ({len(text)} characters):
 def clean_generated_text(text: str, *, max_chars: int) -> str:
     _ = max_chars
     cleaned = text.replace("—", ". ").replace("–", "-")
+    cleaned = re.sub(r"\bnot just ([^.\n,;:]{1,80}),?\s+but\s+", "", cleaned, flags=re.I)
+    cleaned = re.sub(r",\s*not just\s+", " instead of ", cleaned, flags=re.I)
     cleaned = re.sub(r"\b(game-changing|revolutionary|unlock|delve into|in today's world)\b", "", cleaned, flags=re.I)
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
