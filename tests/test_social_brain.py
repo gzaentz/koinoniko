@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
@@ -2547,6 +2547,56 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(all(trend.source_type == "web_daily" for trend in grouped.daily))
             self.assertTrue(all(trend.source_type == "web_weekly" for trend in grouped.weekly))
             self.assertTrue(all(trend.id.startswith("trend_web_daily_") for trend in grouped.daily))
+            store.close()
+
+    def test_web_trend_groups_backfill_older_unused_daily_trends(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            now = datetime(2026, 6, 26, 12, 30, tzinfo=timezone.utc)
+            recent = store.save_trend_item(
+                TrendItem(
+                    title="Fresh daily sales AI signal",
+                    source_type="web_daily",
+                    topic="sales AI",
+                    summary="Fresh signal.",
+                    why_it_matters="Useful today.",
+                    leadpoet_angle="Tie it to buyer timing.",
+                    urgency="high",
+                    date=now.isoformat(),
+                )
+            )
+            older = [
+                store.save_trend_item(
+                    TrendItem(
+                        title=f"Older daily sales AI signal {index}",
+                        source_type="web_daily",
+                        topic="sales AI",
+                        summary="Older but unused signal.",
+                        why_it_matters="Still useful context.",
+                        leadpoet_angle="Tie it to buyer timing.",
+                        urgency="medium",
+                        date=(now - timedelta(days=3 + index)).isoformat(),
+                    )
+                )
+                for index in range(4)
+            ]
+            store.save_trend_item(
+                TrendItem(
+                    title="Weekly signal should stay in weekly",
+                    source_type="web_weekly",
+                    topic="sales AI",
+                    summary="Weekly signal.",
+                    why_it_matters="Useful weekly.",
+                    leadpoet_angle="Tie it to buyer timing.",
+                    date=(now - timedelta(days=3)).isoformat(),
+                )
+            )
+
+            grouped = web_trend_groups(store, now=now)
+
+            self.assertEqual([trend.id for trend in grouped.daily], [recent.id, *[trend.id for trend in older]])
+            self.assertEqual(len(grouped.daily), 5)
+            self.assertTrue(all(trend.source_type == "web_daily" for trend in grouped.daily))
             store.close()
 
     def test_web_trends_refresh_endpoint_returns_daily_and_weekly_groups(self):

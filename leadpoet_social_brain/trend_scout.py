@@ -1061,15 +1061,38 @@ def empty_refresh_stats() -> dict[str, int]:
 def web_trend_groups(store: SQLiteStore, *, now: datetime | None = None, limit: int = 5) -> WebTrendGroups:
     current = now or datetime.now(timezone.utc)
     trends = store.list_trends(status="unused", limit=250)
-    daily = [
-        trend for trend in trends
-        if trend.source_type == WEB_DAILY_SOURCE_TYPE and trend_is_recent(trend, current, days=2)
-    ][:limit]
-    weekly = [
-        trend for trend in trends
-        if trend.source_type == WEB_WEEKLY_SOURCE_TYPE and trend_is_recent(trend, current, days=8)
-    ][:limit]
+    daily = select_trend_group(
+        trends,
+        source_type=WEB_DAILY_SOURCE_TYPE,
+        current=current,
+        recent_days=2,
+        limit=limit,
+    )
+    weekly = select_trend_group(
+        trends,
+        source_type=WEB_WEEKLY_SOURCE_TYPE,
+        current=current,
+        recent_days=8,
+        limit=limit,
+    )
     return WebTrendGroups(daily=daily, weekly=weekly)
+
+
+def select_trend_group(
+    trends: list[TrendItem],
+    *,
+    source_type: str,
+    current: datetime,
+    recent_days: int,
+    limit: int,
+) -> list[TrendItem]:
+    matching = [trend for trend in trends if trend.source_type == source_type]
+    recent = [trend for trend in matching if trend_is_recent(trend, current, days=recent_days)]
+    if len(recent) >= limit:
+        return recent[:limit]
+    recent_ids = {trend.id for trend in recent}
+    fallback = [trend for trend in matching if trend.id not in recent_ids]
+    return [*recent, *fallback][:limit]
 
 
 def web_trend_from_article(article: dict[str, object], *, source_type: str) -> TrendItem:
