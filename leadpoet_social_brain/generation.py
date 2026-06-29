@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import replace
 
 from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.core.models import ContextBundle, DraftRequest, GeneratedDraft, TrendItem, ViralPattern
@@ -60,6 +61,8 @@ class SocialBrainGenerator:
     ) -> list[GeneratedDraft]:
         _ = variants
         adapter = self._adapter_for(request.platform)
+        if hasattr(adapter, "normalize_post_type"):
+            request = replace(request, post_type=adapter.normalize_post_type(request.post_type))
         if hasattr(adapter, "validate_post_type"):
             adapter.validate_post_type(request.post_type)
         max_chars = resolve_length_max_chars(request, adapter.rules.default_max_chars)
@@ -907,6 +910,24 @@ def repair_draft_against_rules(
             avoid_phrases=avoid_phrases,
             active_rules=active_rules,
         )
+    anchored = anchor_draft_to_workspace(
+        repaired,
+        request,
+        bundle,
+        trends=trends,
+        active_rules=active_rules,
+        max_chars=max_chars,
+    )
+    if anchored != repaired:
+        violations = draft_rule_violations(
+            anchored,
+            request,
+            bundle,
+            trends=trends,
+            avoid_phrases=avoid_phrases,
+            active_rules=active_rules,
+        )
+        return anchored, violations
     return repaired, violations
 
 
@@ -954,6 +975,58 @@ def workspace_anchor_name(bundle: ContextBundle, active_rules: dict[str, list[st
     if re.search(r"\bLeadpoet\b", haystack):
         return "Leadpoet"
     return None
+
+
+def anchor_draft_to_workspace(
+    text: str,
+    request: DraftRequest,
+    bundle: ContextBundle,
+    *,
+    trends: list[TrendItem],
+    active_rules: dict[str, list[str]],
+    max_chars: int,
+) -> str:
+    anchor = workspace_anchor_name(bundle, active_rules)
+    if not anchor or not should_require_anchor(request, trends) or anchor.lower() in text.lower():
+        return text
+    anchor_line = workspace_anchor_line(anchor, bundle, active_rules)
+    candidates = [
+        f"{text.rstrip()}\n\n{anchor_line}",
+        f"{first_sentence_or_line(text)}\n\n{anchor_line}",
+        anchor_line,
+    ]
+    for candidate in candidates:
+        cleaned = clean_generated_text(candidate, max_chars=max_chars)
+        if len(cleaned) <= max_chars and anchor.lower() in cleaned.lower():
+            return cleaned
+    return text
+
+
+def workspace_anchor_line(anchor: str, bundle: ContextBundle, active_rules: dict[str, list[str]]) -> str:
+    sources = [
+        *active_rules.get("positioning_rules", []),
+        *(section.content for section in bundle.positioning_sections),
+    ]
+    for source in sources:
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", source):
+            sentence = " ".join(sentence.strip(" -•\t").split())
+            if anchor.lower() not in sentence.lower():
+                continue
+            if ":" in sentence:
+                prefix = sentence.split(":", 1)[0].strip()
+                if anchor.lower() in prefix.lower():
+                    sentence = f"{prefix}."
+            if len(sentence) <= 120:
+                return sentence
+    return f"{anchor} is the intent layer for sales AI."
+
+
+def first_sentence_or_line(text: str) -> str:
+    cleaned = " ".join(text.strip().split())
+    if not cleaned:
+        return ""
+    match = re.match(r"(.+?[.!?])(?:\s|$)", cleaned)
+    return match.group(1).strip() if match else cleaned
 
 
 def should_require_anchor(request: DraftRequest, trends: list[TrendItem]) -> bool:
@@ -1185,7 +1258,9 @@ Original ({len(text)} characters):
 
 def clean_generated_text(text: str, *, max_chars: int) -> str:
     _ = max_chars
-    cleaned = text.replace("—", ". ").replace("–", "-")
+    cleaned = re.sub(r"(\S)\s+[—–]\s+([^—–\n]+?)\s+[—–]\s+", r"\1: \2 ", text)
+    cleaned = re.sub(r"\s+[—–]\s+", ": ", cleaned)
+    cleaned = cleaned.replace("—", ": ").replace("–", "-")
     cleaned = re.sub(r"\bnot just ([^.\n,;:]{1,80}),?\s+but\s+", "", cleaned, flags=re.I)
     cleaned = re.sub(r",\s*not just\s+", " instead of ", cleaned, flags=re.I)
     cleaned = re.sub(r"\b(game-changing|revolutionary|unlock|delve into|in today's world)\b", "", cleaned, flags=re.I)

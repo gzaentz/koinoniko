@@ -23,7 +23,7 @@ from leadpoet_social_brain.content_queue import create_post_x, plan_week_x, post
 from leadpoet_social_brain.cli import build_parser as build_cli_parser, main as cli_main
 from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.core.models import ContentQueueItem, DraftRequest, EngagementMetrics, PostNote, SocialPost, SyncMetadata, TrendItem, utc_now
-from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
+from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator, clean_generated_text
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
 from leadpoet_social_brain.openrouter_provider import OpenRouterProvider, create_provider
 from leadpoet_social_brain.pattern_scout import (
@@ -1235,6 +1235,38 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotIn("violates_publishable_output_requirement", warnings)
             store.close()
 
+    def test_generation_deterministically_anchors_when_provider_ignores_anchor_repair(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = SequentialProvider(
+                [
+                    strategy_json(),
+                    "Every sales AI says it replaces reps. Then asks you who to email.",
+                    "Sales AI still needs a human to point it at the right account.",
+                    "The agent can write. It still needs judgment.",
+                    evaluation_json("Every sales AI says it replaces reps.\n\nThen asks you who to email."),
+                    "Every sales AI says it replaces reps.\n\nThen asks you who to email.",
+                    "Every sales AI says it replaces reps.\n\nThen asks you who to email.",
+                ]
+            )
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="Sales LLMs",
+                    post_type="light_funny",
+                    angle="sales AI still needs judgment",
+                    length_mode="short",
+                )
+            )[0]
+
+            self.assertIn("Leadpoet", draft.text)
+            self.assertLessEqual(len(draft.text), 160)
+            warnings = draft.context_snapshot["evaluation"]["warnings"]
+            self.assertNotIn("anchor the point to Leadpoet as the source of the core wedge", warnings)
+            store.close()
+
     def test_generation_uses_default_model_for_all_roles_when_roles_are_blank(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -1505,6 +1537,35 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("User instruction: Write about why sales AI needs buyer timing", provider.prompts[0])
             self.assertIn("Create one complete standalone X post for review.", provider.prompts[0])
             self.assertNotIn("Content Reviewer", "\n".join(provider.prompts))
+            store.close()
+
+    def test_generated_text_dash_cleanup_keeps_sentence_flow(self):
+        cleaned = clean_generated_text(
+            "That layer — proprietary intent and account context — is what Leadpoet owns.",
+            max_chars=280,
+        )
+
+        self.assertEqual(cleaned, "That layer: proprietary intent and account context is what Leadpoet owns.")
+        self.assertNotIn("—", cleaned)
+        self.assertNotIn("That layer. proprietary", cleaned)
+
+    def test_create_post_x_normalizes_user_facing_post_type_aliases(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            result = create_post_x(
+                store,
+                SocialBrainGenerator(store, provider=FakeProvider(["Leadpoet makes buyer timing obvious."])),
+                instruction="Write a light funny post about sales AI needing better judgment.",
+                topic="Sales LLMs",
+                post_type="funny_post",
+            )
+
+            saved_draft = store.get_generated_draft(result.item.draft_id)
+
+            self.assertEqual(result.item.post_type, "light_funny")
+            self.assertEqual(saved_draft.request.post_type, "light_funny")
+            self.assertEqual(saved_draft.context_snapshot["request"]["post_type"], "light_funny")
             store.close()
 
     def test_create_post_x_uses_selected_trend_ids(self):
@@ -2209,7 +2270,11 @@ class SocialBrainTest(unittest.TestCase):
 
             self.assertEqual(status, 200)
             self.assertEqual(payload["status"], "needs_review")
-            self.assertEqual(payload["generated_text"], "Buyer timing is the real sales AI advantage. More email is not strategy.")
+            self.assertEqual(
+                payload["generated_text"],
+                "Buyer timing is the real sales AI advantage. More email is not strategy.\n\n"
+                "Leadpoet is the core intent layer.",
+            )
             self.assertEqual(payload["item"]["status"], "needs_review")
             self.assertEqual(payload["item"]["scheduled_at"], "2026-06-30T10:00")
             self.assertEqual(payload["item"]["quality_mode"], "quality_review")

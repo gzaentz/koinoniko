@@ -161,7 +161,9 @@ def create_post_x(
         raise ValueError("Post idea / instruction is required.")
     topic = topic.strip() or "uncategorized"
     post_type = post_type.strip() or "founder_insight"
-    get_x_adapter().validate_post_type(post_type)
+    adapter = get_x_adapter()
+    post_type = adapter.normalize_post_type(post_type)
+    adapter.validate_post_type(post_type)
 
     warnings: list[str] = []
     selected_trends = [

@@ -17,6 +17,13 @@ X_POST_TYPES = (
     "light_funny",
 )
 
+X_POST_TYPE_ALIASES = {
+    "funny": "light_funny",
+    "funny_post": "light_funny",
+    "light/funny": "light_funny",
+    "launch_post": "launch",
+}
+
 
 class XAdapter:
     rules = PlatformRules(
@@ -33,9 +40,13 @@ class XAdapter:
             raise ValueError(f"X post text is {len(text)} chars, over the {limit} char limit.")
 
     def validate_post_type(self, post_type: str) -> None:
-        if post_type not in self.rules.supported_post_types:
+        if self.normalize_post_type(post_type) not in self.rules.supported_post_types:
             supported = ", ".join(self.rules.supported_post_types)
             raise ValueError(f"Unsupported X post type '{post_type}'. Supported: {supported}.")
+
+    def normalize_post_type(self, post_type: str) -> str:
+        cleaned = (post_type or "").strip()
+        return X_POST_TYPE_ALIASES.get(cleaned, cleaned)
 
     def normalize_url(self, url: str | None) -> str | None:
         if not url:
