@@ -533,6 +533,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("Use the structure, not the wording.", app_js)
         self.assertIn("usePatternInPost", app_js)
         self.assertIn("savePattern", app_js)
+        self.assertIn("unsavePattern", app_js)
+        self.assertIn("Pattern removed from saved.", app_js)
         self.assertIn("patternCardSummary", app_js)
         self.assertIn("renderDashboardPatterns", app_js)
         self.assertIn("/api/patterns/", app_js)
@@ -2393,6 +2395,8 @@ class SocialBrainTest(unittest.TestCase):
             detail_status, detail = handle_api_request("GET", f"/api/patterns/{manual.id}", db_path=db_path)
             save_status, saved = handle_api_request("POST", f"/api/patterns/{manual.id}/save", b"{}", db_path=db_path)
             saved_list_status, saved_list = handle_api_request("GET", "/api/patterns?status=saved", db_path=db_path)
+            unsave_status, unsaved = handle_api_request("POST", f"/api/patterns/{manual.id}/unsave", b"{}", db_path=db_path)
+            unsaved_list_status, unsaved_list = handle_api_request("GET", "/api/patterns?status=saved", db_path=db_path)
             archive_status, archived = handle_api_request("POST", f"/api/patterns/{manual.id}/archive", b"{}", db_path=db_path)
 
             self.assertEqual(batch.imported, 1)
@@ -2405,6 +2409,10 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(saved["pattern"]["status"], "saved")
             self.assertEqual(saved_list_status, 200)
             self.assertEqual(saved_list["items"][0]["id"], manual.id)
+            self.assertEqual(unsave_status, 200)
+            self.assertEqual(unsaved["pattern"]["status"], "active")
+            self.assertEqual(unsaved_list_status, 200)
+            self.assertEqual(unsaved_list["items"], [])
             self.assertEqual(archive_status, 200)
             self.assertEqual(archived["pattern"]["status"], "archived")
 

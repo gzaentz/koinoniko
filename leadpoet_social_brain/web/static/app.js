@@ -1094,7 +1094,7 @@ function patternCardSummary(pattern) {
 
 function patternSaveButton(pattern) {
   if (pattern.status === "saved") {
-    return `<button class="secondary" type="button" disabled>Saved</button>`;
+    return `<button class="secondary" type="button" onclick='unsavePattern(event, ${jsArg(pattern.id)})'>Unsave</button>`;
   }
   return `<button class="secondary" type="button" onclick='savePattern(event, ${jsArg(pattern.id)})'>Save</button>`;
 }
@@ -1370,21 +1370,30 @@ window.ignorePattern = (event, id) => updatePatternStatus(event, id, "ignore");
 
 window.savePattern = (event, id) => updatePatternStatus(event, id, "save");
 
+window.unsavePattern = (event, id) => updatePatternStatus(event, id, "unsave");
+
 function updatePatternStatus(event, id, action) {
   event.preventDefault();
   event.stopPropagation();
   runButton(event.currentTarget, "Saving...", async () => {
     await api(`/api/patterns/${encodeURIComponent(id)}/${action}`, { method: "POST", body: "{}" });
-    if (action !== "save") {
+    if (!["save", "unsave"].includes(action)) {
       closeModal("patternModal");
     }
-    showMessage(action === "archive" ? "Pattern archived." : action === "save" ? "Pattern saved to library." : "Pattern ignored.");
+    showMessage(patternStatusMessage(action));
     await refresh();
-    if (action === "save" && state.patternDetail?.id === id) {
+    if (["save", "unsave"].includes(action) && state.patternDetail?.id === id) {
       state.patternDetail = findPatternItem(id) || state.patternDetail;
       renderPatternModal();
     }
   });
+}
+
+function patternStatusMessage(action) {
+  if (action === "archive") return "Pattern archived.";
+  if (action === "save") return "Pattern saved to library.";
+  if (action === "unsave") return "Pattern removed from saved.";
+  return "Pattern ignored.";
 }
 
 function patternSignal(pattern) {

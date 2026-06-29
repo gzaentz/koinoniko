@@ -712,8 +712,8 @@ def route_api(
         if not pattern:
             return 404, {"error": "Pattern not found."}
         return 200, {"pattern": pattern_payload(pattern)}
-    if method == "POST" and len(parts) == 4 and parts[:2] == ["api", "patterns"] and parts[3] in {"archive", "ignore", "save"}:
-        status_by_action = {"archive": "archived", "ignore": "ignored", "save": "saved"}
+    if method == "POST" and len(parts) == 4 and parts[:2] == ["api", "patterns"] and parts[3] in {"archive", "ignore", "save", "unsave"}:
+        status_by_action = {"archive": "archived", "ignore": "ignored", "save": "saved", "unsave": "active"}
         pattern = store.mark_viral_pattern_status(parts[2], status_by_action[parts[3]])
         if not pattern:
             return 404, {"error": "Pattern not found."}
