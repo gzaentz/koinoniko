@@ -59,7 +59,7 @@ TREND_REQUIRED_RELEVANCE_TERMS = {
     "pipeline",
     "prospecting",
     "revops",
-    "sales",
+    "sales pipeline",
     "sales ai",
     "sales automation",
     "sales engagement",
@@ -129,6 +129,35 @@ TREND_NEGATIVE_WEIGHTS = {
     "senate": 4,
     "sports": 5,
     "stock price": 3,
+}
+TREND_FINANCE_REJECT_TERMS = {
+    "after hours trading",
+    "best brokers",
+    "bonds",
+    "buy stock",
+    "compound interest",
+    "dividend",
+    "etf",
+    "etfs",
+    "financial dictionary",
+    "how to invest",
+    "index funds",
+    "investing",
+    "stock market",
+    "stock price",
+    "stock split",
+    "stock splits",
+    "stocks to buy",
+    "wall street",
+}
+TREND_FINANCE_SOURCE_TERMS = {
+    "barron's",
+    "investorplace",
+    "marketwatch",
+    "motley fool",
+    "seeking alpha",
+    "the motley fool",
+    "yahoo finance",
 }
 TREND_RELEVANCE_TERMS = {
     *TREND_REQUIRED_RELEVANCE_TERMS,
@@ -513,6 +542,8 @@ def web_trend_rank_key(article: dict[str, object]) -> tuple[int, int, int]:
 
 def web_trend_relevance_score(article: dict[str, object]) -> int:
     text = article_relevance_text(article)
+    if article_looks_like_investing_pick(article, text):
+        return 0
     if not any(text_matches_term(text, term) for term in TREND_REQUIRED_RELEVANCE_TERMS):
         return 0
     positive = sum(
@@ -526,6 +557,21 @@ def web_trend_relevance_score(article: dict[str, object]) -> int:
         if text_matches_term(text, term)
     )
     return max(0, positive - negative)
+
+
+def article_looks_like_investing_pick(article: dict[str, object], text: str | None = None) -> bool:
+    text = text or article_relevance_text(article)
+    source = clean_text(
+        article.get("sourceCommonName")
+        or article.get("source")
+        or article.get("domain")
+        or article.get("sourceCountry")
+    ).lower()
+    has_finance_language = any(text_matches_term(text, term) for term in TREND_FINANCE_REJECT_TERMS)
+    has_finance_source = any(term in source for term in TREND_FINANCE_SOURCE_TERMS)
+    if not has_finance_language and not has_finance_source:
+        return False
+    return not any(text_matches_term(text, term) for term in TREND_REQUIRED_RELEVANCE_TERMS)
 
 
 def article_relevance_text(article: dict[str, object]) -> str:
@@ -595,6 +641,10 @@ def save_web_trend_articles(
                 elif trend.enrichment_status == "partial":
                     stats["partial"] += 1
         if trend.status != "unused":
+            continue
+        if trend_source_relevance_score(trend) < TREND_RELEVANCE_KEEP_THRESHOLD:
+            if stats is not None:
+                stats["failed"] += 1
             continue
         trend = store.save_trend_item(trend)
         if stats is not None:
@@ -705,6 +755,27 @@ def enrich_trend_source(
     )
 
 
+def trend_source_relevance_score(trend: TrendItem) -> int:
+    return web_trend_relevance_score(
+        {
+            "title": trend.source_title or trend.title,
+            "summary": " ".join(
+                clean_text(value)
+                for value in [
+                    trend.summary,
+                    trend.source_excerpt,
+                    trend.source_text_excerpt,
+                    json_list_text(trend.key_points_json),
+                    json_list_text(trend.important_claims_json),
+                ]
+                if clean_text(value)
+            ),
+            "sourceCommonName": trend.source_author,
+            "url": trend.source_url,
+        }
+    )
+
+
 def fetch_source_page_text(url: str) -> str:
     request = Request(
         url,
@@ -776,7 +847,7 @@ class ArticleTextParser(HTMLParser):
         if tag == "title":
             self._capture_title = True
             self._parts = []
-        elif tag in {"p", "h1", "h2", "li"}:
+        elif tag in {"p", "h1", "h2"}:
             self._capture_tag = tag
             self._parts = []
 
@@ -948,6 +1019,18 @@ def normalize_string_list(value: object, *, limit: int) -> list[str]:
     else:
         items = []
     return unique_texts([clean_text(item) for item in items if clean_text(item)])[:limit]
+
+
+def json_list_text(value: str | None) -> str:
+    if not value:
+        return ""
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return clean_text(value)
+    if not isinstance(parsed, list):
+        return clean_text(value)
+    return " ".join(clean_text(item) for item in parsed if clean_text(item))
 
 
 def source_confidence_for(status: str, provider_digest: bool, has_source_detail: bool) -> str:

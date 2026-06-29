@@ -13,6 +13,7 @@ from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 from leadpoet_social_brain.trend_scout import (
     MISSING_SCRAPINGDOG_TRENDS_MESSAGE,
     WebTrendGroups,
+    extract_source_page_details,
     refresh_web_trends,
     select_web_trend_articles,
     web_trend_relevance_score,
@@ -71,6 +72,12 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
                 "summary": "RevOps teams need better account context before outreach.",
                 "url": "https://example.com/crm-enrichment",
             },
+            {
+                "title": "2 Artificial Intelligence (AI) Stocks to Buy as Demand for Custom Chips Soars",
+                "summary": "Chip sales may rise as investors look for stocks to buy in the AI market.",
+                "sourceCommonName": "The Motley Fool",
+                "url": "https://example.com/ai-stocks",
+            },
         ]
 
         selected = select_web_trend_articles(articles, limit=5)
@@ -84,7 +91,72 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
         )
         self.assertEqual(web_trend_relevance_score(articles[0]), 0)
         self.assertEqual(web_trend_relevance_score(articles[1]), 0)
+        self.assertEqual(web_trend_relevance_score(articles[4]), 0)
         self.assertGreaterEqual(web_trend_relevance_score(articles[2]), 5)
+
+    def test_source_parser_ignores_navigation_list_items(self):
+        page = extract_source_page_details(
+            """
+            <html>
+              <body>
+                <nav>
+                  <ul>
+                    <li>How to Invest</li>
+                    <li>Stock Market 101</li>
+                    <li>Best Brokers for Beginners</li>
+                  </ul>
+                </nav>
+                <article>
+                  <h1>AI SDR platforms add buyer intent signals</h1>
+                  <p>Sales teams are using account signals to prioritize outreach around buying windows.</p>
+                </article>
+              </body>
+            </html>
+            """
+        )
+
+        self.assertNotIn("How to Invest", page.text_excerpt or "")
+        self.assertIn("buyer intent signals", page.text_excerpt or "")
+
+    def test_investing_article_is_rejected_after_source_enrichment(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+
+            def fake_fetch(*, timespan: str, limit: int):
+                return [
+                    {
+                        "title": "2 Artificial Intelligence (AI) Stocks to Buy as Demand for Custom Chips Soars",
+                        "url": f"https://example.com/{timespan}/ai-stocks",
+                        "sourceCommonName": "The Motley Fool",
+                        "summary": "Chip sales are rising as investors look for artificial intelligence stocks to buy.",
+                    }
+                ]
+
+            def fake_source_page(url: str) -> str:
+                return """
+                <html>
+                  <head><title>2 Artificial Intelligence Stocks to Buy</title></head>
+                  <body>
+                    <nav><li>How to Invest</li><li>Stock Market 101</li><li>Best Brokers for Beginners</li></nav>
+                    <p>Broadcom could be a winner from rising demand for custom AI chips.</p>
+                    <p>The article compares stock valuation, market demand, and chip revenue.</p>
+                  </body>
+                </html>
+                """
+
+            groups = refresh_web_trends(
+                store,
+                fetch_articles=fake_fetch,
+                limit=1,
+                enrich=True,
+                fetch_source_page=fake_source_page,
+            )
+
+            self.assertEqual(groups.daily, [])
+            self.assertEqual(groups.weekly, [])
+            self.assertEqual(groups.trends_stored, 0)
+            self.assertEqual(store.list_trends(status="unused"), [])
+            store.close()
 
     def test_scrapingdog_trends_fill_daily_and_weekly_with_relevant_news(self):
         with tempfile.TemporaryDirectory() as tmpdir:
