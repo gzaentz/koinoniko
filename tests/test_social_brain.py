@@ -450,6 +450,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('data-create-post-field="post_type"', index_html)
         self.assertIn('id="createPostTopicMenu"', index_html)
         self.assertIn('id="createPostTypeMenu"', index_html)
+        self.assertIn('id="createPostLength"', index_html)
+        self.assertIn('id="planLength"', index_html)
         self.assertNotIn('id="createPostQuality"', index_html)
         self.assertNotIn('id="planQuality"', index_html)
         self.assertIn('id="reviewAddButton"', index_html)
@@ -1154,6 +1156,31 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("- game changer", provider.calls[2]["prompt"])
             self.assertIn("Most sales AI", drafts[0].text)
             self.assertIn("Leadpoet", drafts[0].text)
+            store.close()
+
+    def test_generation_length_modes_reach_prompts_and_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = RoleAwareProvider()
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="buyer timing needs more than email copy",
+                    length_mode="long",
+                )
+            )[0]
+
+            snapshot = store.get_generated_draft(draft.id).context_snapshot
+            self.assertEqual(snapshot["length_mode"], "long")
+            self.assertEqual(snapshot["length_label"], "Long-form")
+            self.assertEqual(snapshot["max_chars"], 1200)
+            self.assertIn("- Length form: Long-form", provider.calls[0]["prompt"])
+            self.assertIn("- Character limit: 1200", provider.calls[1]["prompt"])
+            self.assertIn("match the requested length form", provider.calls[2]["prompt"])
             store.close()
 
     def test_style_guide_rebuild_is_writing_guide_not_tag_report(self):
@@ -4090,6 +4117,69 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(saved_item.x_post_id, "posted1")
             self.assertIsNotNone(post)
             self.assertEqual(post.source_draft_id, draft.id)
+            store.close()
+
+    def test_post_queue_item_uses_source_draft_length_mode(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            long_text = (
+                "Leadpoet sits in the part of sales AI that gets missed when everyone talks about copy.\n\n"
+                "The email can be good and the pipeline can still be fake if the account is not actually in a buying window. "
+                "That is the difference between topic interest and timing.\n\n"
+                "The useful layer is proprietary buyer context, account-level intent, and a clear reason to act this week."
+            )
+            provider = SequentialProvider(
+                [
+                    json.dumps(
+                        {
+                            "thesis": "Buyer timing matters more than copy.",
+                            "concrete_detail": "account-level intent",
+                            "source_bridge": "Use saved Leadpoet positioning.",
+                            "evidence_boundary": "Do not invent proof.",
+                        }
+                    ),
+                    long_text,
+                    "Leadpoet is the intent layer.",
+                    "Buyer timing beats volume.",
+                    json.dumps(
+                        {
+                            "ranked_drafts": [1, 2, 3],
+                            "quality_notes": "Long-form but grounded.",
+                            "warnings": [],
+                            "suggested_final_version": long_text,
+                        }
+                    ),
+                ]
+            )
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="buyer timing beats copy",
+                    length_mode="long",
+                )
+            )[0]
+            self.assertGreater(len(draft.text), 280)
+            approved = store.save_content_queue_item(
+                ContentQueueItem(
+                    draft_id=draft.id,
+                    text=draft.text,
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="buyer timing beats copy",
+                    scheduled_at="2026-06-30T10:00:00-04:00",
+                    status="approved",
+                    approved_at=utc_now(),
+                )
+            )
+
+            fake_client = FakeXWriteClient()
+            result = post_queue_item_x(store, fake_client, item=approved)
+
+            self.assertIsNone(result.error)
+            self.assertEqual(fake_client.posts, [long_text])
             store.close()
 
     def test_x_write_client_fails_clearly_without_write_credentials(self):

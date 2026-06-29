@@ -26,6 +26,24 @@ MISSING_PROVIDER_MESSAGE = (
     "No LLM provider configured. Set SOCIAL_BRAIN_PROVIDER=module.path:create_provider to generate drafts."
 )
 
+POST_LENGTH_PRESETS = {
+    "short": {
+        "label": "Short",
+        "max_chars": 160,
+        "instruction": "Very concise. Aim for 1-3 short lines and one clean point. Do not pad for rhythm.",
+    },
+    "standard": {
+        "label": "Standard",
+        "max_chars": 280,
+        "instruction": "Default X shape. Aim for roughly 140-260 characters, with room below the hard limit.",
+    },
+    "long": {
+        "label": "Long-form",
+        "max_chars": 1200,
+        "instruction": "Long-form X post. Aim for 400-900 characters in short paragraphs. Build the point, but do not turn it into a thread unless explicitly asked.",
+    },
+}
+
 
 class SocialBrainGenerator:
     def __init__(self, store: SQLiteStore, provider: DraftProvider | None = None):
@@ -44,7 +62,7 @@ class SocialBrainGenerator:
         adapter = self._adapter_for(request.platform)
         if hasattr(adapter, "validate_post_type"):
             adapter.validate_post_type(request.post_type)
-        max_chars = request.max_chars or adapter.rules.default_max_chars
+        max_chars = resolve_length_max_chars(request, adapter.rules.default_max_chars)
         bundle = self.context_manager.build_bundle(
             platform=request.platform,
             topic=request.topic,
@@ -221,7 +239,7 @@ class SocialBrainGenerator:
 
     def build_prompt(self, request: DraftRequest) -> str:
         adapter = self._adapter_for(request.platform)
-        max_chars = request.max_chars or adapter.rules.default_max_chars
+        max_chars = resolve_length_max_chars(request, adapter.rules.default_max_chars)
         bundle = self.context_manager.build_bundle(
             platform=request.platform,
             topic=request.topic,
@@ -302,6 +320,38 @@ def skills_with_review_rules(skills: list[SkillAsset], review_rules: list[str]) 
     return updated
 
 
+def normalize_length_mode(mode: str | None) -> str:
+    cleaned = str(mode or "standard").strip().lower().replace("_", "-")
+    aliases = {
+        "concise": "short",
+        "brief": "short",
+        "normal": "standard",
+        "default": "standard",
+        "longform": "long",
+        "long-form": "long",
+        "expanded": "long",
+    }
+    cleaned = aliases.get(cleaned, cleaned)
+    return cleaned if cleaned in POST_LENGTH_PRESETS else "standard"
+
+
+def resolve_length_max_chars(request: DraftRequest, platform_default: int) -> int:
+    if request.max_chars:
+        return request.max_chars
+    mode = normalize_length_mode(request.length_mode)
+    return int(POST_LENGTH_PRESETS.get(mode, {}).get("max_chars") or platform_default)
+
+
+def length_prompt_section(request: DraftRequest, max_chars: int) -> str:
+    mode = normalize_length_mode(request.length_mode)
+    preset = POST_LENGTH_PRESETS[mode]
+    return (
+        f"- Length form: {preset['label']}\n"
+        f"- Length target: {preset['instruction']}\n"
+        f"- Character limit: {max_chars}"
+    )
+
+
 def build_generation_prompt(
     request: DraftRequest,
     bundle: ContextBundle,
@@ -337,6 +387,7 @@ def build_generation_prompt(
         positioning_rules=(active_rules or {}).get("positioning_rules", []),
         voice_rules=(active_rules or {}).get("voice_rules", []),
     )
+    length_section = length_prompt_section(request, max_chars)
     return f"""Write {request.platform.upper()} posts for this workspace.
 
 Study these selected Voice Examples first:
@@ -361,7 +412,7 @@ Request:
 - Tone: {request.tone or "plain, sharp, useful"}
 - CTA: {request.call_to_action or "only include if it feels natural"}
 - Extra context: {request.extra_context or "none"}
-- Character limit: {max_chars}
+{length_section}
 
 Writing and review instructions:
 {skill_text or "- No skill files found. Use retrieved context and keep the post natural."}
@@ -394,6 +445,8 @@ def build_strategy_prompt(
         positioning_rules=(active_rules or {}).get("positioning_rules", []),
         voice_rules=(active_rules or {}).get("voice_rules", []),
     )
+    max_chars = resolve_length_max_chars(request, get_x_adapter().rules.default_max_chars)
+    length_section = length_prompt_section(request, max_chars)
     return f"""You are the hidden content strategist for this workspace's posts.
 
 Do not write the post yet. Produce the structured Post Intent that the natural writer will use.
@@ -414,6 +467,7 @@ Request:
 - Angle: {request.angle or "choose the strongest specific angle"}
 - Audience: {request.audience or "the saved target audience"}
 - Extra context: {request.extra_context or "none"}
+{length_section}
 
 Facts & Context:
 {context or "- No saved facts/context yet."}
@@ -471,6 +525,7 @@ def build_best_writer_prompt(
         positioning_rules=(active_rules or {}).get("positioning_rules", []),
         voice_rules=(active_rules or {}).get("voice_rules", []),
     )
+    length_section = length_prompt_section(request, max_chars)
     return f"""Write 3 X draft options for this workspace.
 
 Prioritize exact Voice Examples, worked-reason notes, and the writing skills below over generic marketing instincts.
@@ -486,7 +541,7 @@ Request:
 - Tone: {request.tone or "plain, sharp, useful"}
 - CTA: {request.call_to_action or "only include if natural"}
 - Extra context: {request.extra_context or "none"}
-- Character limit: {max_chars}
+{length_section}
 
 Exact Voice Examples:
 {examples_text or "No examples selected."}
@@ -544,6 +599,7 @@ def build_evaluation_prompt(
         positioning_rules=(active_rules or {}).get("positioning_rules", []),
         voice_rules=(active_rules or {}).get("voice_rules", []),
     )
+    length_section = length_prompt_section(request, max_chars)
     return f"""Choose the best X post for this workspace and clean it up lightly.
 
 Original request:
@@ -551,6 +607,7 @@ Original request:
 - Post type: {request.post_type}
 - Angle: {request.angle or "none"}
 - Audience: {request.audience or "the saved target audience"}
+{length_section}
 
 Hidden Post Intent:
 {json.dumps(strategy_summary, indent=2)}
@@ -588,7 +645,7 @@ Final evaluator should check:
 - no corporate launch tone
 
 If the best draft violates any check, rewrite it once in suggested_final_version while preserving the thesis. If no draft has a real source bridge or post-worthy point, include "not_post_worthy" in warnings and rewrite toward the strongest grounded evergreen point. If a draft uses an Avoid Phrase, revise away from it in suggested_final_version.
-The suggested_final_version must be natural, specific, founder-led, concise, non-corporate, free of em dashes, {max_chars} characters or fewer, and complete."""
+The suggested_final_version must be natural, specific, founder-led, match the requested length form, non-corporate, free of em dashes, {max_chars} characters or fewer, and complete."""
 
 
 def build_context_snapshot(
@@ -631,6 +688,9 @@ def build_context_snapshot(
         )
     return {
         "request": request.__dict__,
+        "length_mode": normalize_length_mode(request.length_mode),
+        "length_label": POST_LENGTH_PRESETS[normalize_length_mode(request.length_mode)]["label"],
+        "max_chars": request.max_chars or POST_LENGTH_PRESETS[normalize_length_mode(request.length_mode)]["max_chars"],
         "generation_mode": "provider",
         "quality_mode": quality_mode,
         "provider_name": provider_name,
@@ -886,6 +946,7 @@ def build_rule_repair_prompt(
     max_chars: int,
 ) -> str:
     context = "\n".join(f"- {section.kind}/{section.name}: {section.content}" for section in bundle.positioning_sections)
+    length_section = length_prompt_section(request, max_chars)
     return f"""Repair this X post so it follows the active Voice and context rules.
 
 Return only the revised post text.
@@ -897,7 +958,7 @@ Request:
 - Topic: {request.topic}
 - Post type: {request.post_type}
 - Angle: {request.angle or "none"}
-- Character limit: {max_chars}
+{length_section}
 
 Facts & Context:
 {context or "- No saved facts/context available."}

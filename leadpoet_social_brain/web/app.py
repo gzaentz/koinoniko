@@ -792,6 +792,7 @@ def route_api(
             use_patterns=bool_from_payload(payload, "use_patterns", False),
             pattern_ids=string_list_payload(payload.get("pattern_ids")),
             trend_ids=string_list_payload(payload.get("trend_ids")),
+            length_mode=str(payload.get("length_mode") or "standard"),
         )
         item_payload = queue_item_payload(store, result.item)
         return 200, {
@@ -819,6 +820,7 @@ def route_api(
             variants_per_slot=int(payload.get("variants_per_slot") or 1),
             allow_evergreen=bool(payload.get("allow_evergreen", True)),
             use_patterns=bool(payload.get("use_patterns", False)),
+            length_mode=str(payload.get("length_mode") or "standard"),
         )
         return 200, {
             "queued": [queue_item_payload(store, item) for item in result.queued],

@@ -205,6 +205,7 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--audience")
     generate.add_argument("--tone")
     generate.add_argument("--cta")
+    generate.add_argument("--length", choices=["short", "standard", "long"], default="standard")
     generate.add_argument("--extra-context")
     generate.add_argument("--max-chars", type=int)
     generate.add_argument("--use-trends", action="store_true")
@@ -221,6 +222,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_week.add_argument("--topic-mix")
     plan_week.add_argument("--cadence", default="daily_mornings")
     plan_week.add_argument("--default-post-type", default="founder_insight")
+    plan_week.add_argument("--length", choices=["short", "standard", "long"], default="standard")
     plan_week.add_argument("--allow-evergreen", action="store_true")
     plan_week.set_defaults(func=cmd_plan_week_x)
 
@@ -743,6 +745,7 @@ def cmd_generate_x(store: SQLiteStore, args: argparse.Namespace) -> int:
         audience=args.audience,
         tone=args.tone,
         call_to_action=args.cta,
+        length_mode=args.length,
         max_chars=args.max_chars,
         extra_context=args.extra_context,
         use_trends=args.use_trends,
@@ -776,6 +779,7 @@ def cmd_plan_week_x(store: SQLiteStore, args: argparse.Namespace) -> int:
             variants_per_slot=1,
             allow_evergreen=args.allow_evergreen,
             use_patterns=args.use_patterns,
+            length_mode=args.length,
         )
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc

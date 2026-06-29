@@ -1796,6 +1796,7 @@ async function createPost() {
       instruction,
       topic: $("createPostTopic").value || "uncategorized",
       post_type: $("createPostType").value || "founder_insight",
+      length_mode: $("createPostLength").value || "standard",
       use_trends: Boolean(trendId),
       trend_ids: trendId ? [trendId] : [],
       use_patterns: Boolean(patternId),
@@ -1813,6 +1814,7 @@ async function createPost() {
   $("createPostInstruction").value = "";
   $("createPostExtra").value = "";
   $("createPostScheduled").value = "";
+  $("createPostLength").value = "standard";
   if ($("createPostTrend")) $("createPostTrend").value = "";
   if ($("createPostPattern")) $("createPostPattern").value = "";
   state.selectedTrendForCreate = null;
@@ -1830,6 +1832,7 @@ async function planWeek() {
       posts: Number($("planPosts").value || 5),
       topic_mix: $("planTopicMix").value,
       default_post_type: $("planPostType").value,
+      length_mode: $("planLength").value || "standard",
       cadence: $("planCadence").value,
       trend_window_days: 14,
       use_trends: $("planUseTrends").checked,

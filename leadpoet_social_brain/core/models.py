@@ -247,6 +247,7 @@ class DraftRequest:
     audience: str | None = None
     tone: str | None = None
     call_to_action: str | None = None
+    length_mode: str | None = None
     max_chars: int | None = None
     extra_context: str | None = None
     use_trends: bool = False

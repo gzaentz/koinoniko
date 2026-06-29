@@ -766,10 +766,20 @@ python3 -m leadpoet_social_brain.cli generate-x \
   --topic "sales LLMs" \
   --post-type founder_insight \
   --angle "why buyer context beats AI SDR volume" \
-  --use-trends
+  --use-trends \
+  --length standard
 ```
 
 Generation saves one reviewed draft. Koinoniko does not expose separate "standard" and "best" modes.
+
+Length forms are format presets, not separate quality modes:
+
+- `short`: very concise, usually 1-3 short lines, max 160 chars
+- `standard`: default X shape, target around 140-260 chars, max 280 chars
+- `long`: long-form X post, target around 400-900 chars, max 1200 chars
+
+The same strategist -> writer -> evaluator pipeline runs for every length form. In the web UI, choose the form from the Create Post or Weekly Plan modal.
+Long-form drafts can be reviewed and queued inside Koinoniko; actual posting depends on the connected X account and API permissions accepting longer text.
 
 Use `--max-chars` only when you want to override the default X length behavior:
 
@@ -825,7 +835,8 @@ python3 -m leadpoet_social_brain.cli plan-week-x \
   --trend-window-days 14 \
   --topic-mix "sales LLMs:3,Bittensor:2,product:2" \
   --cadence daily_mornings \
-  --default-post-type founder_insight
+  --default-post-type founder_insight \
+  --length standard
 ```
 
 If `--use-trends` is passed and there are no recent unused trends, planning fails clearly instead of inventing news. Use `--allow-evergreen` when evergreen posts are acceptable.

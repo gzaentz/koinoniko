@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from leadpoet_social_brain.core.models import EngagementMetrics, PostNote, SocialPost, TrendItem
+from leadpoet_social_brain.generation import resolve_length_max_chars
 from leadpoet_social_brain.platforms.x import get_x_adapter
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 
@@ -95,7 +96,7 @@ def publish_x_draft(
     if not draft:
         raise ValueError(f"No generated draft found for id {draft_id}")
     adapter = get_x_adapter()
-    adapter.validate_text(draft.text, max_chars=draft.request.max_chars)
+    adapter.validate_text(draft.text, max_chars=resolve_length_max_chars(draft.request, adapter.rules.default_max_chars))
     post = store.save_post(
         SocialPost(
             platform="x",

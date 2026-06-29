@@ -23,8 +23,10 @@ from leadpoet_social_brain.generation import (
     build_evaluation_prompt,
     build_strategy_prompt,
     fit_generated_text_to_limit,
+    normalize_length_mode,
     parse_evaluation_result,
     parse_strategy_summary,
+    resolve_length_max_chars,
     skills_with_review_rules,
 )
 from leadpoet_social_brain.platforms.x import get_x_adapter
@@ -72,6 +74,7 @@ def plan_week_x(
     variants_per_slot: int,
     allow_evergreen: bool = False,
     use_patterns: bool = False,
+    length_mode: str = "standard",
 ) -> PlanWeekResult:
     _ = variants_per_slot
     if posts <= 0:
@@ -108,6 +111,7 @@ def plan_week_x(
             post_type=default_post_type,
             angle=angle,
             extra_context="Weekly content calendar suggestion. Make it worth posting on its own.",
+            length_mode=length_mode,
             use_trends=bool(trend),
             trend_ids=[trend.id] if trend else [],
             use_patterns=use_patterns,
@@ -150,6 +154,7 @@ def create_post_x(
     use_patterns: bool = False,
     pattern_ids: list[str] | None = None,
     trend_ids: list[str] | None = None,
+    length_mode: str = "standard",
 ) -> CreatePostResult:
     instruction = instruction.strip()
     if not instruction:
@@ -182,6 +187,7 @@ def create_post_x(
         topic=topic,
         post_type=post_type,
         angle=instruction,
+        length_mode=length_mode,
         extra_context="\n".join(context_parts),
         use_trends=bool(selected_trends),
         trend_ids=[trend.id for trend in selected_trends],
@@ -250,11 +256,15 @@ def revise_queued_post(
     skills = skills_with_review_rules(skills, active_rules["review_rules"])
     avoid_phrases = load_avoid_phrases(store)
     model_routing = resolve_model_routing(store, provider)
+    length_mode = queue_item_length_mode(store, item)
+    max_chars = queue_item_max_chars(store, item)
     request = DraftRequest(
         platform=item.platform,
         topic=item.topic,
         post_type=item.post_type,
         angle=item.angle,
+        length_mode=length_mode,
+        max_chars=max_chars,
         extra_context=(
             "Revise this queued post into the strongest final version. "
             f"Original post: {item.text}\nInstruction: {instruction.strip()}"
@@ -290,7 +300,7 @@ def revise_queued_post(
             avoid_phrases=avoid_phrases,
             active_rules=active_rules,
             strategy_summary=strategy_summary,
-            max_chars=adapter.rules.default_max_chars,
+            max_chars=max_chars,
         ),
         variants=3,
         model=model_routing.natural_writer,
@@ -301,7 +311,7 @@ def revise_queued_post(
             text = fit_generated_text_to_limit(
                 provider,
                 raw,
-                max_chars=adapter.rules.default_max_chars,
+                max_chars=max_chars,
                 model=model_routing.natural_writer,
                 repair_context="queued X revision option",
             )
@@ -320,7 +330,7 @@ def revise_queued_post(
             draft_options=options,
             avoid_phrases=avoid_phrases,
             active_rules=active_rules,
-            max_chars=adapter.rules.default_max_chars,
+            max_chars=max_chars,
         ),
         variants=1,
         model=model_routing.evaluator,
@@ -332,11 +342,11 @@ def revise_queued_post(
         text = fit_generated_text_to_limit(
             provider,
             raw,
-            max_chars=adapter.rules.default_max_chars,
+            max_chars=max_chars,
             model=model_routing.natural_writer,
             repair_context="queued X revision",
         )
-        adapter.validate_text(text)
+        adapter.validate_text(text, max_chars=max_chars)
         saved.append(
             store.save_queued_post_version(
                 QueuedPostVersion(
@@ -418,7 +428,7 @@ def post_queue_item_x(
     if item.status != "approved":
         raise ValueError("Queued post must be approved before posting.")
     try:
-        get_x_adapter().validate_text(item.text)
+        get_x_adapter().validate_text(item.text, max_chars=queue_item_max_chars(store, item))
         posted = client.post_tweet(item.text)
         now = utc_now()
         post = store.save_post(
@@ -495,6 +505,24 @@ def require_queue_item(store: SQLiteStore, queue_id: str) -> ContentQueueItem:
     if not item:
         raise ValueError(f"No queued post found for id {queue_id}")
     return item
+
+
+def queue_item_source_draft(store: SQLiteStore, item: ContentQueueItem) -> GeneratedDraft | None:
+    return store.get_generated_draft(item.draft_id) if item.draft_id else None
+
+
+def queue_item_length_mode(store: SQLiteStore, item: ContentQueueItem) -> str:
+    draft = queue_item_source_draft(store, item)
+    if not draft:
+        return "long" if len(item.text) > get_x_adapter().rules.default_max_chars else "standard"
+    return normalize_length_mode(draft.request.length_mode)
+
+
+def queue_item_max_chars(store: SQLiteStore, item: ContentQueueItem) -> int:
+    draft = queue_item_source_draft(store, item)
+    if not draft:
+        return max(len(item.text), get_x_adapter().rules.default_max_chars)
+    return resolve_length_max_chars(draft.request, get_x_adapter().rules.default_max_chars)
 
 
 def expand_topic_mix(topic_mix: str | None, posts: int) -> list[str]:

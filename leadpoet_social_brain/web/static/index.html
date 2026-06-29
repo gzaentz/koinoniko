@@ -520,6 +520,13 @@
             </div>
           </label>
           <label>Schedule time<input id="createPostScheduled" type="datetime-local"></label>
+          <label>Length
+            <select id="createPostLength">
+              <option value="standard" selected>Standard</option>
+              <option value="short">Short</option>
+              <option value="long">Long-form</option>
+            </select>
+          </label>
         </div>
         <div class="form-grid">
           <label>Trend to build from
@@ -554,6 +561,13 @@
           <label>Posts<input id="planPosts" type="number" min="1" max="14" value="5"></label>
           <label>Topic mix<input id="planTopicMix" value="sales LLMs:3,Bittensor:2"></label>
           <label>Post type<input id="planPostType" value="founder_insight"></label>
+          <label>Length
+            <select id="planLength">
+              <option value="standard" selected>Standard</option>
+              <option value="short">Short</option>
+              <option value="long">Long-form</option>
+            </select>
+          </label>
           <label>Cadence
             <select id="planCadence">
               <option value="weekday_mornings">Weekday mornings</option>
