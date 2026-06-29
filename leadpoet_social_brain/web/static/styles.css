@@ -588,6 +588,10 @@ main {
   min-height: 0;
 }
 
+.dashboard-top-grid {
+  align-items: start;
+}
+
 .recent-posts-panel {
   display: flex;
   flex-direction: column;
@@ -763,10 +767,12 @@ main {
 }
 
 .trend-scroll {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
+  align-content: start;
+  align-items: start;
 }
 
 .trend-row,
@@ -791,7 +797,7 @@ main {
 
 .trend-row,
 .pattern-card {
-  grid-template-rows: auto auto minmax(34px, auto) 1fr;
+  grid-template-rows: auto auto minmax(34px, auto) auto;
 }
 
 .trend-row[role="button"],
@@ -848,7 +854,7 @@ main {
 
 .trend-row .actions,
 .pattern-card .actions {
-  align-self: end;
+  align-self: start;
   margin-top: 4px;
 }
 
