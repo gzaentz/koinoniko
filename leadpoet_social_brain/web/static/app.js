@@ -777,6 +777,7 @@ function postFieldOptionRow(id, field, option, context = "row") {
 }
 
 function postFieldOptions(field) {
+  if (field === "length") return lengthOptions();
   const values = field === "topic" ? topicOptions() : postTypeOptions();
   return values.map((value) => ({
     value,
@@ -784,15 +785,42 @@ function postFieldOptions(field) {
   }));
 }
 
+function lengthOptions() {
+  return [
+    { value: "short", label: "Short" },
+    { value: "standard", label: "Standard" },
+    { value: "long", label: "Long" },
+  ];
+}
+
+function normalizeLengthMode(value) {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[\s_-]+form$/, "");
+  return lengthOptions().some((option) => option.value === normalized) ? normalized : "standard";
+}
+
+function lengthModeLabel(value) {
+  const normalized = normalizeLengthMode(value);
+  return lengthOptions().find((option) => option.value === normalized)?.label || "Standard";
+}
+
+function createPostLengthValue() {
+  const input = $("createPostLength");
+  if (!input) return "standard";
+  return normalizeLengthMode(input.dataset.value || input.value);
+}
+
 function createPostFieldInputId(field) {
+  if (field === "length") return "createPostLength";
   return field === "topic" ? "createPostTopic" : "createPostType";
 }
 
 function createPostFieldMenuId(field) {
+  if (field === "length") return "createPostLengthMenu";
   return field === "topic" ? "createPostTopicMenu" : "createPostTypeMenu";
 }
 
 function createPostFieldName(field) {
+  if (field === "length") return "length";
   return field === "topic" ? "topic" : "post type";
 }
 
@@ -814,7 +842,7 @@ function createPostFieldOptionRows(field, query, filterOptions) {
       <strong>${escapeHtml(option.label)}</strong>
     </button>
   `);
-  if (typed) {
+  if (typed && field !== "length") {
     rows.push(`
       <button
         class="field-combo-option create-option"
@@ -853,7 +881,7 @@ function openCreatePostFieldMenu(field, filterOptions = false) {
 
 function closeCreatePostFieldMenus(exceptField = "") {
   if (typeof exceptField !== "string") exceptField = "";
-  ["topic", "post_type"].forEach((field) => {
+  ["topic", "post_type", "length"].forEach((field) => {
     if (field === exceptField) return;
     const input = $(createPostFieldInputId(field));
     const menu = $(createPostFieldMenuId(field));
@@ -868,7 +896,14 @@ function setCreatePostFieldValue(field, rawValue) {
     showMessage(field === "topic" ? "Topic is required." : "Post type is required.", true);
     return;
   }
-  $(createPostFieldInputId(field)).value = value;
+  const input = $(createPostFieldInputId(field));
+  if (field === "length") {
+    const normalized = normalizeLengthMode(value);
+    input.dataset.value = normalized;
+    input.value = lengthModeLabel(normalized);
+  } else {
+    input.value = value;
+  }
   closeCreatePostFieldMenus();
 }
 
@@ -1796,7 +1831,7 @@ async function createPost() {
       instruction,
       topic: $("createPostTopic").value || "uncategorized",
       post_type: $("createPostType").value || "founder_insight",
-      length_mode: $("createPostLength").value || "standard",
+      length_mode: createPostLengthValue(),
       use_trends: Boolean(trendId),
       trend_ids: trendId ? [trendId] : [],
       use_patterns: Boolean(patternId),
@@ -1814,7 +1849,7 @@ async function createPost() {
   $("createPostInstruction").value = "";
   $("createPostExtra").value = "";
   $("createPostScheduled").value = "";
-  $("createPostLength").value = "standard";
+  setCreatePostFieldValue("length", "standard");
   if ($("createPostTrend")) $("createPostTrend").value = "";
   if ($("createPostPattern")) $("createPostPattern").value = "";
   state.selectedTrendForCreate = null;
@@ -2825,7 +2860,7 @@ function isOpenById(id) {
 }
 
 function hasOpenCreatePostFieldMenu() {
-  return ["topic", "post_type"].some((field) => isOpenById(createPostFieldMenuId(field)));
+  return ["topic", "post_type", "length"].some((field) => isOpenById(createPostFieldMenuId(field)));
 }
 
 function hasOpenTransientDropdown() {
@@ -3398,6 +3433,7 @@ function setup() {
   document.addEventListener("click", closePostFieldEditor);
   setupCreatePostFieldCombo("topic");
   setupCreatePostFieldCombo("post_type");
+  setupCreatePostFieldCombo("length");
   document.addEventListener("click", closeCreatePostFieldMenus);
   document.addEventListener("keydown", handleGlobalEscape);
   $("generatePostButton").addEventListener("click", (event) => runButton(event.currentTarget, "Generating...", createPost));

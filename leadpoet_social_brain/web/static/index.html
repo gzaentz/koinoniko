@@ -521,11 +521,20 @@
           </label>
           <label>Schedule time<input id="createPostScheduled" type="datetime-local"></label>
           <label>Length
-            <select id="createPostLength">
-              <option value="standard" selected>Standard</option>
-              <option value="short">Short</option>
-              <option value="long">Long-form</option>
-            </select>
+            <div class="field-combo create-post-field-combo" data-create-post-field="length">
+              <input
+                id="createPostLength"
+                class="field-combo-input"
+                value="Standard"
+                data-value="standard"
+                autocomplete="off"
+                role="combobox"
+                aria-expanded="false"
+                aria-controls="createPostLengthMenu"
+                readonly
+              >
+              <div class="field-combo-menu hidden" id="createPostLengthMenu" role="listbox"></div>
+            </div>
           </label>
         </div>
         <div class="form-grid">
@@ -565,7 +574,7 @@
             <select id="planLength">
               <option value="standard" selected>Standard</option>
               <option value="short">Short</option>
-              <option value="long">Long-form</option>
+              <option value="long">Long</option>
             </select>
           </label>
           <label>Cadence

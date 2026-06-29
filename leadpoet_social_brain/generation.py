@@ -38,9 +38,9 @@ POST_LENGTH_PRESETS = {
         "instruction": "Default X shape. Aim for roughly 140-260 characters, with room below the hard limit.",
     },
     "long": {
-        "label": "Long-form",
+        "label": "Long",
         "max_chars": 1200,
-        "instruction": "Long-form X post. Aim for 400-900 characters in short paragraphs. Build the point, but do not turn it into a thread unless explicitly asked.",
+        "instruction": "Long X post. Aim for 400-900 characters in short paragraphs. Build the point, but do not turn it into a thread unless explicitly asked.",
     },
 }
 
