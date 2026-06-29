@@ -1587,7 +1587,6 @@ function renderQueueModal() {
     <div class="modal-actions">
       <button onclick="saveQueueDetail(event)">Save changes</button>
       <button class="secondary" onclick="reviseDetail(event)" ${canUseAI ? "" : "disabled"} title="${canUseAI ? "" : "Provider-backed generation is not connected."}">Improve with AI</button>
-      <button class="secondary" onclick="generateBestVersion(event)" ${canUseAI ? "" : "disabled"} title="${canUseAI ? "" : "Provider-backed generation is not connected."}">Generate Best Version</button>
       ${item.status !== "approved" ? `<button class="secondary" onclick='approveQueue(event, ${jsArg(item.id)})'>Approve</button>` : `<button class="secondary" onclick='moveToReview(event, ${jsArg(item.id)})'>Move to review</button>`}
       ${item.status === "approved" ? `<button class="secondary" onclick='postNow(event, ${jsArg(item.id)})' ${canPost ? "" : "disabled"} title="${state.status?.x_write_configured ? "" : "X write auth is not connected."}">Post now</button>` : ""}
       <button class="quiet-button" onclick='skipQueue(event, ${jsArg(item.id)})'>Skip</button>
@@ -1600,7 +1599,6 @@ function renderQueueModal() {
         <button class="secondary" onclick='reviseWithPreset(event, "Make this more founder-led and specific.")' ${canUseAI ? "" : "disabled"}>Make More Founder-Led</button>
         <button class="secondary" onclick='reviseWithPreset(event, "Shorten this while keeping the point.")' ${canUseAI ? "" : "disabled"}>Shorten</button>
         <button class="secondary" onclick='reviseWithPreset(event, "Tie this more clearly to saved facts and context without making it salesy.")' ${canUseAI ? "" : "disabled"}>Tie More to Context</button>
-        <button class="secondary" onclick='reviseWithPreset(event, "Generate the strongest final version of this queued post.", true)' ${canUseAI ? "" : "disabled"}>Generate Best Version</button>
       </div>
       <div id="revisionList" class="revision-list">${revisionList(item.versions || [])}</div>
     </div>
@@ -1645,7 +1643,7 @@ window.reviseDetail = (event) => {
     if (!instruction) throw new Error("Add an AI revision instruction first.");
     const payload = await api(`/api/queue/${encodeURIComponent(state.queueDetail.id)}/revise`, {
       method: "POST",
-      body: JSON.stringify({ instruction, variants: 3 }),
+      body: JSON.stringify({ instruction }),
     });
     state.queueDetail = {
       ...state.queueDetail,
@@ -1656,22 +1654,18 @@ window.reviseDetail = (event) => {
   });
 };
 
-window.generateBestVersion = (event) => {
-  reviseWithPreset(event, "Generate the strongest final version of this queued post.", true);
-};
-
-window.reviseWithPreset = (event, instruction, bestVersion = false) => {
+window.reviseWithPreset = (event, instruction) => {
   $("revisionInstruction").value = instruction;
   runButton(event.currentTarget, "Generating...", async () => {
     const payload = await api(`/api/queue/${encodeURIComponent(state.queueDetail.id)}/revise`, {
       method: "POST",
-      body: JSON.stringify({ instruction, variants: bestVersion ? 1 : 3, best_version: bestVersion }),
+      body: JSON.stringify({ instruction }),
     });
     state.queueDetail = {
       ...state.queueDetail,
       versions: payload.versions,
     };
-    showMessage(bestVersion ? "Best Version generated. Accept it when it is ready." : "Revision options generated.");
+    showMessage("Revision generated. Accept it when it is ready.");
     renderQueueModal();
   });
 };
@@ -1806,7 +1800,6 @@ async function createPost() {
       trend_ids: trendId ? [trendId] : [],
       use_patterns: Boolean(patternId),
       pattern_ids: patternId ? [patternId] : [],
-      best_version: true,
       scheduled_at: $("createPostScheduled").value,
       extra_context: $("createPostExtra").value,
     }),
@@ -1842,9 +1835,7 @@ async function planWeek() {
       use_trends: $("planUseTrends").checked,
       use_patterns: $("planUsePatterns").checked,
       allow_evergreen: $("planAllowEvergreen").checked,
-      best_version: true,
       instruction: $("planInstruction").value,
-      variants_per_slot: 1,
     }),
   });
   const warnings = payload.warnings || [];
@@ -2689,7 +2680,7 @@ function fallbackConnections(status) {
     openrouter: {
       status: status.openrouter_api_key_configured ? "connected" : "not_connected",
       label: "OpenRouter",
-      description: "Routes model calls for Standard and Best Version generation.",
+      description: "Routes model calls for strategy, writing, and review.",
     },
     x_read: {
       status: status.x_read_configured ? "connected" : "not_connected",
@@ -3254,8 +3245,7 @@ function label(value) {
 
 function qualityLabel(value) {
   const mode = String(value || "");
-  if (mode === "best_version") return "Best Version";
-  if (mode === "standard") return "Standard";
+  if (mode === "quality_review") return "Reviewed";
   return "";
 }
 

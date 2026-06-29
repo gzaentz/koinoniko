@@ -771,7 +771,6 @@ def route_api(
             queue_id=parts[2],
             instruction=str(payload.get("instruction") or ""),
             variants=int(payload.get("variants") or 3),
-            best_version=bool(payload.get("best_version", False)),
         )
         return 200, {"versions": [queue_version_payload(version) for version in versions]}
     if method == "POST" and len(parts) == 5 and parts[:2] == ["api", "queue"] and parts[3] == "versions":
@@ -788,7 +787,6 @@ def route_api(
             topic=str(payload.get("topic") or "uncategorized"),
             post_type=str(payload.get("post_type") or "founder_insight"),
             use_trends=bool_from_payload(payload, "use_trends", False),
-            best_version=bool_from_payload(payload, "best_version", True),
             scheduled_at=clean_optional(payload.get("scheduled_at")),
             extra_context=clean_optional(payload.get("extra_context")),
             use_patterns=bool_from_payload(payload, "use_patterns", False),
@@ -820,7 +818,6 @@ def route_api(
             default_post_type=str(payload.get("default_post_type") or "founder_insight"),
             variants_per_slot=int(payload.get("variants_per_slot") or 1),
             allow_evergreen=bool(payload.get("allow_evergreen", True)),
-            best_version=bool(payload.get("best_version", False)),
             use_patterns=bool(payload.get("use_patterns", False)),
         )
         return 200, {
@@ -2545,7 +2542,7 @@ def account_connections_payload(status: dict[str, Any]) -> dict[str, dict[str, s
         "openrouter": connection_payload(
             "connected" if status.get("openrouter_api_key_configured") else "not_connected",
             "OpenRouter",
-            "Routes model calls for Standard and Best Version generation.",
+            "Routes model calls for strategy, writing, and review.",
         ),
         "x_read": connection_payload(
             "connected" if status.get("x_read_configured") else "not_connected",

@@ -29,7 +29,7 @@ Koinoniko currently supports:
 - tracking compact Voice Coverage and Active Writing Rules
 - generating X drafts through a configured LLM provider
 - using OpenRouter as the built-in provider
-- routing Standard and Best Version generation to configurable models
+- routing the default quality pipeline through configurable strategy, writing, and review models
 - planning a weekly queue of X posts for review
 - editing, revising, approving, scheduling, and posting approved queue items
 - storing draft-to-post linkage and generation influences
@@ -334,9 +334,9 @@ Then open `Account -> Model Routing` and set:
 - Natural writer model
 - Evaluator model
 
-Standard generation uses the default model in one provider call.
+All generation uses one quality-reviewed pipeline: strategist -> natural writer -> evaluator. The strategist turns the request and selected context into a compact Post Intent, the writer drafts naturally from that intent, and the evaluator chooses or revises the final version before it is saved.
 
-Best Version mode uses a simple strategist -> natural writer -> evaluator flow. Role models are optional. If a role is blank, it falls back to the default model. If no Account model is saved, env fallbacks such as `SOCIAL_BRAIN_DEFAULT_MODEL` or legacy `OPENROUTER_MODEL` are used.
+Role models are optional. If a role is blank, it falls back to the default model. If no Account model is saved, env fallbacks such as `SOCIAL_BRAIN_DEFAULT_MODEL` or legacy `OPENROUTER_MODEL` are used.
 
 Example OpenRouter model IDs:
 
@@ -759,27 +759,17 @@ python3 -m leadpoet_social_brain.cli prompt-x \
   --use-trends
 ```
 
-Generate drafts:
+Generate a reviewed draft:
 
 ```bash
 python3 -m leadpoet_social_brain.cli generate-x \
   --topic "sales LLMs" \
   --post-type founder_insight \
   --angle "why buyer context beats AI SDR volume" \
-  --use-trends \
-  --variants 3
+  --use-trends
 ```
 
-Generate one higher-quality final draft:
-
-```bash
-python3 -m leadpoet_social_brain.cli generate-x \
-  --topic "sales LLMs" \
-  --post-type founder_insight \
-  --angle "why buyer context beats AI SDR volume" \
-  --use-trends \
-  --best-version
-```
+Generation saves one reviewed draft. Koinoniko does not expose separate "standard" and "best" modes.
 
 Use `--max-chars` only when you want to override the default X length behavior:
 
@@ -813,11 +803,13 @@ In the web UI, `Create Post` includes:
 - `Pattern to use`
 - selected source chips that can be removed before generation
 
-Create Post uses the Best Version pipeline by default. A hidden strategist first turns the
+Create Post uses the same quality-reviewed pipeline. A hidden strategist first turns the
 user's idea and selected context into a structured Post Intent, including the thesis,
 concrete detail, post shape, and evidence boundary. The natural writer drafts from that
-intent, and the evaluator rewrites once if the result is generic, unsupported, or too
-polished. The user only reviews the final queued post, not the internal brief.
+intent, and the evaluator rewrites if the result is generic, unsupported, or too polished.
+Active Writing Rules also repair obvious violations such as missing Leadpoet positioning,
+blocked phrases, or em dashes. The user only reviews the final queued post, not the
+internal brief.
 
 `Use in Post` on a trend or `Use Pattern` on a pattern opens Create Post with that source preselected. Generated output still enters the review queue; it does not publish automatically.
 
@@ -833,8 +825,7 @@ python3 -m leadpoet_social_brain.cli plan-week-x \
   --trend-window-days 14 \
   --topic-mix "sales LLMs:3,Bittensor:2,product:2" \
   --cadence daily_mornings \
-  --default-post-type founder_insight \
-  --best-version
+  --default-post-type founder_insight
 ```
 
 If `--use-trends` is passed and there are no recent unused trends, planning fails clearly instead of inventing news. Use `--allow-evergreen` when evergreen posts are acceptable.
@@ -851,8 +842,7 @@ python3 -m leadpoet_social_brain.cli update-queued-post \
 
 python3 -m leadpoet_social_brain.cli revise-queued-post \
   --queue-id "<queue id>" \
-  --instruction "Make this more natural and founder-led." \
-  --best-version
+  --instruction "Make this more natural and founder-led."
 
 python3 -m leadpoet_social_brain.cli approve-queued-post --queue-id "<queue id>"
 ```
@@ -1239,7 +1229,7 @@ Current tests cover:
 - skill loading and prompt assembly
 - provider-required generation
 - OpenRouter provider behavior
-- Best Version model routing
+- quality pipeline model routing
 - trend storage, refresh, and ScrapingDog behavior
 - web login and signed sessions
 - Account status and sync endpoints

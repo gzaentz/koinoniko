@@ -32,7 +32,7 @@ from leadpoet_social_brain.platforms.x_api import XPostedTweet, XWriteClient
 from leadpoet_social_brain.providers import DraftProvider, generate_with_provider, resolve_model_routing
 from leadpoet_social_brain.skills import generation_skills
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
-from leadpoet_social_brain.voice import active_rules_prompt_section, avoid_phrases_prompt_section, load_avoid_phrases
+from leadpoet_social_brain.voice import load_avoid_phrases
 
 
 LOCAL_TZ = ZoneInfo("America/New_York")
@@ -71,9 +71,9 @@ def plan_week_x(
     default_post_type: str,
     variants_per_slot: int,
     allow_evergreen: bool = False,
-    best_version: bool = False,
     use_patterns: bool = False,
 ) -> PlanWeekResult:
+    _ = variants_per_slot
     if posts <= 0:
         raise ValueError("--posts must be greater than 0.")
     get_x_adapter().validate_post_type(default_post_type)
@@ -114,8 +114,7 @@ def plan_week_x(
         )
         drafts = generator.generate(
             request,
-            variants=max(1, variants_per_slot),
-            best_version=best_version,
+            variants=1,
         )
         draft = drafts[0]
         quality_warnings = draft_quality_warnings(draft)
@@ -146,7 +145,6 @@ def create_post_x(
     topic: str = "uncategorized",
     post_type: str = "founder_insight",
     use_trends: bool = False,
-    best_version: bool = True,
     scheduled_at: str | None = None,
     extra_context: str | None = None,
     use_patterns: bool = False,
@@ -190,7 +188,7 @@ def create_post_x(
         use_patterns=use_patterns,
         pattern_ids=pattern_ids or [],
     )
-    draft = generator.generate(request, variants=1, best_version=best_version)[0]
+    draft = generator.generate(request, variants=1)[0]
     warnings.extend(f"Quality warning: {warning}" for warning in draft_quality_warnings(draft))
     trend_ids = selected_trend_ids(draft, selected_trends)
     item = store.save_content_queue_item(
@@ -208,7 +206,6 @@ def create_post_x(
                 draft,
                 instruction=instruction,
                 trends=[trend for trend in selected_trends if trend.id in set(trend_ids)],
-                best_version=best_version,
             ),
         )
     )
@@ -236,8 +233,8 @@ def revise_queued_post(
     queue_id: str,
     instruction: str,
     variants: int = 3,
-    best_version: bool = False,
 ) -> list[QueuedPostVersion]:
+    _ = variants
     item = require_queue_item(store, queue_id)
     if not instruction.strip():
         raise ValueError("Edit instruction is required.")
@@ -252,141 +249,91 @@ def revise_queued_post(
     active_rules = active_writing_rules_for_prompt(store, skills)
     skills = skills_with_review_rules(skills, active_rules["review_rules"])
     avoid_phrases = load_avoid_phrases(store)
-    examples = "\n\n".join(post.text for post in bundle.examples) or "No examples selected."
-    context = "\n".join(
-        f"- {section.kind}/{section.name}: {section.content}"
-        for section in [*bundle.style_sections, *bundle.positioning_sections]
-    )
-    skill_text = "\n\n".join(f"## {skill.path}\n{skill.content}" for skill in skills)
-    analytics = "\n".join(f"- {hint}" for hint in bundle.analytics_hints)
-    active_rules_text = active_rules_prompt_section(
-        positioning_rules=active_rules["positioning_rules"],
-        voice_rules=active_rules["voice_rules"],
-    )
-    prompt = f"""Revise this queued X post for this workspace.
-
-Original post:
-{item.text}
-
-User edit instruction:
-{instruction.strip()}
-
-Topic: {item.topic}
-Post type: {item.post_type}
-Angle: {item.angle or "none"}
-Character limit: {adapter.rules.default_max_chars}
-
-Relevant Voice Examples:
-{examples}
-
-Relevant facts/context:
-{context or "- No context available."}
-
-{active_rules_text}
-
-Useful performance guidance:
-{analytics or "- No analytics hints available."}
-
-Writing and review instructions:
-{skill_text}
-
-{avoid_phrases_prompt_section(avoid_phrases)}
-
-Each variant must be {adapter.rules.default_max_chars} characters or fewer and end as a complete thought.
-Return only revised post text variants. Do not explain. Do not approve or post anything."""
     model_routing = resolve_model_routing(store, provider)
-    if best_version:
-        request = DraftRequest(
-            platform=item.platform,
-            topic=item.topic,
-            post_type=item.post_type,
-            angle=item.angle,
-            extra_context=(
-                "Revise this queued post into the strongest final version. "
-                f"Original post: {item.text}\nInstruction: {instruction.strip()}"
-            ),
-            trend_ids=item.trend_ids,
-        )
-        trends = [
-            trend for trend_id in item.trend_ids
-            if (trend := store.get_trend_item(trend_id)) is not None
-        ]
-        strategy_raw = generate_with_provider(
-            provider,
-            build_strategy_prompt(
-                request,
-                bundle,
-                trends=trends,
-                patterns=[],
-                avoid_phrases=avoid_phrases,
-                active_rules=active_rules,
-            ),
-            variants=1,
-            model=model_routing.strategist,
-        )[0]
-        strategy_summary = parse_strategy_summary(strategy_raw)
-        raw_options = generate_with_provider(
-            provider,
-            build_best_writer_prompt(
-                request,
-                bundle,
-                skills=skills,
-                trends=trends,
-                patterns=[],
-                avoid_phrases=avoid_phrases,
-                active_rules=active_rules,
-                strategy_summary=strategy_summary,
+    request = DraftRequest(
+        platform=item.platform,
+        topic=item.topic,
+        post_type=item.post_type,
+        angle=item.angle,
+        extra_context=(
+            "Revise this queued post into the strongest final version. "
+            f"Original post: {item.text}\nInstruction: {instruction.strip()}"
+        ),
+        trend_ids=item.trend_ids,
+    )
+    trends = [
+        trend for trend_id in item.trend_ids
+        if (trend := store.get_trend_item(trend_id)) is not None
+    ]
+    strategy_raw = generate_with_provider(
+        provider,
+        build_strategy_prompt(
+            request,
+            bundle,
+            trends=trends,
+            patterns=[],
+            avoid_phrases=avoid_phrases,
+            active_rules=active_rules,
+        ),
+        variants=1,
+        model=model_routing.strategist,
+    )[0]
+    strategy_summary = parse_strategy_summary(strategy_raw)
+    raw_options = generate_with_provider(
+        provider,
+        build_best_writer_prompt(
+            request,
+            bundle,
+            skills=skills,
+            trends=trends,
+            patterns=[],
+            avoid_phrases=avoid_phrases,
+            active_rules=active_rules,
+            strategy_summary=strategy_summary,
+            max_chars=adapter.rules.default_max_chars,
+        ),
+        variants=3,
+        model=model_routing.natural_writer,
+    )
+    options: list[str] = []
+    for raw in raw_options:
+        try:
+            text = fit_generated_text_to_limit(
+                provider,
+                raw,
                 max_chars=adapter.rules.default_max_chars,
-            ),
-            variants=3,
-            model=model_routing.natural_writer,
-        )
-        options: list[str] = []
-        for raw in raw_options:
-            try:
-                text = fit_generated_text_to_limit(
-                    provider,
-                    raw,
-                    max_chars=adapter.rules.default_max_chars,
-                    model=model_routing.natural_writer,
-                    repair_context="Best Version queued X revision option",
-                )
-            except ValueError:
-                continue
-            if text:
-                options.append(text)
-        if not options:
-            raise ValueError("Provider did not return usable revision text.")
-        evaluation_raw = generate_with_provider(
-            provider,
-            build_evaluation_prompt(
-                request,
-                skills=skills,
-                strategy_summary=strategy_summary,
-                draft_options=options,
-                avoid_phrases=avoid_phrases,
-                active_rules=active_rules,
-                max_chars=adapter.rules.default_max_chars,
-            ),
-            variants=1,
-            model=model_routing.evaluator,
-        )[0]
-        final_text, _, _ = parse_evaluation_result(evaluation_raw, options)
-        raw_versions = [final_text]
-    else:
-        raw_versions = generate_with_provider(
-            provider,
-            prompt,
-            variants=max(1, min(variants, 3)),
-            model=model_routing.default,
-        )
+                model=model_routing.natural_writer,
+                repair_context="queued X revision option",
+            )
+        except ValueError:
+            continue
+        if text:
+            options.append(text)
+    if not options:
+        raise ValueError("Provider did not return usable revision text.")
+    evaluation_raw = generate_with_provider(
+        provider,
+        build_evaluation_prompt(
+            request,
+            skills=skills,
+            strategy_summary=strategy_summary,
+            draft_options=options,
+            avoid_phrases=avoid_phrases,
+            active_rules=active_rules,
+            max_chars=adapter.rules.default_max_chars,
+        ),
+        variants=1,
+        model=model_routing.evaluator,
+    )[0]
+    final_text, _, _ = parse_evaluation_result(evaluation_raw, options)
+    raw_versions = [final_text]
     saved: list[QueuedPostVersion] = []
     for raw in raw_versions:
         text = fit_generated_text_to_limit(
             provider,
             raw,
             max_chars=adapter.rules.default_max_chars,
-            model=model_routing.natural_writer if best_version else model_routing.default,
+            model=model_routing.natural_writer,
             repair_context="queued X revision",
         )
         adapter.validate_text(text)
@@ -658,12 +605,10 @@ def create_post_notes(
     *,
     instruction: str,
     trends: list[TrendItem],
-    best_version: bool,
 ) -> str:
     pieces = [
         f"Focus: {instruction}",
         f"Why worth publishing: {draft.explanation}",
-        f"Quality mode: {'Best Version' if best_version else 'Standard'}",
     ]
     if trends:
         pieces.append("Trend/source used: " + ", ".join(trend.title for trend in trends))

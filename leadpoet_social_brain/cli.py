@@ -210,8 +210,6 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--use-trends", action="store_true")
     generate.add_argument("--use-patterns", action="store_true")
     generate.add_argument("--pattern-id", action="append", dest="pattern_ids", default=[])
-    generate.add_argument("--variants", type=int, default=3)
-    generate.add_argument("--best-version", action="store_true")
     generate.set_defaults(func=cmd_generate_x)
 
     plan_week = subparsers.add_parser("plan-week-x", help="Generate a one-week X content queue.")
@@ -223,9 +221,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_week.add_argument("--topic-mix")
     plan_week.add_argument("--cadence", default="daily_mornings")
     plan_week.add_argument("--default-post-type", default="founder_insight")
-    plan_week.add_argument("--variants-per-slot", type=int, default=1)
     plan_week.add_argument("--allow-evergreen", action="store_true")
-    plan_week.add_argument("--best-version", action="store_true")
     plan_week.set_defaults(func=cmd_plan_week_x)
 
     list_queue = subparsers.add_parser("list-content-queue", help="List queued content.")
@@ -250,8 +246,6 @@ def build_parser() -> argparse.ArgumentParser:
     revise_queue = subparsers.add_parser("revise-queued-post", help="Generate AI revision options for a queued post.")
     revise_queue.add_argument("--queue-id", required=True)
     revise_queue.add_argument("--instruction", required=True)
-    revise_queue.add_argument("--variants", type=int, default=3)
-    revise_queue.add_argument("--best-version", action="store_true")
     revise_queue.set_defaults(func=cmd_revise_queued_post)
 
     approve_queue = subparsers.add_parser("approve-queued-post", help="Approve one queued post.")
@@ -741,7 +735,6 @@ def cmd_generate_x(store: SQLiteStore, args: argparse.Namespace) -> int:
     if not provider:
         raise SystemExit(MISSING_PROVIDER_MESSAGE)
     generator = SocialBrainGenerator(store, provider=provider)
-    print("Generator mode: best version" if args.best_version else "Generator mode: configured LLM provider")
     request = DraftRequest(
         platform="x",
         topic=args.topic,
@@ -756,7 +749,7 @@ def cmd_generate_x(store: SQLiteStore, args: argparse.Namespace) -> int:
         use_patterns=args.use_patterns,
         pattern_ids=args.pattern_ids,
     )
-    drafts = generator.generate(request, variants=args.variants, best_version=args.best_version)
+    drafts = generator.generate(request)
     for index, draft in enumerate(drafts, start=1):
         print(f"\nDraft {index} ({len(draft.text)} chars, id {draft.id})")
         print(draft.text)
@@ -780,9 +773,8 @@ def cmd_plan_week_x(store: SQLiteStore, args: argparse.Namespace) -> int:
             topic_mix=args.topic_mix,
             cadence=args.cadence,
             default_post_type=args.default_post_type,
-            variants_per_slot=args.variants_per_slot,
+            variants_per_slot=1,
             allow_evergreen=args.allow_evergreen,
-            best_version=args.best_version,
             use_patterns=args.use_patterns,
         )
     except ValueError as exc:
@@ -875,8 +867,6 @@ def cmd_revise_queued_post(store: SQLiteStore, args: argparse.Namespace) -> int:
             provider,
             queue_id=args.queue_id,
             instruction=args.instruction,
-            variants=args.variants,
-            best_version=args.best_version,
         )
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc

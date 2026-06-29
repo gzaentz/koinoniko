@@ -156,7 +156,7 @@ class RoleAwareProvider:
                         "warnings": [],
                         "suggested_final_version": (
                             "Most sales AI still acts like more volume is the product.\n\n"
-                            "The useful version knows why this account cares today."
+                            "Leadpoet is for knowing why this account cares today."
                         ),
                     }
                 )
@@ -611,7 +611,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn("Reset to Env Defaults", index_html)
         self.assertNotIn("Test Provider", index_html)
         self.assertIn("Improve with AI", app_js)
-        self.assertIn("Generate Best Version", app_js)
+        self.assertNotIn("Generate Best Version", app_js)
         self.assertIn("Make More Natural", app_js)
         self.assertIn("Make More Founder-Led", app_js)
         self.assertIn('state.view === "reviewer"', app_js)
@@ -661,7 +661,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("createPostFieldOptionRows", app_js)
         self.assertIn("closeTransientDropdowns", app_js)
         self.assertIn("handleGlobalEscape", app_js)
-        self.assertGreaterEqual(app_js.count("best_version: true"), 2)
+        self.assertNotIn("best_version", app_js)
         self.assertNotIn("postVoiceTopic", app_js)
         self.assertNotIn("postVoicePostType", app_js)
         self.assertNotIn("postVoiceHook", app_js)
@@ -1065,13 +1065,14 @@ class SocialBrainTest(unittest.TestCase):
                 variants=2,
             )
 
-            self.assertEqual(len(drafts), 2)
-            self.assertEqual(len({draft.text for draft in drafts}), 2)
+            self.assertEqual(len(drafts), 1)
             self.assertTrue(all(len(draft.text) <= 280 for draft in drafts))
             self.assertTrue(all("—" not in draft.text for draft in drafts))
             self.assertTrue(all(draft.explanation.startswith("Influenced by") for draft in drafts))
-            self.assertEqual(len(provider.prompts), 1)
-            self.assertIn("Writing and review instructions:", provider.prompts[0])
+            self.assertEqual(len(provider.prompts), 3)
+            self.assertIn("Produce the structured Post Intent", provider.prompts[0])
+            self.assertIn("Writing and review instructions:", provider.prompts[1])
+            self.assertIn("Final evaluator should check", provider.prompts[2])
             saved_draft = store.get_generated_draft(drafts[0].id)
             self.assertIsNotNone(saved_draft)
             self.assertEqual(saved_draft.text, drafts[0].text)
@@ -1088,7 +1089,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(all(skill.get("sha256") for skill in saved_draft.context_snapshot["skills"]))
             store.close()
 
-    def test_standard_generation_uses_default_model(self):
+    def test_generation_uses_default_model_for_all_roles_when_roles_are_blank(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
             store.seed_defaults()
@@ -1100,13 +1101,12 @@ class SocialBrainTest(unittest.TestCase):
                 variants=1,
             )
 
-            self.assertEqual(len(provider.calls), 1)
-            self.assertEqual(provider.calls[0]["model"], "openrouter/default")
-            self.assertEqual(drafts[0].context_snapshot["quality_mode"], "standard")
+            self.assertEqual([call["model"] for call in provider.calls], ["openrouter/default"] * 3)
+            self.assertEqual(drafts[0].context_snapshot["quality_mode"], "quality_review")
             self.assertEqual(drafts[0].context_snapshot["default_model"], "openrouter/default")
             store.close()
 
-    def test_best_version_generation_calls_role_models_and_saves_metadata(self):
+    def test_generation_calls_role_models_and_saves_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
             store.seed_defaults()
@@ -1123,8 +1123,7 @@ class SocialBrainTest(unittest.TestCase):
                     topic="sales LLMs",
                     post_type="founder_insight",
                     angle="buyer timing beats volume",
-                ),
-                best_version=True,
+                )
             )
 
             self.assertEqual(len(drafts), 1)
@@ -1133,7 +1132,7 @@ class SocialBrainTest(unittest.TestCase):
                 ["openrouter/strategy", "openrouter/writer", "openrouter/evaluator"],
             )
             snapshot = store.get_generated_draft(drafts[0].id).context_snapshot
-            self.assertEqual(snapshot["quality_mode"], "best_version")
+            self.assertEqual(snapshot["quality_mode"], "quality_review")
             self.assertEqual(snapshot["strategist_model"], "openrouter/strategy")
             self.assertEqual(snapshot["natural_writer_model"], "openrouter/writer")
             self.assertEqual(snapshot["evaluator_model"], "openrouter/evaluator")
@@ -1151,9 +1150,10 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("evidence safety", provider.calls[2]["prompt"])
             self.assertIn("post-worthiness", provider.calls[2]["prompt"])
             self.assertIn("generic swap test", provider.calls[2]["prompt"])
-            self.assertIn("Best Version evaluator should check", provider.calls[2]["prompt"])
+            self.assertIn("Final evaluator should check", provider.calls[2]["prompt"])
             self.assertIn("- game changer", provider.calls[2]["prompt"])
             self.assertIn("Most sales AI", drafts[0].text)
+            self.assertIn("Leadpoet", drafts[0].text)
             store.close()
 
     def test_style_guide_rebuild_is_writing_guide_not_tag_report(self):
@@ -1223,7 +1223,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(saved_draft.context_snapshot["selected_trends"][0]["id"], trend.id)
             store.close()
 
-    def test_plan_week_x_surfaces_best_version_quality_warnings(self):
+    def test_plan_week_x_surfaces_quality_warnings(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
             store.seed_defaults()
@@ -1258,7 +1258,7 @@ class SocialBrainTest(unittest.TestCase):
                             "ranked_drafts": [1, 2, 3],
                             "quality_notes": "No real source bridge.",
                             "warnings": ["not_post_worthy"],
-                            "suggested_final_version": "Sales teams do not need another way to send more.\n\nThey need a better reason to know this account is worth attention now.",
+                            "suggested_final_version": "Leadpoet is not another way to send more.\n\nIt is a better reason to know this account is worth attention now.",
                         }
                     ),
                 ]
@@ -1275,7 +1275,6 @@ class SocialBrainTest(unittest.TestCase):
                 cadence="daily_mornings",
                 default_post_type="founder_insight",
                 variants_per_slot=1,
-                best_version=True,
             )
 
             self.assertTrue(any("Slot 1: Quality warning" in warning for warning in result.warnings))
@@ -1327,10 +1326,10 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(result.item.topic, "Leadpoet")
             self.assertEqual(result.item.post_type, "founder_insight")
             self.assertIn("buyer timing", result.item.angle)
-            self.assertIn("Quality mode: Best Version", result.item.reviewer_notes)
+            self.assertNotIn("Quality mode:", result.item.reviewer_notes)
             self.assertEqual(len(queued), 1)
             self.assertEqual(queued[0].id, result.item.id)
-            self.assertEqual(saved_draft.context_snapshot["quality_mode"], "best_version")
+            self.assertEqual(saved_draft.context_snapshot["quality_mode"], "quality_review")
             self.assertIn("strategy_summary", saved_draft.context_snapshot)
             self.assertIn("User instruction: Write about why sales AI needs buyer timing", provider.prompts[0])
             store.close()
@@ -1382,7 +1381,7 @@ class SocialBrainTest(unittest.TestCase):
             store.seed_defaults()
             result = create_post_x(
                 store,
-                SocialBrainGenerator(store, provider=FakeProvider(["Evergreen post about buyer timing."])),
+                SocialBrainGenerator(store, provider=FakeProvider(["Leadpoet makes buyer timing easier to act on."])),
                 instruction="Make the buyer timing point.",
                 topic="Leadpoet",
                 post_type="founder_insight",
@@ -1394,7 +1393,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(result.item.trend_ids, [])
             store.close()
 
-    def test_create_post_x_surfaces_best_version_quality_warnings(self):
+    def test_create_post_x_surfaces_quality_warnings(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
             store.seed_defaults()
@@ -1417,7 +1416,7 @@ class SocialBrainTest(unittest.TestCase):
                     "ranked_drafts": [1, 2, 3],
                     "quality_notes": "The source bridge is too loose.",
                     "warnings": ["not_post_worthy", "source bridge is weak"],
-                    "suggested_final_version": "Sales AI does not need another volume lever.\n\nIt needs a better reason to choose this account this week.",
+                    "suggested_final_version": "Leadpoet is not another volume lever.\n\nIt gives a better reason to choose this account this week.",
                 }
             )
             provider = SequentialProvider(
@@ -1864,9 +1863,35 @@ class SocialBrainTest(unittest.TestCase):
             )
             repaired = (
                 "The SaaStr AI agent proved the real point: outbound only works when buyer timing is real. "
-                "Most teams still automate around volume instead."
+                "Leadpoet is built around that timing, not more volume."
             )
-            provider = SequentialProvider([overlong, repaired])
+            strategy = json.dumps(
+                {
+                    "thesis": "Buyer timing beats volume.",
+                    "concrete_detail": "SaaStr booked 614 meetings.",
+                    "source_bridge": "Use the case study as market proof for timing.",
+                    "evidence_boundary": "Do not invent proof.",
+                }
+            )
+            evaluation = json.dumps(
+                {
+                    "ranked_drafts": [1, 2, 3],
+                    "quality_notes": "Strong but too long.",
+                    "warnings": [],
+                    "suggested_final_version": overlong,
+                }
+            )
+            provider = SequentialProvider(
+                [
+                    strategy,
+                    overlong,
+                    "Leadpoet makes buyer timing obvious.",
+                    "More volume is not the wedge.",
+                    "Leadpoet repairs the long option around buyer timing.",
+                    evaluation,
+                    repaired,
+                ]
+            )
 
             with patch("leadpoet_social_brain.web.app.load_provider_from_env", return_value=provider):
                 status, payload = handle_api_request(
@@ -1879,8 +1904,9 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(payload["versions"][0]["text"], repaired)
             self.assertLessEqual(len(payload["versions"][0]["text"]), 280)
-            self.assertIn("Character limit: 280", provider.prompts[0])
-            self.assertIn("Shorten this queued X revision to 280 characters or fewer.", provider.prompts[1])
+            self.assertIn("Character limit: 280", provider.prompts[1])
+            self.assertIn("Shorten this queued X revision option to 280 characters or fewer.", provider.prompts[2])
+            self.assertIn("Shorten this queued X revision to 280 characters or fewer.", provider.prompts[4])
             self.assertNotIn("Most teams don't have that. So they build outreach around volume", payload["versions"][0]["text"])
 
     def test_web_accept_revision_updates_queue_post(self):
@@ -1924,7 +1950,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(accepted["item"]["status"], "needs_review")
             self.assertIsNone(accepted["item"]["approved_at"])
 
-    def test_web_best_version_revision_does_not_auto_approve(self):
+    def test_web_quality_revision_does_not_auto_approve(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"
             store = SQLiteStore(db_path)
@@ -1954,7 +1980,6 @@ class SocialBrainTest(unittest.TestCase):
                         {
                             "instruction": "Generate the strongest final version.",
                             "variants": 1,
-                            "best_version": True,
                         }
                     ),
                     db_path=db_path,
@@ -2004,7 +2029,6 @@ class SocialBrainTest(unittest.TestCase):
                             "scheduled_at": "2026-06-30T10:00",
                             "use_trends": True,
                             "trend_ids": [trend.id],
-                            "best_version": False,
                         }
                     ),
                     db_path=db_path,
@@ -2015,7 +2039,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["generated_text"], "Buyer timing is the real sales AI advantage. More email is not strategy.")
             self.assertEqual(payload["item"]["status"], "needs_review")
             self.assertEqual(payload["item"]["scheduled_at"], "2026-06-30T10:00")
-            self.assertEqual(payload["item"]["quality_mode"], "standard")
+            self.assertEqual(payload["item"]["quality_mode"], "quality_review")
             self.assertIn("buyer timing", payload["item"]["focus"].lower())
             self.assertEqual(payload["queue_id"], payload["item"]["id"])
 
@@ -3192,7 +3216,7 @@ class SocialBrainTest(unittest.TestCase):
             )
             self.assertEqual(status, 200)
             saved_groups = {group["key"]: group["items"] for group in saved["groups"]}
-            self.assertIn("Leadpoet owns buyer timing", saved_groups["positioning_rules"][0])
+            self.assertTrue(any("Leadpoet owns buyer timing" in item for item in saved_groups["positioning_rules"]))
             self.assertIn("Write like Gavin saw", saved_groups["voice_rules"][0])
             self.assertIn("Reject drafts", saved_groups["review_rules"][0])
 
@@ -4930,7 +4954,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["item"]["status"], "needs_review")
             store = SQLiteStore(db_path)
             saved_draft = store.get_generated_draft(payload["item"]["draft_id"])
-            self.assertEqual(saved_draft.context_snapshot["quality_mode"], "best_version")
+            self.assertEqual(saved_draft.context_snapshot["quality_mode"], "quality_review")
             self.assertEqual(saved_draft.context_snapshot["selected_viral_patterns"][0]["id"], pattern.id)
             store.close()
 

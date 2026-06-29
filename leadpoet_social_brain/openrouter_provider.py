@@ -20,7 +20,7 @@ class OpenRouterProvider:
         model: str | None,
         base_url: str = OPENROUTER_API_URL,
         temperature: float = 0.8,
-        max_tokens: int = 1200,
+        max_tokens: int = 4000,
         site_url: str | None = None,
         app_name: str | None = None,
         request_json: Callable[[str, dict[str, Any], dict[str, str]], dict[str, Any]] | None = None,
@@ -95,7 +95,7 @@ def create_provider() -> OpenRouterProvider:
         ),
         base_url=os.getenv("OPENROUTER_API_URL", OPENROUTER_API_URL),
         temperature=float(os.getenv("OPENROUTER_TEMPERATURE", "0.8")),
-        max_tokens=int(os.getenv("OPENROUTER_MAX_TOKENS", "1200")),
+        max_tokens=int(os.getenv("OPENROUTER_MAX_TOKENS", "4000")),
         site_url=os.getenv("OPENROUTER_SITE_URL") or None,
         app_name=os.getenv("OPENROUTER_APP_NAME", "Leadpoet Social Brain"),
     )

@@ -39,8 +39,8 @@ class SocialBrainGenerator:
         *,
         variants: int = 3,
         save: bool = True,
-        best_version: bool = False,
     ) -> list[GeneratedDraft]:
+        _ = variants
         adapter = self._adapter_for(request.platform)
         if hasattr(adapter, "validate_post_type"):
             adapter.validate_post_type(request.post_type)
@@ -60,22 +60,7 @@ class SocialBrainGenerator:
             raise ValueError(MISSING_PROVIDER_MESSAGE)
         provider_name = provider_name_for(self.provider)
         model_routing = resolve_model_routing(self.store, self.provider)
-        if best_version:
-            return self._generate_best_version(
-                request,
-                bundle,
-                skills=skills,
-                trends=trends,
-                patterns=patterns,
-                avoid_phrases=avoid_phrases,
-                active_rules=active_rules,
-                max_chars=max_chars,
-                provider_name=provider_name,
-                model_routing=model_routing,
-                save=save,
-            )
-
-        prompt = build_generation_prompt(
+        return self._generate_quality_draft(
             request,
             bundle,
             skills=skills,
@@ -84,54 +69,12 @@ class SocialBrainGenerator:
             avoid_phrases=avoid_phrases,
             active_rules=active_rules,
             max_chars=max_chars,
+            provider_name=provider_name,
+            model_routing=model_routing,
+            save=save,
         )
-        raw_texts = generate_with_provider(
-            self.provider,
-            prompt,
-            variants=variants,
-            model=model_routing.default,
-        )
-        drafts: list[GeneratedDraft] = []
-        for raw_text in raw_texts:
-            text = fit_generated_text_to_limit(
-                self.provider,
-                raw_text,
-                max_chars=max_chars,
-                model=model_routing.default,
-                repair_context="generated X draft",
-            )
-            adapter.validate_text(text, max_chars=max_chars)
-            quality_notes = build_quality_notes(
-                request,
-                bundle,
-                trends=trends,
-            )
-            draft = GeneratedDraft(
-                text=text,
-                request=request,
-                explanation=explain_influence(bundle, trends=trends, patterns=patterns),
-                influences=build_influence_labels(bundle, trends=trends, patterns=patterns),
-                context_snapshot=build_context_snapshot(
-                    request,
-                    bundle,
-                    skills=skills,
-                    trends=trends,
-                    patterns=patterns,
-                    avoid_phrases=avoid_phrases,
-                    active_rules=active_rules,
-                    quality_notes=quality_notes,
-                    provider_name=provider_name,
-                    quality_mode="standard",
-                    model_routing=model_routing,
-                    models_used={"default": model_routing.default},
-                ),
-            )
-            if save:
-                self.store.save_generated_draft(draft)
-            drafts.append(draft)
-        return drafts
 
-    def _generate_best_version(
+    def _generate_quality_draft(
         self,
         request: DraftRequest,
         bundle: ContextBundle,
@@ -188,7 +131,7 @@ class SocialBrainGenerator:
                     raw,
                     max_chars=max_chars,
                     model=model_routing.natural_writer,
-                    repair_context="Best Version X draft option",
+                    repair_context="quality-reviewed X draft option",
                 )
             except ValueError:
                 continue
@@ -217,8 +160,32 @@ class SocialBrainGenerator:
             final_text,
             max_chars=max_chars,
             model=model_routing.natural_writer,
-            repair_context="Best Version final X post",
+            repair_context="quality-reviewed final X post",
         )
+        text, rule_warnings = repair_draft_against_rules(
+            self.provider,
+            text,
+            request,
+            bundle,
+            trends=trends,
+            avoid_phrases=avoid_phrases,
+            active_rules=active_rules,
+            max_chars=max_chars,
+            model=model_routing.natural_writer,
+        )
+        if rule_warnings:
+            existing_warnings = evaluation.get("warnings") if isinstance(evaluation, dict) else []
+            evaluation = {
+                **evaluation,
+                "warnings": [
+                    *(
+                        [str(warning) for warning in existing_warnings if str(warning).strip()]
+                        if isinstance(existing_warnings, list)
+                        else []
+                    ),
+                    *rule_warnings,
+                ],
+            }
         adapter.validate_text(text, max_chars=max_chars)
         notes = quality_notes or build_quality_notes(request, bundle, trends=trends)
         draft = GeneratedDraft(
@@ -236,7 +203,7 @@ class SocialBrainGenerator:
                 active_rules=active_rules,
                 quality_notes=notes,
                 provider_name=provider_name,
-                quality_mode="best_version",
+                quality_mode="quality_review",
                 model_routing=model_routing,
                 models_used={
                     "default": model_routing.default,
@@ -601,13 +568,16 @@ Voice and review rules:
 Draft options:
 {options}
 
-Return compact JSON only with:
+Return compact JSON only. Do not include analysis, chain-of-thought, markdown, or commentary.
+Keep the JSON short enough to fit comfortably in the response.
+Use these keys:
 ranked_drafts, quality_notes, warnings, suggested_final_version.
 
-Best Version evaluator should check:
+Final evaluator should check:
 - strategy fidelity: the draft expresses the thesis and uses the concrete detail
 - post-worthiness: there is a clear reason this should be posted now, not just because a topical source exists
 - source bridge: any trend/company/product/case study reference states the transferable mechanism, not just a loose analogy
+- positioning fidelity: if saved Facts & Context names a company/product as owning the core wedge, the final draft must frame that company/product as the source of the wedge
 - generic swap test: the draft would still be specific if company and product names were removed; if it could apply to any workspace, fail it
 - evidence safety: no invented first-person anecdote, fake customer story, fake quote, fake metric, unsupported reading/research session, or unsupported product claim
 - specificity: at least one concrete noun, situation, mechanism, or contrast
@@ -793,6 +763,168 @@ def parse_evaluation_result(raw: str, draft_options: list[str]) -> tuple[str, st
     return draft_options[0], raw.strip(), {"raw": raw.strip()}
 
 
+def repair_draft_against_rules(
+    provider: DraftProvider,
+    text: str,
+    request: DraftRequest,
+    bundle: ContextBundle,
+    *,
+    trends: list[TrendItem],
+    avoid_phrases: list[str],
+    active_rules: dict[str, list[str]],
+    max_chars: int,
+    model: str | None,
+) -> tuple[str, list[str]]:
+    violations = draft_rule_violations(
+        text,
+        request,
+        bundle,
+        trends=trends,
+        avoid_phrases=avoid_phrases,
+        active_rules=active_rules,
+    )
+    if not violations:
+        return text, []
+    repair_prompt = build_rule_repair_prompt(
+        text,
+        violations=violations,
+        request=request,
+        bundle=bundle,
+        max_chars=max_chars,
+    )
+    repaired_raw = generate_with_provider(provider, repair_prompt, variants=1, model=model)[0]
+    repaired = fit_generated_text_to_limit(
+        provider,
+        repaired_raw,
+        max_chars=max_chars,
+        model=model,
+        repair_context="rule-repaired X post",
+    )
+    remaining = draft_rule_violations(
+        repaired,
+        request,
+        bundle,
+        trends=trends,
+        avoid_phrases=avoid_phrases,
+        active_rules=active_rules,
+    )
+    return repaired, remaining
+
+
+def draft_rule_violations(
+    text: str,
+    request: DraftRequest,
+    bundle: ContextBundle,
+    *,
+    trends: list[TrendItem],
+    avoid_phrases: list[str],
+    active_rules: dict[str, list[str]],
+) -> list[str]:
+    lowered = text.lower()
+    violations: list[str] = []
+    for phrase in avoid_phrases:
+        phrase = " ".join(str(phrase or "").lower().split())
+        if not phrase:
+            continue
+        if phrase == "not just x, but y":
+            if "not just" in lowered:
+                violations.append("avoid 'not just X, but Y' framing")
+            continue
+        if phrase in lowered:
+            violations.append(f"avoid phrase: {phrase}")
+    if "—" in text:
+        violations.append("remove em dash")
+    if re.search(r"\b(i do not|i don't) know enough about leadpoet\b", lowered):
+        violations.append("remove model uncertainty about Leadpoet; use saved context or make a narrower claim")
+    anchor = workspace_anchor_name(bundle, active_rules)
+    if anchor and should_require_anchor(request, trends) and anchor.lower() not in lowered:
+        violations.append(f"anchor the point to {anchor} as the source of the core wedge")
+    return dedupe_preserve_order(violations)
+
+
+def workspace_anchor_name(bundle: ContextBundle, active_rules: dict[str, list[str]]) -> str | None:
+    haystack = "\n".join(
+        [
+            *(section.content for section in bundle.positioning_sections),
+            *active_rules.get("positioning_rules", []),
+            *active_rules.get("voice_rules", []),
+        ]
+    )
+    if re.search(r"\bLeadpoet\b", haystack):
+        return "Leadpoet"
+    return None
+
+
+def should_require_anchor(request: DraftRequest, trends: list[TrendItem]) -> bool:
+    topic = (request.topic or "").lower()
+    post_type = (request.post_type or "").lower()
+    if "bittensor" in topic or "bittensor" in post_type:
+        return False
+    if trends:
+        return True
+    return any(
+        marker in f"{topic} {post_type}"
+        for marker in [
+            "leadpoet",
+            "sales",
+            "intent",
+            "founder",
+            "product",
+            "launch",
+            "investor",
+            "technical",
+        ]
+    )
+
+
+def build_rule_repair_prompt(
+    text: str,
+    *,
+    violations: list[str],
+    request: DraftRequest,
+    bundle: ContextBundle,
+    max_chars: int,
+) -> str:
+    context = "\n".join(f"- {section.kind}/{section.name}: {section.content}" for section in bundle.positioning_sections)
+    return f"""Repair this X post so it follows the active Voice and context rules.
+
+Return only the revised post text.
+
+Violations to fix:
+{chr(10).join(f"- {violation}" for violation in violations)}
+
+Request:
+- Topic: {request.topic}
+- Post type: {request.post_type}
+- Angle: {request.angle or "none"}
+- Character limit: {max_chars}
+
+Facts & Context:
+{context or "- No saved facts/context available."}
+
+Rules:
+- Keep the same core point.
+- Make it sound natural and founder-written.
+- Do not make it more polished or corporate.
+- Do not add unsupported claims, anecdotes, proof, metrics, or customer stories.
+- Stay under {max_chars} characters.
+- End as a complete thought.
+
+Draft:
+{text}"""
+
+
+def dedupe_preserve_order(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
+
+
 def parse_json_object(raw: str) -> object | None:
     text = raw.strip()
     if text.startswith("```"):
@@ -908,7 +1040,7 @@ Original ({len(text)} characters):
 
 def clean_generated_text(text: str, *, max_chars: int) -> str:
     _ = max_chars
-    cleaned = text.replace("—", "-").replace("–", "-")
+    cleaned = text.replace("—", ". ").replace("–", "-")
     cleaned = re.sub(r"\b(game-changing|revolutionary|unlock|delve into|in today's world)\b", "", cleaned, flags=re.I)
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
