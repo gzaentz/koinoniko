@@ -589,7 +589,8 @@ main {
 }
 
 .dashboard-top-grid {
-  align-items: start;
+  align-items: stretch;
+  overflow: hidden;
 }
 
 .recent-posts-panel {
@@ -764,15 +765,19 @@ main {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 
 .trend-scroll {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   padding-right: 4px;
   align-content: start;
   align-items: start;
+  scrollbar-gutter: stable;
 }
 
 .trend-row,
@@ -868,6 +873,11 @@ main {
 .trend-row strong,
 .pattern-card strong {
   color: var(--ink);
+}
+
+.trend-date {
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 .panel-subtitle {

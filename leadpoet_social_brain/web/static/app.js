@@ -1052,10 +1052,12 @@ function renderTrendList(targetId, trends, emptyText) {
 
 function dashboardTrendRow(item) {
   const summary = trendCardSummary(item);
+  const date = trendCardDate(item);
   return `
     <article class="trend-row" role="button" tabindex="0" onclick='openTrendDetails(${jsArg(item.id)})' onkeydown='openTrendDetailsFromKey(event, ${jsArg(item.id)})'>
       <div class="meta-row">
         <span>${escapeHtml(topicLabel(item.topic || ""))}</span>
+        ${date ? `<span class="trend-date">${escapeHtml(date)}</span>` : ""}
         ${item.source_url ? `<a href="${escapeAttr(item.source_url)}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">Source</a>` : ""}
       </div>
       <h3>${escapeHtml(item.title)}</h3>
@@ -1072,6 +1074,10 @@ function trendCardSummary(item) {
     || summarize(item.source_text_excerpt || item.source_excerpt || "", 150)
     || cleanString(item.why_it_matters)
     || cleanString(item.leadpoet_angle);
+}
+
+function trendCardDate(item) {
+  return formatDate(item.source_published_at || item.date || item.created_at);
 }
 
 function trendRelevanceText(item) {
@@ -2551,12 +2557,14 @@ async function loadTrends() {
 }
 
 function trendCard(item) {
+  const date = trendCardDate(item);
   return `
     <article class="trend-card" role="button" tabindex="0" onclick='openTrendDetails(${jsArg(item.id)})' onkeydown='openTrendDetailsFromKey(event, ${jsArg(item.id)})'>
       <div class="meta-row">
         <span class="tag">${escapeHtml(item.urgency || "medium")}</span>
         <span>${escapeHtml(topicLabel(item.topic || ""))}</span>
         <span>${escapeHtml(label(item.source_type || ""))}</span>
+        ${date ? `<span class="trend-date">${escapeHtml(date)}</span>` : ""}
       </div>
       <h3>${escapeHtml(item.title)}</h3>
       <p>${escapeHtml(item.summary || "")}</p>
