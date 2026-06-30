@@ -154,7 +154,11 @@ class SocialBrainGenerator:
         if not cleaned_options:
             retry_options = generate_with_provider(
                 self.provider,
-                build_writer_retry_prompt(writer_prompt, max_chars=max_chars),
+                build_writer_retry_prompt(
+                    writer_prompt,
+                    max_chars=max_chars,
+                    anchor=workspace_anchor_name(bundle, active_rules),
+                ),
                 variants=1,
                 model=model_routing.natural_writer,
             )
@@ -215,7 +219,16 @@ class SocialBrainGenerator:
                     *rule_warnings,
                 ],
             }
-        evaluation = clean_evaluation_warnings_after_repair(evaluation, repaired_successfully=repaired_successfully)
+        evaluation = clean_evaluation_warnings_after_final_text(
+            evaluation,
+            text=text,
+            request=request,
+            bundle=bundle,
+            trends=trends,
+            avoid_phrases=avoid_phrases,
+            active_rules=active_rules,
+            repaired_successfully=repaired_successfully,
+        )
         adapter.validate_text(text, max_chars=max_chars)
         notes = quality_notes or build_quality_notes(request, bundle, trends=trends)
         draft = GeneratedDraft(
@@ -846,20 +859,51 @@ STALE_REPAIRED_WARNING_LABELS = {
 }
 
 
-def clean_evaluation_warnings_after_repair(
+def clean_evaluation_warnings_after_final_text(
     evaluation: dict[str, object],
     *,
+    text: str,
+    request: DraftRequest,
+    bundle: ContextBundle,
+    trends: list[TrendItem],
+    avoid_phrases: list[str],
+    active_rules: dict[str, list[str]],
     repaired_successfully: bool,
 ) -> dict[str, object]:
-    if not repaired_successfully:
-        return evaluation
     warnings = evaluation.get("warnings")
     if not isinstance(warnings, list):
         return evaluation
-    cleaned = [
-        warning for warning in warnings
-        if " ".join(str(warning or "").split()) not in STALE_REPAIRED_WARNING_LABELS
-    ]
+    anchor = workspace_anchor_name(bundle, active_rules)
+    remaining_violations = draft_rule_violations(
+        text,
+        request,
+        bundle,
+        trends=trends,
+        avoid_phrases=avoid_phrases,
+        active_rules=active_rules,
+    )
+    cleaned: list[object] = []
+    for warning in warnings:
+        normalized = " ".join(str(warning or "").split())
+        lowered = normalized.lower()
+        if not normalized:
+            continue
+        if repaired_successfully and normalized in STALE_REPAIRED_WARNING_LABELS:
+            continue
+        if (
+            anchor
+            and anchor.lower() in text.lower()
+            and not any("anchor the point" in violation.lower() for violation in remaining_violations)
+            and (
+                "positioning_gap" in lowered
+                or "generic intent layer" in lowered
+                or "generic 'intent layer'" in lowered
+                or f"no draft names {anchor.lower()}" in lowered
+                or f"missing {anchor.lower()}" in lowered
+            )
+        ):
+            continue
+        cleaned.append(warning)
     return {**evaluation, "warnings": cleaned}
 
 
@@ -954,27 +998,85 @@ def draft_rule_violations(
             violations.append(f"avoid phrase: {phrase}")
     if "—" in text:
         violations.append("remove em dash")
-    if re.search(r"\b(i do not|i don't) know enough about leadpoet\b", lowered):
-        violations.append("remove model uncertainty about Leadpoet; use saved context or make a narrower claim")
     if re.search(r"\b(cannot proceed|no product update supplied|provide:|provide more details|need more details|to write this post)\b", lowered):
         violations.append("return a publishable post, not a refusal, caveat, or request for more details")
     anchor = workspace_anchor_name(bundle, active_rules)
+    if anchor and re.search(rf"\b(i do not|i don't) know enough about {re.escape(anchor.lower())}\b", lowered):
+        violations.append(f"remove model uncertainty about {anchor}; use saved context or make a narrower claim")
     if anchor and should_require_anchor(request, trends) and anchor.lower() not in lowered:
         violations.append(f"anchor the point to {anchor} as the source of the core wedge")
     return dedupe_preserve_order(violations)
 
 
 def workspace_anchor_name(bundle: ContextBundle, active_rules: dict[str, list[str]]) -> str | None:
-    haystack = "\n".join(
-        [
-            *(section.content for section in bundle.positioning_sections),
-            *active_rules.get("positioning_rules", []),
-            *active_rules.get("voice_rules", []),
-        ]
-    )
+    sources = [
+        *active_rules.get("positioning_rules", []),
+        *(section.content for section in bundle.positioning_sections),
+        *active_rules.get("voice_rules", []),
+    ]
+    for source in sources:
+        candidate = first_workspace_anchor_candidate(source)
+        if candidate:
+            return candidate
+    haystack = "\n".join(sources)
     if re.search(r"\bLeadpoet\b", haystack):
         return "Leadpoet"
     return None
+
+
+ANCHOR_STOPWORDS = {
+    "A",
+    "An",
+    "And",
+    "At",
+    "Bittensor",
+    "Context",
+    "Do",
+    "Facts",
+    "For",
+    "Gavin",
+    "If",
+    "Koinoniko",
+    "No",
+    "Other",
+    "Positioning",
+    "Rules",
+    "Sales",
+    "The",
+    "This",
+    "Use",
+    "Voice",
+    "When",
+    "X",
+}
+
+
+def first_workspace_anchor_candidate(text: str) -> str | None:
+    patterns = [
+        r"\b([A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*){0,2})\s+(?:is|owns|helps|turns|gives|makes|builds|provides)\b",
+        r"\b([A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*){0,2})'s\s+(?:core|unique|main|primary|product|platform|wedge|advantage)\b",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            candidate = " ".join(match.group(1).split())
+            if is_valid_workspace_anchor(candidate):
+                return candidate
+    return None
+
+
+def is_valid_workspace_anchor(candidate: str) -> bool:
+    if not candidate:
+        return False
+    words = candidate.split()
+    if len(words) > 3:
+        return False
+    if candidate in ANCHOR_STOPWORDS:
+        return False
+    if any(word in ANCHOR_STOPWORDS for word in words):
+        return False
+    if candidate.isupper() and len(candidate) <= 2:
+        return False
+    return True
 
 
 def anchor_draft_to_workspace(
@@ -1201,7 +1303,12 @@ def clean_draft_options(
     return cleaned_options
 
 
-def build_writer_retry_prompt(writer_prompt: str, *, max_chars: int) -> str:
+def build_writer_retry_prompt(writer_prompt: str, *, max_chars: int, anchor: str | None = None) -> str:
+    anchor_instruction = (
+        f"Keep the {anchor}/source bridge explicit when the topic is sales, AI, intent, product, launch, or investor-facing."
+        if anchor
+        else "Keep the saved-context/source bridge explicit when the topic is sales, AI, intent, product, launch, or investor-facing."
+    )
     return f"""{writer_prompt}
 
 The previous draft options were not usable.
@@ -1210,7 +1317,7 @@ Return one complete X post only.
 Rules:
 - Stay under {max_chars} characters.
 - Use the saved Facts & Context.
-- Keep the Leadpoet/source bridge explicit when the topic is sales, AI, intent, product, launch, or investor-facing.
+- {anchor_instruction}
 - Do not include avoid phrases, em dashes, markdown, numbering labels, or commentary.
 - Do not invent shipped features, customer stories, product metrics, launch timing, or private proof.
 - Do not refuse or ask the user for missing details. If product specifics are thin, write a product belief from saved context."""

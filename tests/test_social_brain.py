@@ -53,7 +53,12 @@ from leadpoet_social_brain.storage.sqlite_store import (
     resolve_db_path,
 )
 from leadpoet_social_brain.trend_scout import WebTrendGroups, refresh_web_trends, web_trend_groups
-from leadpoet_social_brain.voice import DEFAULT_AVOID_PHRASES, load_avoid_phrases, save_avoid_phrases
+from leadpoet_social_brain.voice import (
+    DEFAULT_AVOID_PHRASES,
+    load_avoid_phrases,
+    save_avoid_phrases,
+    save_positioning_rules,
+)
 from leadpoet_social_brain.web.app import (
     CREATE_POST_MISSING_PROVIDER_MESSAGE,
     DEFAULT_AUTH_USERNAME,
@@ -1273,6 +1278,89 @@ class SocialBrainTest(unittest.TestCase):
             self.assertLessEqual(len(draft.text), 160)
             warnings = draft.context_snapshot["evaluation"]["warnings"]
             self.assertNotIn("anchor the point to Leadpoet as the source of the core wedge", warnings)
+            store.close()
+
+    def test_generation_uses_saved_workspace_rules_without_leadpoet_leakage(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            save_positioning_rules(
+                store,
+                [
+                    "AcmeOS is the core account intelligence layer: first-party CRM context, renewal timing, and buyer intent.",
+                    "Competitor agents are market proof that account timing matters, not the source of AcmeOS's wedge.",
+                ],
+            )
+            provider = SequentialProvider(
+                [
+                    strategy_json(
+                        source_material="User request and AcmeOS positioning context.",
+                        source_bridge="AI SDR trend -> account timing problem -> AcmeOS account intelligence layer.",
+                        claims_to_make=["AcmeOS centers account timing."],
+                        success_criteria="specific, grounded, and tied to AcmeOS.",
+                    ),
+                    "Every AI SDR can write a decent email. It still guesses who is ready to hear it.",
+                    "Outbound automation got fast before it got informed.",
+                    "The useful layer is account timing, not sequence volume.",
+                    evaluation_json(
+                        "Every AI SDR can write a decent email.\n\nIt still guesses who is ready to hear it."
+                    ),
+                    "Every AI SDR can write a decent email.\n\nIt still guesses who is ready to hear it.",
+                    "Every AI SDR can write a decent email.\n\nIt still guesses who is ready to hear it.",
+                ]
+            )
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="Sales LLMs",
+                    post_type="founder_insight",
+                    angle="sales AI still needs account timing",
+                    length_mode="standard",
+                )
+            )[0]
+
+            active_rules = "\n".join(draft.context_snapshot["active_writing_rules"]["positioning_rules"])
+            self.assertIn("AcmeOS is the core account intelligence layer", active_rules)
+            self.assertNotIn("Leadpoet", active_rules)
+            self.assertIn("AcmeOS", draft.text)
+            self.assertNotIn("Leadpoet", draft.text)
+            warnings = draft.context_snapshot["evaluation"]["warnings"]
+            self.assertNotIn("anchor the point to AcmeOS as the source of the core wedge", warnings)
+            store.close()
+
+    def test_generation_clears_stale_positioning_warnings_when_final_text_is_anchored(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = SequentialProvider(
+                [
+                    strategy_json(),
+                    "Sales AI needs timing before copy.",
+                    "The message is downstream of the account signal.",
+                    "Most tools write before they know who is ready.",
+                    evaluation_json(
+                        "Sales AI needs timing before copy.\n\nLeadpoet is the intent layer before outreach.",
+                        warnings=[
+                            "positioning_gap: no draft names Leadpoet explicitly as the intent layer owner",
+                            "All drafts stop at generic 'intent layer' concept without claiming Leadpoet wedge",
+                        ],
+                    ),
+                ]
+            )
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="Sales LLMs",
+                    post_type="founder_insight",
+                    angle="sales AI needs buyer timing before copy",
+                    length_mode="standard",
+                )
+            )[0]
+
+            self.assertIn("Leadpoet", draft.text)
+            warnings = draft.context_snapshot["evaluation"]["warnings"]
+            self.assertEqual(warnings, [])
             store.close()
 
     def test_generation_uses_default_model_for_all_roles_when_roles_are_blank(self):

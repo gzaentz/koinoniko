@@ -22,17 +22,21 @@ DEFAULT_AVOID_PHRASES = [
     "vague market commentary",
 ]
 
-REQUIRED_POSITIONING_RULES = [
+DEFAULT_WORKSPACE_POSITIONING_RULES = [
     "Leadpoet is the core intent layer: proprietary buyer context, timing signals, and account-level intent.",
     "Other tools, agents, and case studies are market proof that intent matters, not the source of Leadpoet's unique wedge.",
     "When referencing another product, validate the market shift, then pull the point back to Leadpoet owning buyer timing and proprietary context.",
 ]
 
-POSITIONING_RULES = [
-    *REQUIRED_POSITIONING_RULES,
+UNIVERSAL_POSITIONING_RULES = [
     "Use saved Facts & Context as the source of truth for writer, company, product, audience, and positioning.",
     "Do not invent company claims, founder background, customer proof, metrics, or product capabilities.",
     "When referencing another product, trend, or case study, connect it back only to the saved positioning.",
+]
+
+POSITIONING_RULES = [
+    *DEFAULT_WORKSPACE_POSITIONING_RULES,
+    *UNIVERSAL_POSITIONING_RULES,
 ]
 
 DEFAULT_VOICE_RULES = [
@@ -66,11 +70,14 @@ def save_avoid_phrases(store: SQLiteStore, phrases: list[object]) -> list[str]:
 
 
 def load_positioning_rules(store: SQLiteStore) -> list[str]:
-    return with_required_positioning_rules(load_rules_setting(store, VOICE_POSITIONING_RULES_SETTING, POSITIONING_RULES))
+    raw = store.get_app_setting(VOICE_POSITIONING_RULES_SETTING)
+    if raw is None:
+        return list(POSITIONING_RULES)
+    return with_universal_positioning_rules(parse_rules_value(raw, []))
 
 
 def save_positioning_rules(store: SQLiteStore, rules: list[object]) -> list[str]:
-    normalized = with_required_positioning_rules(normalize_rules(rules))
+    normalized = with_universal_positioning_rules(normalize_rules(rules))
     store.save_app_setting(VOICE_POSITIONING_RULES_SETTING, json.dumps(normalized))
     store.save_context_section(
         ContextSection(
@@ -146,8 +153,8 @@ def with_required_review_rules(rules: list[str]) -> list[str]:
     return normalize_rules([*rules, *REQUIRED_REVIEW_RULES])
 
 
-def with_required_positioning_rules(rules: list[str]) -> list[str]:
-    return normalize_rules([*REQUIRED_POSITIONING_RULES, *rules])
+def with_universal_positioning_rules(rules: list[str]) -> list[str]:
+    return normalize_rules([*rules, *UNIVERSAL_POSITIONING_RULES])
 
 
 def positioning_rules_context_content(rules: list[str]) -> str:
