@@ -9,10 +9,12 @@ import secrets
 import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
+import re
 
 from leadpoet_social_brain.core.models import (
     ContentQueueItem,
     ContextSection,
+    DEFAULT_WORKSPACE_ID,
     DraftRequest,
     EngagementMetrics,
     GeneratedDraft,
@@ -35,6 +37,7 @@ DB_ENV_VAR = "SOCIAL_BRAIN_DB"
 RAILWAY_VOLUME_MOUNT_ENV_VAR = "RAILWAY_VOLUME_MOUNT_PATH"
 DEFAULT_WEB_AUTH_USERNAME = "gavinz444"
 PASSWORD_HASH_ITERATIONS = 310_000
+WORKSPACE_ID_MAX_LENGTH = 80
 
 
 def resolve_db_path(path: str | Path | None = None) -> Path:
@@ -50,8 +53,9 @@ def resolve_db_path(path: str | Path | None = None) -> Path:
 
 
 class SQLiteStore:
-    def __init__(self, path: str | Path | None = None):
+    def __init__(self, path: str | Path | None = None, *, workspace_id: str | None = None):
         self.path = resolve_db_path(path)
+        self.workspace_id = normalize_workspace_id(workspace_id)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
@@ -71,6 +75,7 @@ class SQLiteStore:
             """
             CREATE TABLE IF NOT EXISTS posts (
                 id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
                 platform TEXT NOT NULL,
                 text TEXT NOT NULL,
                 url TEXT,
@@ -116,17 +121,20 @@ class SQLiteStore:
 
             CREATE TABLE IF NOT EXISTS patterns (
                 id TEXT PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                name TEXT NOT NULL,
                 category TEXT NOT NULL,
                 description TEXT NOT NULL,
                 example_post_ids TEXT NOT NULL,
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                UNIQUE(workspace_id, name)
             );
 
             CREATE TABLE IF NOT EXISTS pattern_examples (
                 id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
                 platform TEXT NOT NULL DEFAULT 'x',
                 source_url TEXT,
                 source_author TEXT,
@@ -158,10 +166,11 @@ class SQLiteStore:
             );
 
             CREATE INDEX IF NOT EXISTS idx_pattern_examples_lookup
-            ON pattern_examples(status, window, category, topic, collected_at);
+            ON pattern_examples(workspace_id, status, window, category, topic, collected_at);
 
             CREATE TABLE IF NOT EXISTS context_sections (
                 id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
                 kind TEXT NOT NULL,
                 name TEXT NOT NULL,
                 content TEXT NOT NULL,
@@ -169,11 +178,12 @@ class SQLiteStore:
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                UNIQUE(kind, name)
+                UNIQUE(workspace_id, kind, name)
             );
 
             CREATE TABLE IF NOT EXISTS generated_drafts (
                 id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
                 platform TEXT NOT NULL,
                 topic TEXT NOT NULL,
                 post_type TEXT NOT NULL,
@@ -206,6 +216,7 @@ class SQLiteStore:
 
             CREATE TABLE IF NOT EXISTS trend_items (
                 id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
                 title TEXT NOT NULL,
                 source_url TEXT,
                 source_type TEXT NOT NULL,
@@ -236,10 +247,11 @@ class SQLiteStore:
             );
 
             CREATE INDEX IF NOT EXISTS idx_trend_items_lookup
-            ON trend_items(status, urgency, topic, date);
+            ON trend_items(workspace_id, status, urgency, topic, date);
 
             CREATE TABLE IF NOT EXISTS content_queue (
                 id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
                 platform TEXT NOT NULL DEFAULT 'x',
                 draft_id TEXT,
                 text TEXT NOT NULL,
@@ -260,7 +272,7 @@ class SQLiteStore:
             );
 
             CREATE INDEX IF NOT EXISTS idx_content_queue_status_scheduled
-            ON content_queue(status, scheduled_at);
+            ON content_queue(workspace_id, status, scheduled_at);
 
             CREATE TABLE IF NOT EXISTS queued_post_versions (
                 id TEXT PRIMARY KEY,
@@ -276,6 +288,7 @@ class SQLiteStore:
 
             CREATE TABLE IF NOT EXISTS web_auth_users (
                 username TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
                 password_hash TEXT NOT NULL,
                 salt TEXT NOT NULL,
                 iterations INTEGER NOT NULL,
@@ -284,18 +297,22 @@ class SQLiteStore:
             );
 
             CREATE TABLE IF NOT EXISTS app_settings (
-                key TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                key TEXT NOT NULL,
                 value TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (workspace_id, key)
             );
 
             CREATE TABLE IF NOT EXISTS sync_metadata (
-                key TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                key TEXT NOT NULL,
                 last_started_at TEXT,
                 last_completed_at TEXT,
                 status TEXT NOT NULL,
                 summary_json TEXT NOT NULL DEFAULT '{}',
-                error_message TEXT
+                error_message TEXT,
+                PRIMARY KEY (workspace_id, key)
             );
             """
         )
@@ -304,6 +321,9 @@ class SQLiteStore:
         self.conn.commit()
 
     def _migrate_existing_schema(self) -> None:
+        self._ensure_workspace_columns()
+        self._migrate_workspace_unique_tables()
+        self._recreate_workspace_indexes()
         self._ensure_column("posts", "source_draft_id", "TEXT")
         for column in ["hook", "structure", "tone", "cta", "formatting"]:
             self._ensure_column("post_notes", column, "TEXT")
@@ -323,11 +343,59 @@ class SQLiteStore:
             self._ensure_column("trend_items", column, "TEXT")
         self._ensure_column("trend_items", "enrichment_status", "TEXT NOT NULL DEFAULT 'not_attempted'")
 
+    def _ensure_workspace_columns(self) -> None:
+        for table in [
+            "posts",
+            "patterns",
+            "pattern_examples",
+            "context_sections",
+            "generated_drafts",
+            "trend_items",
+            "content_queue",
+            "web_auth_users",
+            "app_settings",
+            "sync_metadata",
+        ]:
+            self._ensure_column(table, "workspace_id", f"TEXT NOT NULL DEFAULT '{DEFAULT_WORKSPACE_ID}'")
+
+    def _migrate_workspace_unique_tables(self) -> None:
+        if not self._has_unique_index("patterns", ["workspace_id", "name"]):
+            self._rebuild_patterns_table()
+        if not self._has_unique_index("context_sections", ["workspace_id", "kind", "name"]):
+            self._rebuild_context_sections_table()
+        if not self._has_unique_index("app_settings", ["workspace_id", "key"]):
+            self._rebuild_app_settings_table()
+        if not self._has_unique_index("sync_metadata", ["workspace_id", "key"]):
+            self._rebuild_sync_metadata_table()
+
+    def _recreate_workspace_indexes(self) -> None:
+        self.conn.execute("DROP INDEX IF EXISTS idx_pattern_examples_lookup")
+        self.conn.execute(
+            """
+            CREATE INDEX idx_pattern_examples_lookup
+            ON pattern_examples(workspace_id, status, window, category, topic, collected_at)
+            """
+        )
+        self.conn.execute("DROP INDEX IF EXISTS idx_trend_items_lookup")
+        self.conn.execute(
+            """
+            CREATE INDEX idx_trend_items_lookup
+            ON trend_items(workspace_id, status, urgency, topic, date)
+            """
+        )
+        self.conn.execute("DROP INDEX IF EXISTS idx_content_queue_status_scheduled")
+        self.conn.execute(
+            """
+            CREATE INDEX idx_content_queue_status_scheduled
+            ON content_queue(workspace_id, status, scheduled_at)
+            """
+        )
+
     def _ensure_required_context_sections(self) -> None:
         for section in required_context_sections():
             exists = self.conn.execute(
-                "SELECT 1 FROM context_sections WHERE kind = ? AND name = ?",
-                (section.kind, section.name),
+                "SELECT 1 FROM context_sections WHERE workspace_id = ? AND kind = ? AND name = ?",
+                (self.workspace_id, section.kind, section.name),
             ).fetchone()
             if exists:
                 continue
@@ -335,12 +403,13 @@ class SQLiteStore:
             self.conn.execute(
                 """
                 INSERT INTO context_sections (
-                    id, kind, name, content, weight, active, created_at, updated_at
+                    id, workspace_id, kind, name, content, weight, active, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     section.id,
+                    self.workspace_id,
                     section.kind,
                     section.name,
                     section.content,
@@ -355,6 +424,7 @@ class SQLiteStore:
         now = utc_now()
         saved = ContentQueueItem(
             id=item.id,
+            workspace_id=self.workspace_id,
             platform=item.platform,
             draft_id=item.draft_id,
             text=item.text,
@@ -376,13 +446,14 @@ class SQLiteStore:
         self.conn.execute(
             """
             INSERT INTO content_queue (
-                id, platform, draft_id, text, topic, post_type, angle,
+                id, workspace_id, platform, draft_id, text, topic, post_type, angle,
                 trend_ids_json, scheduled_at, status, reviewer_notes,
                 created_at, updated_at, approved_at, posted_at, x_post_id,
                 x_url, failure_reason
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
+                workspace_id = excluded.workspace_id,
                 platform = excluded.platform,
                 draft_id = excluded.draft_id,
                 text = excluded.text,
@@ -402,6 +473,7 @@ class SQLiteStore:
             """,
             (
                 saved.id,
+                saved.workspace_id,
                 saved.platform,
                 saved.draft_id,
                 saved.text,
@@ -425,7 +497,10 @@ class SQLiteStore:
         return saved
 
     def get_content_queue_item(self, queue_id: str) -> ContentQueueItem | None:
-        row = self.conn.execute("SELECT * FROM content_queue WHERE id = ?", (queue_id,)).fetchone()
+        row = self.conn.execute(
+            "SELECT * FROM content_queue WHERE id = ? AND workspace_id = ?",
+            (queue_id, self.workspace_id),
+        ).fetchone()
         return self._row_to_queue_item(row) if row else None
 
     def list_content_queue(
@@ -437,8 +512,8 @@ class SQLiteStore:
         scheduled_to: str | None = None,
         limit: int = 100,
     ) -> list[ContentQueueItem]:
-        clauses: list[str] = []
-        params: list[object] = []
+        clauses: list[str] = ["workspace_id = ?"]
+        params: list[object] = [self.workspace_id]
         if status:
             clauses.append("status = ?")
             params.append(status)
@@ -476,14 +551,17 @@ class SQLiteStore:
             SELECT *
             FROM content_queue
             WHERE platform = ? AND status = 'approved' AND scheduled_at <= ?
+              AND workspace_id = ?
             ORDER BY scheduled_at ASC, created_at ASC
             LIMIT ?
             """,
-            (platform, now or utc_now(), limit),
+            (platform, now or utc_now(), self.workspace_id, limit),
         ).fetchall()
         return [self._row_to_queue_item(row) for row in rows]
 
     def save_queued_post_version(self, version: QueuedPostVersion) -> QueuedPostVersion:
+        if not self.get_content_queue_item(version.queue_id):
+            raise ValueError(f"No queued post found for id {version.queue_id}")
         saved = QueuedPostVersion(
             id=version.id,
             queue_id=version.queue_id,
@@ -513,8 +591,13 @@ class SQLiteStore:
 
     def get_queued_post_version(self, version_id: str) -> QueuedPostVersion | None:
         row = self.conn.execute(
-            "SELECT * FROM queued_post_versions WHERE id = ?",
-            (version_id,),
+            """
+            SELECT qv.*
+            FROM queued_post_versions qv
+            JOIN content_queue cq ON cq.id = qv.queue_id
+            WHERE qv.id = ? AND cq.workspace_id = ?
+            """,
+            (version_id, self.workspace_id),
         ).fetchone()
         return self._row_to_queue_version(row) if row else None
 
@@ -524,14 +607,19 @@ class SQLiteStore:
             SELECT *
             FROM queued_post_versions
             WHERE queue_id = ?
+              AND EXISTS (
+                  SELECT 1 FROM content_queue
+                  WHERE content_queue.id = queued_post_versions.queue_id
+                    AND content_queue.workspace_id = ?
+              )
             ORDER BY created_at DESC
             LIMIT ?
             """,
-            (queue_id, limit),
+            (queue_id, self.workspace_id, limit),
         ).fetchall()
         return [self._row_to_queue_version(row) for row in rows]
 
-    def save_web_auth_user(self, username: str, password: str) -> WebAuthUser:
+    def save_web_auth_user(self, username: str, password: str, *, workspace_id: str | None = None) -> WebAuthUser:
         clean_username = username.strip()
         if not clean_username:
             raise ValueError("Username is required.")
@@ -540,8 +628,14 @@ class SQLiteStore:
         existing = self.get_web_auth_user(clean_username)
         salt, password_hash, iterations = hash_password(password)
         now = utc_now()
+        resolved_workspace_id = normalize_workspace_id(
+            workspace_id
+            or (existing.workspace_id if existing else None)
+            or workspace_id_from_username(clean_username)
+        )
         user = WebAuthUser(
             username=clean_username,
+            workspace_id=resolved_workspace_id,
             password_hash=password_hash,
             salt=salt,
             iterations=iterations,
@@ -551,10 +645,11 @@ class SQLiteStore:
         self.conn.execute(
             """
             INSERT INTO web_auth_users (
-                username, password_hash, salt, iterations, created_at, updated_at
+                username, workspace_id, password_hash, salt, iterations, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(username) DO UPDATE SET
+                workspace_id = excluded.workspace_id,
                 password_hash = excluded.password_hash,
                 salt = excluded.salt,
                 iterations = excluded.iterations,
@@ -562,6 +657,7 @@ class SQLiteStore:
             """,
             (
                 user.username,
+                user.workspace_id,
                 user.password_hash,
                 user.salt,
                 user.iterations,
@@ -596,8 +692,8 @@ class SQLiteStore:
 
     def get_app_setting(self, key: str) -> str | None:
         row = self.conn.execute(
-            "SELECT value FROM app_settings WHERE key = ?",
-            (key.strip(),),
+            "SELECT value FROM app_settings WHERE workspace_id = ? AND key = ?",
+            (self.workspace_id, key.strip()),
         ).fetchone()
         return str(row["value"]) if row else None
 
@@ -607,17 +703,20 @@ class SQLiteStore:
             raise ValueError("Setting key is required.")
         clean_value = str(value or "").strip()
         if not clean_value:
-            self.conn.execute("DELETE FROM app_settings WHERE key = ?", (clean_key,))
+            self.conn.execute(
+                "DELETE FROM app_settings WHERE workspace_id = ? AND key = ?",
+                (self.workspace_id, clean_key),
+            )
         else:
             self.conn.execute(
                 """
-                INSERT INTO app_settings (key, value, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(key) DO UPDATE SET
+                INSERT INTO app_settings (workspace_id, key, value, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(workspace_id, key) DO UPDATE SET
                     value = excluded.value,
                     updated_at = excluded.updated_at
                 """,
-                (clean_key, clean_value, utc_now()),
+                (self.workspace_id, clean_key, clean_value, utc_now()),
             )
         self.conn.commit()
 
@@ -627,6 +726,7 @@ class SQLiteStore:
             raise ValueError("Sync metadata key is required.")
         saved = SyncMetadata(
             key=clean_key,
+            workspace_id=self.workspace_id,
             last_started_at=metadata.last_started_at,
             last_completed_at=metadata.last_completed_at,
             status=metadata.status,
@@ -636,11 +736,11 @@ class SQLiteStore:
         self.conn.execute(
             """
             INSERT INTO sync_metadata (
-                key, last_started_at, last_completed_at, status,
+                workspace_id, key, last_started_at, last_completed_at, status,
                 summary_json, error_message
             )
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(key) DO UPDATE SET
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(workspace_id, key) DO UPDATE SET
                 last_started_at = excluded.last_started_at,
                 last_completed_at = excluded.last_completed_at,
                 status = excluded.status,
@@ -648,6 +748,7 @@ class SQLiteStore:
                 error_message = excluded.error_message
             """,
             (
+                saved.workspace_id,
                 saved.key,
                 saved.last_started_at,
                 saved.last_completed_at,
@@ -661,18 +762,21 @@ class SQLiteStore:
 
     def get_sync_metadata(self, key: str) -> SyncMetadata | None:
         row = self.conn.execute(
-            "SELECT * FROM sync_metadata WHERE key = ?",
-            (key.strip(),),
+            "SELECT * FROM sync_metadata WHERE workspace_id = ? AND key = ?",
+            (self.workspace_id, key.strip()),
         ).fetchone()
         return self._row_to_sync_metadata(row) if row else None
 
     def sync_metadata_by_key(self) -> dict[str, SyncMetadata]:
-        rows = self.conn.execute("SELECT * FROM sync_metadata").fetchall()
+        rows = self.conn.execute(
+            "SELECT * FROM sync_metadata WHERE workspace_id = ?",
+            (self.workspace_id,),
+        ).fetchall()
         return {row["key"]: self._row_to_sync_metadata(row) for row in rows}
 
     def count_posts(self, *, platform: str | None = None, status: str | None = None) -> int:
-        clauses: list[str] = []
-        params: list[object] = []
+        clauses: list[str] = ["workspace_id = ?"]
+        params: list[object] = [self.workspace_id]
         if platform:
             clauses.append("platform = ?")
             params.append(platform)
@@ -688,10 +792,138 @@ class SQLiteStore:
         if column not in {row["name"] for row in rows}:
             self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
+    def _has_unique_index(self, table: str, columns: list[str]) -> bool:
+        for index in self.conn.execute(f"PRAGMA index_list({table})").fetchall():
+            if not bool(index["unique"]):
+                continue
+            index_name = index["name"]
+            rows = self.conn.execute(f"PRAGMA index_info({index_name})").fetchall()
+            if [row["name"] for row in rows] == columns:
+                return True
+        return False
+
+    def _rebuild_patterns_table(self) -> None:
+        self.conn.execute("ALTER TABLE patterns RENAME TO patterns_old")
+        self.conn.execute(
+            """
+            CREATE TABLE patterns (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                description TEXT NOT NULL,
+                example_post_ids TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(workspace_id, name)
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT OR IGNORE INTO patterns (
+                id, workspace_id, name, category, description, example_post_ids,
+                active, created_at, updated_at
+            )
+            SELECT id, COALESCE(workspace_id, ?), name, category, description,
+                   example_post_ids, active, created_at, updated_at
+            FROM patterns_old
+            """,
+            (DEFAULT_WORKSPACE_ID,),
+        )
+        self.conn.execute("DROP TABLE patterns_old")
+
+    def _rebuild_context_sections_table(self) -> None:
+        self.conn.execute("ALTER TABLE context_sections RENAME TO context_sections_old")
+        self.conn.execute(
+            """
+            CREATE TABLE context_sections (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                kind TEXT NOT NULL,
+                name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                weight REAL NOT NULL DEFAULT 1.0,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(workspace_id, kind, name)
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT OR IGNORE INTO context_sections (
+                id, workspace_id, kind, name, content, weight, active,
+                created_at, updated_at
+            )
+            SELECT id, COALESCE(workspace_id, ?), kind, name, content, weight,
+                   active, created_at, updated_at
+            FROM context_sections_old
+            """,
+            (DEFAULT_WORKSPACE_ID,),
+        )
+        self.conn.execute("DROP TABLE context_sections_old")
+
+    def _rebuild_app_settings_table(self) -> None:
+        self.conn.execute("ALTER TABLE app_settings RENAME TO app_settings_old")
+        self.conn.execute(
+            """
+            CREATE TABLE app_settings (
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (workspace_id, key)
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT OR IGNORE INTO app_settings (workspace_id, key, value, updated_at)
+            SELECT COALESCE(workspace_id, ?), key, value, updated_at
+            FROM app_settings_old
+            """,
+            (DEFAULT_WORKSPACE_ID,),
+        )
+        self.conn.execute("DROP TABLE app_settings_old")
+
+    def _rebuild_sync_metadata_table(self) -> None:
+        self.conn.execute("ALTER TABLE sync_metadata RENAME TO sync_metadata_old")
+        self.conn.execute(
+            """
+            CREATE TABLE sync_metadata (
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                key TEXT NOT NULL,
+                last_started_at TEXT,
+                last_completed_at TEXT,
+                status TEXT NOT NULL,
+                summary_json TEXT NOT NULL DEFAULT '{}',
+                error_message TEXT,
+                PRIMARY KEY (workspace_id, key)
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT OR IGNORE INTO sync_metadata (
+                workspace_id, key, last_started_at, last_completed_at, status,
+                summary_json, error_message
+            )
+            SELECT COALESCE(workspace_id, ?), key, last_started_at,
+                   last_completed_at, status, summary_json, error_message
+            FROM sync_metadata_old
+            """,
+            (DEFAULT_WORKSPACE_ID,),
+        )
+        self.conn.execute("DROP TABLE sync_metadata_old")
+
     def save_post(self, post: SocialPost) -> SocialPost:
         now = utc_now()
         saved = SocialPost(
             id=post.id,
+            workspace_id=self.workspace_id,
             platform=post.platform,
             text=post.text,
             url=post.url,
@@ -707,11 +939,12 @@ class SQLiteStore:
         self.conn.execute(
             """
             INSERT INTO posts (
-                id, platform, text, url, published_at, author, topic, post_type,
+                id, workspace_id, platform, text, url, published_at, author, topic, post_type,
                 status, source_draft_id, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
+                workspace_id = excluded.workspace_id,
                 platform = excluded.platform,
                 text = excluded.text,
                 url = excluded.url,
@@ -725,6 +958,7 @@ class SQLiteStore:
             """,
             (
                 saved.id,
+                saved.workspace_id,
                 saved.platform,
                 saved.text,
                 saved.url,
@@ -742,6 +976,8 @@ class SQLiteStore:
         return saved
 
     def add_metrics(self, post_id: str, metrics: EngagementMetrics) -> EngagementMetrics:
+        if not self.get_post(post_id):
+            raise ValueError(f"No post found for id {post_id}")
         normalized = metrics.normalized()
         self.conn.execute(
             """
@@ -769,6 +1005,8 @@ class SQLiteStore:
         return normalized
 
     def save_note(self, note: PostNote) -> PostNote:
+        if not self.get_post(note.post_id):
+            raise ValueError(f"No post found for id {note.post_id}")
         saved = PostNote(
             post_id=note.post_id,
             worked_reason=note.worked_reason,
@@ -820,6 +1058,7 @@ class SQLiteStore:
         now = utc_now()
         saved = Pattern(
             id=pattern.id,
+            workspace_id=self.workspace_id,
             name=pattern.name,
             category=pattern.category,
             description=pattern.description,
@@ -831,11 +1070,11 @@ class SQLiteStore:
         self.conn.execute(
             """
             INSERT INTO patterns (
-                id, name, category, description, example_post_ids, active,
+                id, workspace_id, name, category, description, example_post_ids, active,
                 created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(name) DO UPDATE SET
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(workspace_id, name) DO UPDATE SET
                 category = excluded.category,
                 description = excluded.description,
                 example_post_ids = excluded.example_post_ids,
@@ -844,6 +1083,7 @@ class SQLiteStore:
             """,
             (
                 saved.id,
+                saved.workspace_id,
                 saved.name,
                 saved.category,
                 saved.description,
@@ -860,6 +1100,7 @@ class SQLiteStore:
         now = utc_now()
         saved = ContextSection(
             id=section.id,
+            workspace_id=self.workspace_id,
             kind=section.kind,
             name=section.name,
             content=section.content,
@@ -871,10 +1112,10 @@ class SQLiteStore:
         self.conn.execute(
             """
             INSERT INTO context_sections (
-                id, kind, name, content, weight, active, created_at, updated_at
+                id, workspace_id, kind, name, content, weight, active, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(kind, name) DO UPDATE SET
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(workspace_id, kind, name) DO UPDATE SET
                 content = excluded.content,
                 weight = excluded.weight,
                 active = excluded.active,
@@ -882,6 +1123,7 @@ class SQLiteStore:
             """,
             (
                 saved.id,
+                saved.workspace_id,
                 saved.kind,
                 saved.name,
                 saved.content,
@@ -895,34 +1137,46 @@ class SQLiteStore:
         return saved
 
     def save_generated_draft(self, draft: GeneratedDraft) -> GeneratedDraft:
+        saved = GeneratedDraft(
+            id=draft.id,
+            workspace_id=self.workspace_id,
+            text=draft.text,
+            request=draft.request,
+            explanation=draft.explanation,
+            influences=draft.influences,
+            context_snapshot=draft.context_snapshot,
+            created_at=draft.created_at,
+        )
         self.conn.execute(
             """
             INSERT INTO generated_drafts (
-                id, platform, topic, post_type, request_json, text, explanation,
+                id, workspace_id, platform, topic, post_type, request_json, text, explanation,
                 influences_json, context_snapshot_json, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                draft.id,
-                draft.request.platform,
-                draft.request.topic,
-                draft.request.post_type,
-                json.dumps(draft.request.__dict__),
-                draft.text,
-                draft.explanation,
-                json.dumps(draft.influences),
-                json.dumps(draft.context_snapshot),
-                draft.created_at,
+                saved.id,
+                saved.workspace_id,
+                saved.request.platform,
+                saved.request.topic,
+                saved.request.post_type,
+                json.dumps(saved.request.__dict__),
+                saved.text,
+                saved.explanation,
+                json.dumps(saved.influences),
+                json.dumps(saved.context_snapshot),
+                saved.created_at,
             ),
         )
         self.conn.commit()
-        return draft
+        return saved
 
     def save_trend_item(self, trend: TrendItem) -> TrendItem:
         now = utc_now()
         saved = TrendItem(
             id=trend.id,
+            workspace_id=self.workspace_id,
             title=trend.title,
             source_url=trend.source_url,
             source_type=trend.source_type,
@@ -954,7 +1208,7 @@ class SQLiteStore:
         self.conn.execute(
             """
             INSERT INTO trend_items (
-                id, title, source_url, source_type, topic, summary, why_it_matters,
+                id, workspace_id, title, source_url, source_type, topic, summary, why_it_matters,
                 leadpoet_angle, suggested_hooks, urgency, date, status,
                 engagement_notes, source_author, raw_text, source_title,
                 source_published_at, source_excerpt, source_text_excerpt,
@@ -962,8 +1216,9 @@ class SQLiteStore:
                 source_confidence, enriched_at, enrichment_status,
                 enrichment_error, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
+                workspace_id = excluded.workspace_id,
                 title = excluded.title,
                 source_url = excluded.source_url,
                 source_type = excluded.source_type,
@@ -993,6 +1248,7 @@ class SQLiteStore:
             """,
             (
                 saved.id,
+                saved.workspace_id,
                 saved.title,
                 saved.source_url,
                 saved.source_type,
@@ -1029,6 +1285,7 @@ class SQLiteStore:
         now = utc_now()
         saved = ViralPattern(
             id=pattern.id,
+            workspace_id=self.workspace_id,
             platform=pattern.platform or "x",
             source_url=pattern.source_url,
             source_author=pattern.source_author,
@@ -1061,15 +1318,16 @@ class SQLiteStore:
         self.conn.execute(
             """
             INSERT INTO pattern_examples (
-                id, platform, source_url, source_author, source_text,
+                id, workspace_id, platform, source_url, source_author, source_text,
                 source_summary, topic, category, pattern_name, hook_style,
                 structure, pacing, tone, formatting, why_it_worked,
                 adaptation_rule, engagement_notes, likes, replies, reposts,
                 quotes, bookmarks, impressions, collected_at, window, status,
                 raw_text, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
+                workspace_id = excluded.workspace_id,
                 platform = excluded.platform,
                 source_url = excluded.source_url,
                 source_author = excluded.source_author,
@@ -1100,6 +1358,7 @@ class SQLiteStore:
             """,
             (
                 saved.id,
+                saved.workspace_id,
                 saved.platform,
                 saved.source_url,
                 saved.source_author,
@@ -1134,7 +1393,10 @@ class SQLiteStore:
         return saved
 
     def get_viral_pattern(self, pattern_id: str) -> ViralPattern | None:
-        row = self.conn.execute("SELECT * FROM pattern_examples WHERE id = ?", (pattern_id,)).fetchone()
+        row = self.conn.execute(
+            "SELECT * FROM pattern_examples WHERE id = ? AND workspace_id = ?",
+            (pattern_id, self.workspace_id),
+        ).fetchone()
         return self._row_to_viral_pattern(row) if row else None
 
     def list_viral_patterns(
@@ -1146,8 +1408,8 @@ class SQLiteStore:
         topic: str | None = None,
         limit: int | None = 20,
     ) -> list[ViralPattern]:
-        clauses: list[str] = []
-        params: list[object] = []
+        clauses: list[str] = ["workspace_id = ?"]
+        params: list[object] = [self.workspace_id]
         if status:
             clauses.append("status = ?")
             params.append(status)
@@ -1178,8 +1440,8 @@ class SQLiteStore:
 
     def mark_viral_pattern_status(self, pattern_id: str, status: str) -> ViralPattern | None:
         self.conn.execute(
-            "UPDATE pattern_examples SET status = ?, updated_at = ? WHERE id = ?",
-            (status, utc_now(), pattern_id),
+            "UPDATE pattern_examples SET status = ?, updated_at = ? WHERE id = ? AND workspace_id = ?",
+            (status, utc_now(), pattern_id, self.workspace_id),
         )
         self.conn.commit()
         return self.get_viral_pattern(pattern_id)
@@ -1192,8 +1454,8 @@ class SQLiteStore:
         urgency: str | None = None,
         limit: int = 20,
     ) -> list[TrendItem]:
-        clauses: list[str] = []
-        params: list[object] = []
+        clauses: list[str] = ["workspace_id = ?"]
+        params: list[object] = [self.workspace_id]
         if topic:
             clauses.append("(topic = ? OR topic LIKE ? OR title LIKE ? OR summary LIKE ?)")
             params.extend([topic, f"%{topic}%", f"%{topic}%", f"%{topic}%"])
@@ -1220,8 +1482,8 @@ class SQLiteStore:
 
     def get_trend_item(self, trend_id: str) -> TrendItem | None:
         row = self.conn.execute(
-            "SELECT * FROM trend_items WHERE id = ?",
-            (trend_id,),
+            "SELECT * FROM trend_items WHERE id = ? AND workspace_id = ?",
+            (trend_id, self.workspace_id),
         ).fetchone()
         return self._row_to_trend(row) if row else None
 
@@ -1258,21 +1520,22 @@ class SQLiteStore:
 
     def mark_trend_status(self, trend_id: str, status: str) -> None:
         self.conn.execute(
-            "UPDATE trend_items SET status = ?, updated_at = ? WHERE id = ?",
-            (status, utc_now(), trend_id),
+            "UPDATE trend_items SET status = ?, updated_at = ? WHERE id = ? AND workspace_id = ?",
+            (status, utc_now(), trend_id, self.workspace_id),
         )
         self.conn.commit()
 
     def get_generated_draft(self, draft_id: str) -> GeneratedDraft | None:
         row = self.conn.execute(
-            "SELECT * FROM generated_drafts WHERE id = ?",
-            (draft_id,),
+            "SELECT * FROM generated_drafts WHERE id = ? AND workspace_id = ?",
+            (draft_id, self.workspace_id),
         ).fetchone()
         if not row:
             return None
         request = DraftRequest(**json.loads(row["request_json"]))
         return GeneratedDraft(
             id=row["id"],
+            workspace_id=row["workspace_id"],
             text=row["text"],
             request=request,
             explanation=row["explanation"],
@@ -1282,7 +1545,11 @@ class SQLiteStore:
         )
 
     def save_post_influences(self, influences: Iterable[PostInfluence]) -> None:
-        rows = list(influences)
+        rows = [
+            influence
+            for influence in influences
+            if self.get_post(influence.post_id)
+        ]
         if not rows:
             return
         self.conn.executemany(
@@ -1335,17 +1602,30 @@ class SQLiteStore:
             params.append(category)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self.conn.execute(
-            f"SELECT * FROM post_influences {where} ORDER BY created_at DESC",
-            params,
+            f"""
+            SELECT pi.*
+            FROM post_influences pi
+            JOIN posts p ON p.id = pi.post_id
+            {where}
+            {"AND" if where else "WHERE"} p.workspace_id = ?
+            ORDER BY pi.created_at DESC
+            """,
+            [*params, self.workspace_id],
         ).fetchall()
         return [self._row_to_influence(row) for row in rows]
 
     def get_post(self, post_id: str) -> SocialPost | None:
-        row = self.conn.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
+        row = self.conn.execute(
+            "SELECT * FROM posts WHERE id = ? AND workspace_id = ?",
+            (post_id, self.workspace_id),
+        ).fetchone()
         return self._row_to_post(row) if row else None
 
     def get_post_by_url(self, url: str) -> SocialPost | None:
-        row = self.conn.execute("SELECT * FROM posts WHERE url = ? LIMIT 1", (url,)).fetchone()
+        row = self.conn.execute(
+            "SELECT * FROM posts WHERE url = ? AND workspace_id = ? LIMIT 1",
+            (url, self.workspace_id),
+        ).fetchone()
         return self._row_to_post(row) if row else None
 
     def get_post_by_x_post_id(self, x_post_id: str) -> SocialPost | None:
@@ -1354,6 +1634,7 @@ class SQLiteStore:
             SELECT *
             FROM posts
             WHERE platform = 'x'
+              AND workspace_id = ?
               AND (
                 url LIKE ?
                 OR url LIKE ?
@@ -1363,6 +1644,7 @@ class SQLiteStore:
             LIMIT 1
             """,
             (
+                self.workspace_id,
                 f"%/status/{x_post_id}",
                 f"%/status/{x_post_id}?%",
                 f"%/status/{x_post_id}/%",
@@ -1380,8 +1662,8 @@ class SQLiteStore:
         post_type: str | None = None,
         limit: int | None = 50,
     ) -> list[SocialPost]:
-        clauses: list[str] = []
-        params: list[object] = []
+        clauses: list[str] = ["workspace_id = ?"]
+        params: list[object] = [self.workspace_id]
         if platform:
             clauses.append("platform = ?")
             params.append(platform)
@@ -1405,7 +1687,7 @@ class SQLiteStore:
         return [self._row_to_post(row) for row in rows]
 
     def latest_metrics_by_post_id(self, post_ids: Iterable[str] | None = None) -> dict[str, EngagementMetrics]:
-        params: list[object] = []
+        params: list[object] = [self.workspace_id]
         filter_sql = ""
         ids = list(post_ids or [])
         if ids:
@@ -1416,6 +1698,7 @@ class SQLiteStore:
             f"""
             SELECT pm.*
             FROM post_metrics pm
+            JOIN posts p ON p.id = pm.post_id
             WHERE pm.id = (
                 SELECT latest.id
                 FROM post_metrics AS latest
@@ -1423,6 +1706,7 @@ class SQLiteStore:
                 ORDER BY latest.measured_at DESC, latest.created_at DESC, latest.id DESC
                 LIMIT 1
             )
+            AND p.workspace_id = ?
             {filter_sql}
             """,
             params,
@@ -1430,7 +1714,7 @@ class SQLiteStore:
         return {row["post_id"]: self._row_to_metrics(row) for row in rows}
 
     def metrics_for_post(self, post_id: str, *, limit: int | None = None) -> list[EngagementMetrics]:
-        params: list[object] = [post_id]
+        params: list[object] = [post_id, self.workspace_id]
         limit_sql = ""
         if limit:
             limit_sql = "LIMIT ?"
@@ -1440,6 +1724,11 @@ class SQLiteStore:
             SELECT *
             FROM post_metrics
             WHERE post_id = ?
+              AND EXISTS (
+                  SELECT 1 FROM posts
+                  WHERE posts.id = post_metrics.post_id
+                    AND posts.workspace_id = ?
+              )
             ORDER BY measured_at DESC, created_at DESC, id DESC
             {limit_sql}
             """,
@@ -1448,14 +1737,23 @@ class SQLiteStore:
         return [self._row_to_metrics(row) for row in rows]
 
     def notes_by_post_id(self, post_ids: Iterable[str] | None = None) -> dict[str, PostNote]:
-        params: list[object] = []
+        params: list[object] = [self.workspace_id]
         where = ""
         ids = list(post_ids or [])
         if ids:
             placeholders = ", ".join("?" for _ in ids)
-            where = f"WHERE post_id IN ({placeholders})"
+            where = f"AND n.post_id IN ({placeholders})"
             params.extend(ids)
-        rows = self.conn.execute(f"SELECT * FROM post_notes {where}", params).fetchall()
+        rows = self.conn.execute(
+            f"""
+            SELECT n.*
+            FROM post_notes n
+            JOIN posts p ON p.id = n.post_id
+            WHERE p.workspace_id = ?
+            {where}
+            """,
+            params,
+        ).fetchall()
         return {row["post_id"]: self._row_to_note(row) for row in rows}
 
     def list_context_sections(
@@ -1464,8 +1762,8 @@ class SQLiteStore:
         kinds: Iterable[str] | None = None,
         active_only: bool = True,
     ) -> list[ContextSection]:
-        clauses: list[str] = []
-        params: list[object] = []
+        clauses: list[str] = ["workspace_id = ?"]
+        params: list[object] = [self.workspace_id]
         if kinds:
             kinds_list = list(kinds)
             placeholders = ", ".join("?" for _ in kinds_list)
@@ -1487,8 +1785,8 @@ class SQLiteStore:
         active_only: bool = True,
         limit: int | None = None,
     ) -> list[Pattern]:
-        clauses: list[str] = []
-        params: list[object] = []
+        clauses: list[str] = ["workspace_id = ?"]
+        params: list[object] = [self.workspace_id]
         if categories:
             category_list = list(categories)
             placeholders = ", ".join("?" for _ in category_list)
@@ -1515,8 +1813,8 @@ class SQLiteStore:
         limit: int = 5,
         imitate_only: bool = True,
     ) -> list[SocialPost]:
-        clauses = ["p.platform = ?", "p.status IN ('example', 'published')"]
-        params: list[object] = [platform]
+        clauses = ["p.workspace_id = ?", "p.platform = ?", "p.status IN ('example', 'published')"]
+        params: list[object] = [self.workspace_id, platform]
         if topic:
             clauses.append("(p.topic = ? OR p.topic LIKE ?)")
             params.extend([topic, f"%{topic}%"])
@@ -1557,6 +1855,7 @@ class SQLiteStore:
     def _row_to_post(self, row: sqlite3.Row) -> SocialPost:
         return SocialPost(
             id=row["id"],
+            workspace_id=row["workspace_id"],
             platform=row["platform"],
             text=row["text"],
             url=row["url"],
@@ -1612,6 +1911,7 @@ class SQLiteStore:
     def _row_to_pattern(self, row: sqlite3.Row) -> Pattern:
         return Pattern(
             id=row["id"],
+            workspace_id=row["workspace_id"],
             name=row["name"],
             category=row["category"],
             description=row["description"],
@@ -1624,6 +1924,7 @@ class SQLiteStore:
     def _row_to_viral_pattern(self, row: sqlite3.Row) -> ViralPattern:
         return ViralPattern(
             id=row["id"],
+            workspace_id=row["workspace_id"],
             platform=row["platform"],
             source_url=row["source_url"],
             source_author=row["source_author"],
@@ -1657,6 +1958,7 @@ class SQLiteStore:
     def _row_to_context(self, row: sqlite3.Row) -> ContextSection:
         return ContextSection(
             id=row["id"],
+            workspace_id=row["workspace_id"],
             kind=row["kind"],
             name=row["name"],
             content=row["content"],
@@ -1669,6 +1971,7 @@ class SQLiteStore:
     def _row_to_trend(self, row: sqlite3.Row) -> TrendItem:
         return TrendItem(
             id=row["id"],
+            workspace_id=row["workspace_id"],
             title=row["title"],
             source_url=row["source_url"],
             source_type=row["source_type"],
@@ -1701,6 +2004,7 @@ class SQLiteStore:
     def _row_to_queue_item(self, row: sqlite3.Row) -> ContentQueueItem:
         return ContentQueueItem(
             id=row["id"],
+            workspace_id=row["workspace_id"],
             platform=row["platform"],
             draft_id=row["draft_id"],
             text=row["text"],
@@ -1733,6 +2037,7 @@ class SQLiteStore:
     def _row_to_web_auth_user(self, row: sqlite3.Row) -> WebAuthUser:
         return WebAuthUser(
             username=row["username"],
+            workspace_id=row["workspace_id"],
             password_hash=row["password_hash"],
             salt=row["salt"],
             iterations=row["iterations"],
@@ -1743,6 +2048,7 @@ class SQLiteStore:
     def _row_to_sync_metadata(self, row: sqlite3.Row) -> SyncMetadata:
         return SyncMetadata(
             key=row["key"],
+            workspace_id=row["workspace_id"],
             last_started_at=row["last_started_at"],
             last_completed_at=row["last_completed_at"],
             status=row["status"],
@@ -1809,8 +2115,8 @@ class SQLiteStore:
 
     def _pattern_category(self, pattern_name: str) -> str | None:
         row = self.conn.execute(
-            "SELECT category FROM patterns WHERE name = ?",
-            (pattern_name,),
+            "SELECT category FROM patterns WHERE name = ? AND workspace_id = ?",
+            (pattern_name, self.workspace_id),
         ).fetchone()
         return row["category"] if row else None
 
@@ -2058,6 +2364,22 @@ def hash_password(
     encoded_salt = base64.b64encode(salt_bytes).decode("ascii")
     encoded_hash = base64.b64encode(digest).decode("ascii")
     return encoded_salt, encoded_hash, iterations
+
+
+def normalize_workspace_id(value: str | None) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return DEFAULT_WORKSPACE_ID
+    text = re.sub(r"[^a-z0-9_.-]+", "-", text).strip("-._")
+    if not text:
+        return DEFAULT_WORKSPACE_ID
+    return text[:WORKSPACE_ID_MAX_LENGTH]
+
+
+def workspace_id_from_username(username: str) -> str:
+    if username.strip() == DEFAULT_WEB_AUTH_USERNAME:
+        return DEFAULT_WORKSPACE_ID
+    return normalize_workspace_id(f"user-{username.strip().lower()}")
 
 
 def _keywords(value: str) -> list[str]:

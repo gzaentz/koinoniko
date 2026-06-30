@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import os
+import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -22,7 +23,7 @@ from leadpoet_social_brain.categorization import XPostLLMCategorizer, parse_x_ca
 from leadpoet_social_brain.content_queue import create_post_x, plan_week_x, post_queue_item_x
 from leadpoet_social_brain.cli import build_parser as build_cli_parser, main as cli_main
 from leadpoet_social_brain.context import ContextManager
-from leadpoet_social_brain.core.models import ContentQueueItem, ContextSection, DraftRequest, EngagementMetrics, PostNote, SocialPost, SyncMetadata, TrendItem, utc_now
+from leadpoet_social_brain.core.models import ContentQueueItem, ContextSection, DraftRequest, EngagementMetrics, Pattern, PostNote, SocialPost, SyncMetadata, TrendItem, utc_now
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator, clean_generated_text
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
 from leadpoet_social_brain.openrouter_provider import OpenRouterProvider, create_provider
@@ -54,10 +55,11 @@ from leadpoet_social_brain.storage.sqlite_store import (
     SQLiteStore,
     resolve_db_path,
 )
-from leadpoet_social_brain.trend_scout import WebTrendGroups, refresh_web_trends, web_trend_groups
+from leadpoet_social_brain.trend_scout import WebTrendGroups, build_trend_scout_profile, refresh_web_trends, web_trend_groups
 from leadpoet_social_brain.voice import (
     DEFAULT_AVOID_PHRASES,
     load_avoid_phrases,
+    load_positioning_rules,
     save_avoid_phrases,
     save_positioning_rules,
 )
@@ -79,6 +81,7 @@ from leadpoet_social_brain.web.app import (
     request_has_task_secret,
     request_has_task_token,
     request_is_authenticated,
+    request_workspace_id,
     validate_session_cookie_value,
     verify_credentials,
 )
@@ -326,6 +329,99 @@ class SocialBrainTest(unittest.TestCase):
 
             self.assertTrue(db_path.exists())
             self.assertIn(str(db_path), output.getvalue())
+
+    def test_workspace_migration_preserves_legacy_data_and_scopes_unique_tables(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "legacy.sqlite3"
+            conn = sqlite3.connect(db_path)
+            conn.executescript(
+                """
+                CREATE TABLE context_sections (
+                    id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    weight REAL NOT NULL DEFAULT 1.0,
+                    active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(kind, name)
+                );
+                INSERT INTO context_sections
+                VALUES ('ctx_legacy', 'writer', 'writer_profile', 'Legacy Gavin context', 2.0, 1, '2026-06-27T00:00:00+00:00', '2026-06-27T00:00:00+00:00');
+
+                CREATE TABLE patterns (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    category TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    example_post_ids TEXT NOT NULL,
+                    active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                INSERT INTO patterns
+                VALUES ('pat_legacy', 'plain_claim', 'structure', 'Legacy pattern', '[]', 1, '2026-06-27T00:00:00+00:00', '2026-06-27T00:00:00+00:00');
+
+                CREATE TABLE app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                INSERT INTO app_settings
+                VALUES ('voice.rules', '["Legacy default voice"]', '2026-06-27T00:00:00+00:00');
+
+                CREATE TABLE sync_metadata (
+                    key TEXT PRIMARY KEY,
+                    last_started_at TEXT,
+                    last_completed_at TEXT,
+                    status TEXT NOT NULL,
+                    summary_json TEXT NOT NULL DEFAULT '{}',
+                    error_message TEXT
+                );
+                INSERT INTO sync_metadata
+                VALUES ('x_posts_sync', '2026-06-27T00:00:00+00:00', '2026-06-27T00:01:00+00:00', 'success', '{"imported": 1}', NULL);
+                """
+            )
+            conn.commit()
+            conn.close()
+
+            default_store = SQLiteStore(db_path)
+            alice_store = SQLiteStore(db_path, workspace_id="user-alice")
+
+            default_sections = default_store.list_context_sections(kinds={"writer"})
+            self.assertEqual(default_sections[0].content, "Legacy Gavin context")
+            self.assertEqual(default_store.get_app_setting("voice.rules"), '["Legacy default voice"]')
+            self.assertEqual(default_store.get_sync_metadata("x_posts_sync").summary["imported"], 1)
+
+            alice_store.save_context_section(
+                ContextSection(
+                    kind="writer",
+                    name="writer_profile",
+                    content="Alice workspace context",
+                    weight=2.0,
+                )
+            )
+            alice_store.save_pattern(
+                Pattern(
+                    name="plain_claim",
+                    category="structure",
+                    description="Alice can reuse the same pattern name independently.",
+                )
+            )
+            alice_store.save_app_setting("voice.rules", '["Alice voice"]')
+            alice_store.save_sync_metadata(SyncMetadata(key="x_posts_sync", summary={"imported": 2}))
+
+            self.assertEqual(default_store.list_context_sections(kinds={"writer"})[0].content, "Legacy Gavin context")
+            self.assertEqual(alice_store.list_context_sections(kinds={"writer"})[0].content, "Alice workspace context")
+            self.assertEqual(default_store.list_patterns()[0].description, "Legacy pattern")
+            self.assertEqual(alice_store.list_patterns()[0].description, "Alice can reuse the same pattern name independently.")
+            self.assertEqual(default_store.get_app_setting("voice.rules"), '["Legacy default voice"]')
+            self.assertEqual(alice_store.get_app_setting("voice.rules"), '["Alice voice"]')
+            self.assertEqual(default_store.get_sync_metadata("x_posts_sync").summary["imported"], 1)
+            self.assertEqual(alice_store.get_sync_metadata("x_posts_sync").summary["imported"], 2)
+            default_store.close()
+            alice_store.close()
 
     def test_web_auth_uses_stored_password_hash_and_signed_session_cookie(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1330,6 +1426,110 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotIn("anchor the point to AcmeOS as the source of the core wedge", warnings)
             store.close()
 
+    def test_generation_is_scoped_to_active_workspace_voice_rules_and_context(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            default_store = SQLiteStore(db_path)
+            ingest_x_post(
+                default_store,
+                text="Leadpoet makes buyer timing visible before outreach starts.",
+                url="https://x.com/gavin/status/default-voice",
+                date="2026-06-27T12:00:00+00:00",
+                author="Gavin",
+                topic="sales LLMs",
+                post_type="founder_insight",
+                worked_reason="Leadpoet-specific timing contrast.",
+                imitate=True,
+            )
+            save_positioning_rules(
+                default_store,
+                ["Leadpoet is the intent layer for buyer timing and proprietary account context."],
+            )
+
+            acme_store = SQLiteStore(db_path, workspace_id="acme")
+            ingest_x_post(
+                acme_store,
+                text="AcmeOS starts from CRM renewal risk instead of generic outbound volume.",
+                url="https://x.com/alice/status/acme-voice",
+                date="2026-06-27T13:00:00+00:00",
+                author="Alice",
+                topic="renewals",
+                post_type="founder_insight",
+                worked_reason="AcmeOS-specific renewal timing contrast.",
+                imitate=True,
+            )
+            save_positioning_rules(
+                acme_store,
+                [
+                    "AcmeOS is the renewal intelligence layer: first-party CRM context, renewal risk, and expansion timing.",
+                    "Competitor agents are market proof that timing matters, not the source of AcmeOS's wedge.",
+                ],
+            )
+            provider = SequentialProvider(
+                [
+                    strategy_json(
+                        source_material="User request and AcmeOS renewal context.",
+                        source_bridge="AI renewal workflow -> account timing problem -> AcmeOS renewal intelligence layer.",
+                        claims_to_make=["AcmeOS centers renewal timing."],
+                        success_criteria="specific, grounded, and tied to AcmeOS.",
+                    ),
+                    "AcmeOS turns renewal risk into the first thing revenue teams see.",
+                    "Renewal workflows break when the account context shows up after the sequence.",
+                    "The better CRM agent starts with renewal timing, not generated follow-up.",
+                    evaluation_json(
+                        "AcmeOS turns renewal risk into the first thing revenue teams see."
+                    ),
+                ]
+            )
+
+            draft = SocialBrainGenerator(acme_store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="renewals",
+                    post_type="founder_insight",
+                    angle="renewal timing beats generated follow-up",
+                    length_mode="standard",
+                )
+            )[0]
+
+            self.assertEqual(draft.workspace_id, "acme")
+            self.assertEqual(draft.context_snapshot["workspace_id"], "acme")
+            active_rules = "\n".join(draft.context_snapshot["active_writing_rules"]["positioning_rules"])
+            self.assertIn("AcmeOS is the renewal intelligence layer", active_rules)
+            self.assertNotIn("Leadpoet", active_rules)
+            selected_examples = draft.context_snapshot["selected_examples"]
+            self.assertEqual([example["author"] for example in selected_examples], ["Alice"])
+            self.assertIn("AcmeOS", draft.text)
+            self.assertNotIn("Leadpoet", draft.text)
+            self.assertEqual(len(default_store.list_posts(platform="x")), 1)
+            self.assertEqual(len(acme_store.list_posts(platform="x")), 1)
+            self.assertEqual(default_store.list_posts(platform="x")[0].author, "Gavin")
+            self.assertEqual(acme_store.list_posts(platform="x")[0].author, "Alice")
+            default_store.close()
+            acme_store.close()
+
+    def test_new_non_default_workspace_does_not_inherit_gavin_or_leadpoet_defaults(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SQLiteStore(Path(tmpdir) / "brain.sqlite3", workspace_id="user-alice")
+
+            rules_text = "\n".join(load_positioning_rules(store))
+            profile = build_trend_scout_profile(store)
+            prompt = SocialBrainGenerator(store).build_prompt(
+                DraftRequest(
+                    platform="x",
+                    topic="customer onboarding",
+                    post_type="founder_insight",
+                    angle="why onboarding context matters",
+                )
+            )
+
+            self.assertNotIn("Leadpoet", rules_text)
+            self.assertEqual(profile.user_name, "the writer")
+            self.assertEqual(profile.workspace_name, "this workspace")
+            self.assertNotIn("Gavin", prompt)
+            self.assertNotIn("Leadpoet", prompt)
+            store.close()
+
     def test_generation_clears_stale_positioning_warnings_when_final_text_is_anchored(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -1900,6 +2100,77 @@ class SocialBrainTest(unittest.TestCase):
             self.assertFalse(allowed)
             self.assertEqual(captured["status"], 401)
             self.assertEqual(captured["payload"]["error"], "Authentication required.")
+
+    def test_web_api_uses_authenticated_users_workspace(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            auth_store = SQLiteStore(db_path)
+            default_user = auth_store.save_web_auth_user(DEFAULT_AUTH_USERNAME, "default-password")
+            alice_user = auth_store.save_web_auth_user("alice", "alice-password")
+            default_token = create_session_cookie_value(auth_store, default_user.username)
+            alice_token = create_session_cookie_value(auth_store, alice_user.username)
+            auth_store.close()
+
+            default_store = SQLiteStore(db_path, workspace_id=default_user.workspace_id)
+            default_store.save_post(
+                SocialPost(
+                    platform="x",
+                    text="Leadpoet post for the default workspace.",
+                    url="https://x.com/gavin/status/web-default",
+                    published_at="2026-06-27T12:00:00+00:00",
+                    author="Gavin",
+                    topic="Leadpoet",
+                    post_type="founder_insight",
+                )
+            )
+            default_store.close()
+
+            alice_store = SQLiteStore(db_path, workspace_id=alice_user.workspace_id)
+            alice_store.save_post(
+                SocialPost(
+                    platform="x",
+                    text="AcmeOS post for Alice's workspace.",
+                    url="https://x.com/alice/status/web-alice",
+                    published_at="2026-06-27T13:00:00+00:00",
+                    author="Alice",
+                    topic="AcmeOS",
+                    post_type="founder_insight",
+                )
+            )
+            alice_store.close()
+
+            default_workspace = request_workspace_id(
+                {"Cookie": f"{SESSION_COOKIE}={default_token}"},
+                db_path,
+            )
+            alice_workspace = request_workspace_id(
+                {"Cookie": f"{SESSION_COOKIE}={alice_token}"},
+                db_path,
+            )
+            self.assertEqual(default_workspace, "default")
+            self.assertEqual(alice_workspace, "user-alice")
+
+            default_status, default_payload = handle_api_request(
+                "GET",
+                "/api/dashboard",
+                db_path=db_path,
+                workspace_id=default_workspace,
+            )
+            alice_status, alice_payload = handle_api_request(
+                "GET",
+                "/api/dashboard",
+                db_path=db_path,
+                workspace_id=alice_workspace,
+            )
+
+            self.assertEqual(default_status, 200)
+            self.assertEqual(alice_status, 200)
+            self.assertEqual(default_payload["status"]["workspace_id"], "default")
+            self.assertEqual(alice_payload["status"]["workspace_id"], "user-alice")
+            self.assertEqual([post["author"] for post in default_payload["recent_posts"]], ["Gavin"])
+            self.assertEqual([post["author"] for post in alice_payload["recent_posts"]], ["Alice"])
+            self.assertNotIn("AcmeOS", default_payload["recent_posts"][0]["text"])
+            self.assertNotIn("Leadpoet", alice_payload["recent_posts"][0]["text"])
 
     def test_assistant_starter_prompts_and_missing_provider(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2685,6 +2956,8 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Gavin at AcmeOS", prompt)
             self.assertIn("AcmeOS is the core account intelligence layer", prompt)
             self.assertIn("renewal timing and expansion intent", prompt)
+            self.assertIn("never frame another tool, agent, or case study as the source of AcmeOS's unique wedge", prompt)
+            self.assertIn("Avoid wording like \"AcmeOS can leverage insights from", prompt)
             self.assertNotIn("Gavin at Leadpoet", prompt)
             store.close()
 
@@ -3004,6 +3277,32 @@ class SocialBrainTest(unittest.TestCase):
             ],
         )
 
+    def test_pattern_fetch_continues_after_one_scrapingdog_query_fails(self):
+        def fake_fetch_json(url: str, params: dict[str, str], *, timeout: int):
+            if "data enrichment" in params["query"]:
+                raise RuntimeError("HTTP 400 Bad Request")
+            return {
+                "news_results": [
+                    {
+                        "title": "AI SDR platforms add buyer intent signals",
+                        "link": "https://example.com/ai-sdr-intent",
+                        "source": "GTM News",
+                        "snippet": "Outbound teams are using account signals and buyer timing to prioritize pipeline.",
+                    }
+                ]
+            }
+
+        with patch.dict(os.environ, {"SCRAPINGDOG_API_KEY": "dog-key"}, clear=False):
+            with patch("leadpoet_social_brain.pattern_scout.fetch_json", side_effect=fake_fetch_json):
+                candidates = fetch_scrapingdog_pattern_candidates(
+                    limit=1,
+                    window="weekly",
+                    context_terms=["data enrichment"],
+                )
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["source_summary"], "AI SDR platforms add buyer intent signals")
+
     def test_pattern_refresh_stores_provider_analysis_with_mocked_candidates(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -3049,6 +3348,42 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(patterns[0].category, "sales")
             self.assertEqual(patterns[0].replies, 18)
             self.assertIn("Extract the mechanic only", provider.prompts[0])
+            store.close()
+
+    def test_pattern_refresh_normalizes_analysis_lists_and_enforces_adaptation_rule(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            provider = FakeProvider([
+                json.dumps(
+                    {
+                        "pattern_name": "Integration proof",
+                        "source_summary": "A relevant GTM integration announcement.",
+                        "structure": ["announce integration", "show user benefit"],
+                        "why_it_worked": ["clear partner credibility", "specific workflow value"],
+                        "adaptation_rule": "Use this flow for relevant product proof.",
+                        "category": "gtm",
+                    }
+                )
+            ])
+
+            refresh_patterns(
+                store,
+                provider,
+                limit=1,
+                window="monthly",
+                fetch_candidates=lambda limit: [
+                    {
+                        "source_url": "https://example.com/gtm-integration",
+                        "source_author": "Example News",
+                        "source_text": "A GTM platform connected account signals to AI sales workflows for RevOps teams.",
+                    }
+                ],
+            )
+            pattern = store.list_viral_patterns(status="active", window="monthly")[0]
+
+            self.assertEqual(pattern.structure, "announce integration; show user benefit")
+            self.assertEqual(pattern.why_it_worked, "clear partner credibility; specific workflow value")
+            self.assertIn("Use the structure, not the wording.", pattern.adaptation_rule)
             store.close()
 
     def test_pattern_refresh_keeps_weekly_and_monthly_sources_separate(self):

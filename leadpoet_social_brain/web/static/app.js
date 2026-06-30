@@ -1,4 +1,3 @@
-const DEFAULT_SYNC_USERNAME = "gavinzaentz";
 const SIDEBAR_COLLAPSED_KEY = "koinonikoSidebarCollapsed";
 const ASSISTANT_FALLBACK_STARTERS = [
   "What are the best posts to use as Voice Examples?",
@@ -1898,7 +1897,7 @@ async function syncPosts() {
   const payload = await api("/api/account/sync-x-posts", {
     method: "POST",
     body: JSON.stringify({
-      username: DEFAULT_SYNC_USERNAME,
+      username: accountSyncUsername(),
       ...(autoCategorize ? { auto_categorize: true } : { default_topic: "uncategorized" }),
       default_post_type: "founder_insight",
       exclude_replies: true,
@@ -1925,7 +1924,7 @@ async function syncAllXData() {
   const payload = await api("/api/account/sync-x-all", {
     method: "POST",
     body: JSON.stringify({
-      username: DEFAULT_SYNC_USERNAME,
+      username: accountSyncUsername(),
       metrics_limit: 250,
       ...(autoCategorize ? { auto_categorize: true } : { default_topic: "uncategorized" }),
       default_post_type: "founder_insight",
@@ -2653,6 +2652,11 @@ function renderAccount() {
   syncMenuButton.disabled = !xReadConfigured && trendsButton.disabled && patternsButton.disabled;
   syncMenuButton.title = syncMenuButton.disabled ? "Connect at least one sync source to run syncs." : "Choose a sync action.";
   renderAccountDetailDrawer();
+}
+
+function accountSyncUsername() {
+  const settings = state.account?.settings || {};
+  return cleanString(settings.x_sync_username || "");
 }
 
 function accountConnectionEntries(connections) {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from leadpoet_social_brain.core.models import ContextSection
+from leadpoet_social_brain.core.models import DEFAULT_WORKSPACE_ID, ContextSection
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 
 
@@ -72,7 +72,7 @@ def save_avoid_phrases(store: SQLiteStore, phrases: list[object]) -> list[str]:
 def load_positioning_rules(store: SQLiteStore) -> list[str]:
     raw = store.get_app_setting(VOICE_POSITIONING_RULES_SETTING)
     if raw is None:
-        return list(POSITIONING_RULES)
+        return default_positioning_rules(store)
     return with_universal_positioning_rules(parse_rules_value(raw, []))
 
 
@@ -118,6 +118,12 @@ def load_rules_setting(store: SQLiteStore, key: str, default_rules: list[str]) -
     if raw is None:
         return list(default_rules)
     return parse_rules_value(raw, default_rules)
+
+
+def default_positioning_rules(store: SQLiteStore) -> list[str]:
+    if store.workspace_id == DEFAULT_WORKSPACE_ID:
+        return list(POSITIONING_RULES)
+    return list(UNIVERSAL_POSITIONING_RULES)
 
 
 def parse_rules_value(raw: object, default_rules: list[str]) -> list[str]:

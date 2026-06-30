@@ -44,12 +44,14 @@ from leadpoet_social_brain.content_queue import (
 from leadpoet_social_brain.core.models import (
     ContextSection,
     ContentQueueItem,
+    DEFAULT_WORKSPACE_ID,
     PostNote,
     QueuedPostVersion,
     SocialPost,
     SyncMetadata,
     TrendItem,
     ViralPattern,
+    WebAuthUser,
     new_id,
     utc_now,
 )
@@ -334,7 +336,13 @@ def make_handler(db_path: Path):
         def _serve_api(self, method: str) -> None:
             body = self.rfile.read(int(self.headers.get("Content-Length", "0") or 0))
             try:
-                status, payload = handle_api_request(method, self.path, body, db_path=db_path)
+                status, payload = handle_api_request(
+                    method,
+                    self.path,
+                    body,
+                    db_path=db_path,
+                    workspace_id=request_workspace_id(self.headers, db_path),
+                )
             except Exception as exc:  # noqa: BLE001 - local UI should return readable JSON errors.
                 status, payload = 500, {"error": str(exc)}
             self._serve_json(status, payload)
@@ -425,36 +433,68 @@ def create_session_cookie_value(store: SQLiteStore, username: str) -> str:
     return f"{payload_text}.{session_signature(payload_text, user.password_hash)}"
 
 
-def validate_session_cookie_value(store: SQLiteStore, value: str | None) -> bool:
+def session_payload_from_cookie_value(value: str | None) -> dict[str, Any] | None:
     if not value or "." not in value:
-        return False
+        return None
     payload_text, signature = value.rsplit(".", 1)
     try:
         padded = payload_text + ("=" * (-len(payload_text) % 4))
         payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
     except (ValueError, json.JSONDecodeError):
-        return False
+        return None
+    if not isinstance(payload, dict):
+        return None
+    payload["_payload_text"] = payload_text
+    payload["_signature"] = signature
+    return payload
+
+
+def session_user_from_cookie_value(store: SQLiteStore, value: str | None) -> WebAuthUser | None:
+    payload = session_payload_from_cookie_value(value)
+    if not payload:
+        return None
     user = store.get_web_auth_user(str(payload.get("u") or ""))
     if not user:
-        return False
+        return None
+    payload_text = str(payload.get("_payload_text") or "")
+    signature = str(payload.get("_signature") or "")
     expected = session_signature(payload_text, user.password_hash)
     if not hmac.compare_digest(signature, expected):
-        return False
-    return (
+        return None
+    if (
         payload.get("u") == user.username
         and isinstance(payload.get("e"), int)
         and payload["e"] >= int(time.time())
-    )
+    ):
+        return user
+    return None
+
+
+def validate_session_cookie_value(store: SQLiteStore, value: str | None) -> bool:
+    return session_user_from_cookie_value(store, value) is not None
 
 
 def request_is_authenticated(headers: Mapping[str, str], store: SQLiteStore) -> bool:
+    return request_authenticated_user(headers, store) is not None
+
+
+def request_authenticated_user(headers: Mapping[str, str], store: SQLiteStore) -> WebAuthUser | None:
     cookie = SimpleCookie()
     try:
         cookie.load(headers.get("Cookie", ""))
     except CookieError:
-        return False
+        return None
     morsel = cookie.get(SESSION_COOKIE)
-    return validate_session_cookie_value(store, morsel.value if morsel else None)
+    return session_user_from_cookie_value(store, morsel.value if morsel else None)
+
+
+def request_workspace_id(headers: Mapping[str, str], db_path: str | Path | None) -> str | None:
+    store = SQLiteStore(db_path)
+    try:
+        user = request_authenticated_user(headers, store)
+        return user.workspace_id if user else None
+    finally:
+        store.close()
 
 
 def request_has_task_token(headers: Mapping[str, str]) -> bool:
@@ -603,12 +643,13 @@ def handle_api_request(
     body: bytes | str | None = None,
     *,
     db_path: str | Path | None = None,
+    workspace_id: str | None = None,
 ) -> tuple[int, dict[str, Any]]:
     parsed = urlparse(raw_path)
     path = parsed.path.rstrip("/") or "/"
     query = parse_qs(parsed.query)
     payload = parse_json_body(body)
-    store = SQLiteStore(db_path)
+    store = SQLiteStore(db_path, workspace_id=workspace_id)
     try:
         return route_api(store, method.upper(), path, query, payload)
     except ValueError as exc:
@@ -1351,13 +1392,16 @@ def run_x_posts_sync(
                 raise ValueError(MISSING_PROVIDER_MESSAGE)
             categorizer = XPostLLMCategorizer(provider).categorize
         since_id, start_time = x_posts_incremental_cutoff(store, payload)
+        username = clean_optional(payload.get("username")) or default_x_sync_username_for_store(store)
+        if not username:
+            raise ValueError("X username is required for this workspace.")
         result = sync_x_user_posts(
             store,
             XApiClient.from_env(),
-            username=clean_optional(payload.get("username")) or DEFAULT_X_SYNC_USERNAME,
+            username=username,
             limit=limit,
             default_topic=clean_optional(payload.get("default_topic")) or (
-                UNCATEGORIZED_TOPIC if auto_categorize else DEFAULT_IMPORT_TOPIC
+                UNCATEGORIZED_TOPIC if auto_categorize else default_import_topic_for_store(store)
             ),
             default_post_type=clean_optional(payload.get("default_post_type")) or DEFAULT_IMPORT_POST_TYPE,
             since_id=since_id,
@@ -1485,7 +1529,7 @@ def sync_x_user_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str
             raise ValueError(MISSING_PROVIDER_MESSAGE)
         categorizer = XPostLLMCategorizer(provider).categorize
     default_topic = clean_optional(payload.get("default_topic")) or (
-        UNCATEGORIZED_TOPIC if auto_categorize else DEFAULT_IMPORT_TOPIC
+        UNCATEGORIZED_TOPIC if auto_categorize else default_import_topic_for_store(store)
     )
     client = XApiClient.from_env()
     result = sync_x_user_posts(
@@ -1529,6 +1573,14 @@ def sync_x_user_result_payload(result) -> dict[str, Any]:
             for post in result.dry_run_posts[:10]
         ],
     }
+
+
+def default_import_topic_for_store(store: SQLiteStore) -> str:
+    return DEFAULT_IMPORT_TOPIC if store.workspace_id == DEFAULT_WORKSPACE_ID else UNCATEGORIZED_TOPIC
+
+
+def default_x_sync_username_for_store(store: SQLiteStore) -> str:
+    return DEFAULT_X_SYNC_USERNAME if store.workspace_id == DEFAULT_WORKSPACE_ID else ""
 
 
 def weekly_report_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
@@ -2484,6 +2536,7 @@ def status_payload(store: SQLiteStore | None = None) -> dict[str, Any]:
     else:
         model_source = "missing"
     payload = {
+        "workspace_id": store.workspace_id if store else "",
         "provider_configured": bool(os.getenv("SOCIAL_BRAIN_PROVIDER")),
         "provider_path": os.getenv("SOCIAL_BRAIN_PROVIDER") or "",
         "openrouter_api_key_configured": bool(os.getenv("OPENROUTER_API_KEY")),
@@ -2517,6 +2570,7 @@ def account_payload(store: SQLiteStore) -> dict[str, Any]:
             "models": account_model_settings(store),
             "effective_models": routing.as_dict(),
             "model_env_defaults": model_env_defaults(),
+            "x_sync_username": default_x_sync_username_for_store(store),
         },
     }
 
@@ -2615,7 +2669,14 @@ def account_security_payload(store: SQLiteStore) -> dict[str, Any]:
 
 def first_web_auth_username(store: SQLiteStore) -> str | None:
     row = store.conn.execute(
-        "SELECT username FROM web_auth_users ORDER BY updated_at DESC LIMIT 1"
+        """
+        SELECT username
+        FROM web_auth_users
+        WHERE workspace_id = ?
+        ORDER BY updated_at DESC
+        LIMIT 1
+        """,
+        (store.workspace_id,),
     ).fetchone()
     return str(row["username"]) if row else None
 

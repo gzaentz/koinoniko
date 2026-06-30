@@ -259,7 +259,7 @@ class SocialBrainGenerator:
             ),
         )
         if save:
-            self.store.save_generated_draft(draft)
+            draft = self.store.save_generated_draft(draft)
         return [draft]
 
     def build_prompt(self, request: DraftRequest) -> str:
@@ -716,6 +716,7 @@ def build_context_snapshot(
             }
         )
     return {
+        "workspace_id": bundle.workspace_id,
         "request": request.__dict__,
         "length_mode": normalize_length_mode(request.length_mode),
         "length_label": POST_LENGTH_PRESETS[normalize_length_mode(request.length_mode)]["label"],

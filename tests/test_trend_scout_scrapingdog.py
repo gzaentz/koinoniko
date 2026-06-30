@@ -4,6 +4,7 @@ import os
 import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,7 +14,10 @@ from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 from leadpoet_social_brain.trend_scout import (
     MISSING_SCRAPINGDOG_TRENDS_MESSAGE,
     WebTrendGroups,
+    TrendScoutProfile,
     extract_source_page_details,
+    normalize_article_date,
+    positioned_leadpoet_angle,
     refresh_web_trends,
     select_web_trend_articles,
     web_trend_relevance_score,
@@ -50,6 +54,32 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
     def make_store(self, tmpdir: str) -> SQLiteStore:
         return SQLiteStore(Path(tmpdir) / "brain.sqlite3")
 
+    def test_relative_news_dates_are_normalized(self):
+        parsed = datetime.fromisoformat(normalize_article_date("18 hours ago"))
+        age = datetime.now(timezone.utc) - parsed
+
+        self.assertLess(abs(age - timedelta(hours=18)), timedelta(minutes=1))
+
+    def test_positioned_angle_rewrites_other_tool_leverage_framing(self):
+        trend = TrendItem(
+            title="Close launches Chloe",
+            source_type="web_weekly",
+            topic="sales AI",
+            summary="Close launched an AI sales agent.",
+            why_it_matters="Sales teams are embedding AI inside CRM workflows.",
+            leadpoet_angle="Tie this back to buyer timing.",
+        )
+
+        angle = positioned_leadpoet_angle(
+            "Leadpoet can leverage insights from advances like Chloe.",
+            trend=trend,
+            profile=TrendScoutProfile(),
+        )
+
+        self.assertIn("Leadpoet's angle", angle)
+        self.assertIn("buyer timing", angle)
+        self.assertNotIn("leverage insights from", angle)
+
     def test_relevance_gate_requires_gtm_specificity(self):
         articles = [
             {
@@ -78,6 +108,27 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
                 "sourceCommonName": "The Motley Fool",
                 "url": "https://example.com/ai-stocks",
             },
+            {
+                "title": "Jim Cramer Discusses Big Salesforce (CRM) Deal",
+                "summary": "Salesforce, Inc. (NYSE:CRM) is one of the stocks Cramer discussed.",
+                "sourceCommonName": "Insider Monkey",
+                "url": "https://example.com/cramer-salesforce-stock",
+            },
+            {
+                "title": "Build an agentic AI healthcare claims pipeline with Amazon Bedrock",
+                "summary": "Healthcare teams use Amazon Bedrock to automate claims processing.",
+                "url": "https://example.com/healthcare-claims-pipeline",
+            },
+            {
+                "title": "Top 10 Best AI Sales Agents In The World 2026",
+                "summary": "A ranked list of vendors and tools.",
+                "url": "https://example.com/top-ai-sales-tools",
+            },
+            {
+                "title": "World Cup, Wanderlust and a Wait-and-See World: What's Shaping Global Summer Travel in 2026",
+                "summary": "US outbound flight bookings are up while hotel searches are down.",
+                "url": "https://example.com/travel",
+            },
         ]
 
         selected = select_web_trend_articles(articles, limit=5)
@@ -92,6 +143,10 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
         self.assertEqual(web_trend_relevance_score(articles[0]), 0)
         self.assertEqual(web_trend_relevance_score(articles[1]), 0)
         self.assertEqual(web_trend_relevance_score(articles[4]), 0)
+        self.assertEqual(web_trend_relevance_score(articles[5]), 0)
+        self.assertEqual(web_trend_relevance_score(articles[6]), 0)
+        self.assertEqual(web_trend_relevance_score(articles[7]), 0)
+        self.assertEqual(web_trend_relevance_score(articles[8]), 0)
         self.assertGreaterEqual(web_trend_relevance_score(articles[2]), 5)
 
     def test_source_parser_ignores_navigation_list_items(self):

@@ -106,6 +106,20 @@ PATTERN_NEGATIVE_RELEVANCE_WEIGHTS = {
 DEFAULT_PATTERN_NAME = "Observed pattern"
 DEFAULT_ADAPTATION_RULE = "Use the structure, not the wording."
 MIN_PATTERN_SOURCE_TEXT_LENGTH = 40
+ANALYSIS_TEXT_KEYS = (
+    "pattern_name",
+    "source_summary",
+    "hook_style",
+    "structure",
+    "pacing",
+    "tone",
+    "formatting",
+    "why_it_worked",
+    "adaptation_rule",
+    "what_not_to_copy",
+    "topic",
+    "engagement_signal",
+)
 PatternCandidateFetcher = Callable[..., list[dict[str, object]]]
 
 
@@ -357,18 +371,21 @@ def fetch_scrapingdog_pattern_candidates(
     candidates: list[dict[str, object]] = []
     seen: set[str] = set()
     for query in build_pattern_refresh_queries(context_terms):
-        payload = fetch_json(
-            SCRAPINGDOG_NEWS_URL,
-            {
-                "api_key": api_key,
-                "query": query,
-                "results": str(max(PATTERN_REFRESH_RESULTS_PER_QUERY, min(limit, 30))),
-                "country": "us",
-                "language": "en",
-                "tbs": {"daily": "qdr:d", "weekly": "qdr:w", "monthly": "qdr:m"}.get(window, "qdr:w"),
-            },
-            timeout=SCRAPINGDOG_TIMEOUT_SECONDS,
-        )
+        try:
+            payload = fetch_json(
+                SCRAPINGDOG_NEWS_URL,
+                {
+                    "api_key": api_key,
+                    "query": query,
+                    "results": str(max(PATTERN_REFRESH_RESULTS_PER_QUERY, min(limit, 30))),
+                    "country": "us",
+                    "language": "en",
+                    "tbs": {"daily": "qdr:d", "weekly": "qdr:w", "monthly": "qdr:m"}.get(window, "qdr:w"),
+                },
+                timeout=SCRAPINGDOG_TIMEOUT_SECONDS,
+            )
+        except Exception:  # noqa: BLE001 - one rejected third-party query should not abort the refresh.
+            continue
         results = payload.get("news_results", [])
         if not isinstance(results, list):
             continue
@@ -412,11 +429,12 @@ The adaptation_rule should be concise and should include: Use the structure, not
     parsed = parse_json_object(raw)
     if not parsed:
         raise ValueError("Provider did not return pattern analysis JSON.")
+    for key in ANALYSIS_TEXT_KEYS:
+        parsed[key] = compact_analysis_value(parsed.get(key))
     parsed["category"] = normalize_category(parsed.get("category"))
     if not clean_optional(parsed.get("pattern_name")):
         parsed["pattern_name"] = DEFAULT_PATTERN_NAME
-    if not clean_optional(parsed.get("adaptation_rule")):
-        parsed["adaptation_rule"] = DEFAULT_ADAPTATION_RULE
+    parsed["adaptation_rule"] = ensure_adaptation_rule(parsed.get("adaptation_rule"))
     return parsed
 
 
@@ -714,6 +732,23 @@ def normalize_category(value: object) -> str:
     if "ai" in cleaned or "agent" in cleaned:
         return "ai"
     return "other"
+
+
+def compact_analysis_value(value: object) -> str:
+    if isinstance(value, list):
+        return "; ".join(clean_text(item) for item in value if clean_text(item))
+    if isinstance(value, dict):
+        return json.dumps(value, sort_keys=True)
+    return clean_text(value)
+
+
+def ensure_adaptation_rule(value: object) -> str:
+    rule = clean_text(value)
+    if not rule:
+        return DEFAULT_ADAPTATION_RULE
+    if DEFAULT_ADAPTATION_RULE.lower() in rule.lower():
+        return rule
+    return f"{rule} {DEFAULT_ADAPTATION_RULE}"
 
 
 def unique_texts(values: list[object]) -> list[str]:

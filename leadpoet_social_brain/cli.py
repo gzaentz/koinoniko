@@ -76,6 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     web_login = subparsers.add_parser("set-web-login", help="Set or reset the single web UI login.")
     web_login.add_argument("--username", default=DEFAULT_WEB_AUTH_USERNAME)
+    web_login.add_argument("--workspace-id", help="Optional workspace scope for this login. Defaults to the username.")
     web_login.add_argument("--password", help="Optional. Prefer omitting this and entering the password prompt.")
     web_login.set_defaults(func=cmd_set_web_login)
 
@@ -371,8 +372,8 @@ def cmd_set_web_login(store: SQLiteStore, args: argparse.Namespace) -> int:
         confirmation = getpass.getpass("Confirm password: ")
         if password != confirmation:
             raise SystemExit("Passwords did not match.")
-    user = store.save_web_auth_user(args.username, password)
-    print(f"Saved web login for {user.username} in {store.path}")
+    user = store.save_web_auth_user(args.username, password, workspace_id=args.workspace_id)
+    print(f"Saved web login for {user.username} in workspace {user.workspace_id} at {store.path}")
     return 0
 
 

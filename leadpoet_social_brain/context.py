@@ -48,6 +48,7 @@ class ContextManager:
             platform=platform,
             topic=topic,
             post_type=post_type,
+            workspace_id=self.store.workspace_id,
             style_sections=style_sections,
             positioning_sections=positioning_sections,
             patterns=patterns,

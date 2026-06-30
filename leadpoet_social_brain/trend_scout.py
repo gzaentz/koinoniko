@@ -13,7 +13,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
-from leadpoet_social_brain.core.models import TrendItem, utc_now
+from leadpoet_social_brain.core.models import DEFAULT_WORKSPACE_ID, TrendItem, utc_now
 from leadpoet_social_brain.providers import DraftProvider, generate_with_provider
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 from leadpoet_social_brain.voice import load_positioning_rules, load_voice_rules_override
@@ -32,10 +32,35 @@ SOURCE_EXCERPT_CHARS = 700
 WEB_DAILY_SOURCE_TYPE = "web_daily"
 WEB_WEEKLY_SOURCE_TYPE = "web_weekly"
 SCRAPINGDOG_NEWS_QUERY = (
-    '("AI SDR" OR "sales AI" OR "outbound AI" OR "GTM AI" OR "sales automation" '
-    'OR "sales engagement" OR "lead generation" OR "lead gen" OR "buyer intent" '
-    'OR "intent data" OR "account signals" OR RevOps OR CRM OR pipeline)'
+    '("sales AI" OR "AI SDR" OR "AI sales agent" OR "sales automation") '
+    '("buyer intent" OR "intent data" OR "account signals" OR "buyer timing" OR CRM OR RevOps OR pipeline)'
 )
+SCRAPINGDOG_NEWS_QUERIES = (
+    SCRAPINGDOG_NEWS_QUERY,
+    '("lead generation" OR "lead gen" OR prospecting OR outbound) '
+    '("AI" OR agent OR automation) ("buyer intent" OR "account signals" OR "data enrichment" OR "account context")',
+    '(GTM OR "go-to-market" OR RevOps OR CRM) ("AI agent" OR "AI agents" OR automation) '
+    '(pipeline OR outbound OR "sales workflow")',
+    '("intent data" OR "buyer signals" OR "account intelligence") '
+    '(sales OR outbound OR "lead generation" OR GTM)',
+    '(Salesforce OR HubSpot OR Apollo OR ZoomInfo OR Clay OR Outreach OR Salesloft) '
+    '(AI OR agent OR signals OR intent) (sales OR outbound OR pipeline OR CRM)',
+    '("B2B sales" OR "B2B marketing" OR "revenue teams") '
+    '("AI agents" OR "AI automation" OR "buyer intent" OR "account signals")',
+    '("AI-native CRM" OR "agentic CRM" OR "GTM AI") '
+    '(outbound OR pipeline OR "sales workflow" OR "revenue team")',
+    '("AI outbound" OR "AI sales agent" OR "sales development") '
+    '("meetings" OR pipeline OR prospects OR "buyer signals")',
+    '("revenue intelligence" OR RevTech OR "go-to-market data") '
+    '(AI OR agents OR automation OR "buyer intent")',
+    '("demand generation" OR "revenue marketing") '
+    '(AI OR "buyer signals" OR "intent data" OR "account signals")',
+    '("lead scoring" OR "predictive lead scoring" OR "account scoring") '
+    '(AI OR "intent data" OR "buyer intent" OR "sales automation")',
+    '("GTM engineer" OR "go-to-market engineer" OR "revenue operations") '
+    '(automation OR AI OR agents OR outbound)',
+)
+SCRAPINGDOG_NEWS_QUERIES_PER_WINDOW = 6
 TREND_RELEVANCE_KEEP_THRESHOLD = 5
 TREND_REQUIRED_RELEVANCE_TERMS = {
     "account signal",
@@ -65,6 +90,23 @@ TREND_REQUIRED_RELEVANCE_TERMS = {
     "sales automation",
     "sales engagement",
     "sales workflow",
+    "sdr",
+}
+TREND_AMBIGUOUS_REQUIRED_RELEVANCE_TERMS = {
+    "crm",
+    "pipeline",
+}
+TREND_SUPPORTING_RELEVANCE_TERMS = {
+    "b2b",
+    "go-to-market",
+    "gtm",
+    "lead gen",
+    "lead generation",
+    "outbound",
+    "prospecting",
+    "revenue",
+    "revops",
+    "sales",
     "sdr",
 }
 TREND_RELEVANCE_WEIGHTS = {
@@ -114,22 +156,49 @@ TREND_NEGATIVE_WEIGHTS = {
     "actor": 4,
     "album": 4,
     "basketball": 4,
+    "best ai sales tools": 8,
     "budget deal": 4,
     "celebrity": 6,
     "consumer app": 5,
     "election": 5,
+    "earnings call transcript": 8,
+    "flight bookings": 8,
     "football": 4,
+    "full evaluation": 8,
     "gossip": 6,
     "governor": 4,
+    "hotel searches": 8,
     "iphone": 4,
     "movie": 5,
     "music": 4,
     "photo app": 5,
+    "pricing": 8,
     "politics": 5,
     "recipe": 5,
+    "review 2026": 8,
+    "review and pricing": 10,
     "senate": 4,
     "sports": 5,
     "stock price": 3,
+    "summer travel": 8,
+    "top 10 best": 8,
+    "travel": 6,
+    "wanderlust": 8,
+    "which is better": 8,
+    "world cup": 8,
+}
+TREND_HARD_REJECT_TERMS = {
+    "best ai sales tools",
+    "earnings call transcript",
+    "flight bookings",
+    "full evaluation",
+    "hotel searches",
+    "review and pricing",
+    "summer travel",
+    "top 10 best",
+    "wanderlust",
+    "which is better",
+    "world cup",
 }
 TREND_FINANCE_REJECT_TERMS = {
     "after hours trading",
@@ -144,6 +213,10 @@ TREND_FINANCE_REJECT_TERMS = {
     "how to invest",
     "index funds",
     "investing",
+    "jim cramer",
+    "nasdaq",
+    "nyse",
+    "stock",
     "stock market",
     "stock price",
     "stock split",
@@ -291,6 +364,7 @@ def refresh_web_trends(
         fetch_source_page=fetch_source_page,
         profile=profile,
     )
+    daily_urls = {canonical_source_url(trend.source_url) for trend in daily if canonical_source_url(trend.source_url)}
     weekly = refresh_web_trends_for_period(
         store,
         period="weekly",
@@ -306,6 +380,7 @@ def refresh_web_trends(
         enrich_limit=enrich_limit,
         fetch_source_page=fetch_source_page,
         profile=profile,
+        exclude_source_urls=daily_urls,
     )
     return WebTrendGroups(daily=daily, weekly=weekly, errors=errors, sources=unique_texts(sources), **stats)
 
@@ -329,8 +404,12 @@ def build_trend_scout_profile(store: SQLiteStore) -> TrendScoutProfile:
         )
         if clean_text(section.content)
     ]
-    workspace_name = workspace_name_from_text("\n".join([*positioning_rules, *context_sections])) or "Leadpoet"
+    workspace_name = workspace_name_from_text("\n".join([*positioning_rules, *context_sections]))
+    if not workspace_name:
+        workspace_name = "Leadpoet" if store.workspace_id == DEFAULT_WORKSPACE_ID else "this workspace"
+    user_name = "Gavin" if store.workspace_id == DEFAULT_WORKSPACE_ID else "the writer"
     return TrendScoutProfile(
+        user_name=user_name,
         workspace_name=workspace_name,
         positioning_rules=positioning_rules,
         voice_rules=voice_rules,
@@ -371,12 +450,29 @@ def workspace_name_from_text(text: str) -> str | None:
 
 
 def scrapingdog_news_query(profile: TrendScoutProfile) -> str:
+    return scrapingdog_news_queries(profile)[0]
+
+
+def scrapingdog_news_queries(profile: TrendScoutProfile) -> list[str]:
+    queries = list(SCRAPINGDOG_NEWS_QUERIES)
     if profile.workspace_name == "Leadpoet":
-        return SCRAPINGDOG_NEWS_QUERY
-    return (
-        f'{SCRAPINGDOG_NEWS_QUERY} OR "{profile.workspace_name}" '
-        'OR "account intelligence" OR "buyer timing" OR "account signals"'
+        return queries
+    return unique_texts(
+        [
+            *queries,
+            f'"{profile.workspace_name}" ("sales" OR GTM OR outbound OR "buyer intent" OR "account signals")',
+            f'("{profile.workspace_name}" OR "account intelligence" OR "buyer timing" OR "account signals") '
+            '("AI" OR sales OR outbound OR GTM)',
+        ]
     )
+
+
+def scrapingdog_news_windows(period: str) -> list[str]:
+    if period == "daily":
+        return ["qdr:d", "qdr:w"]
+    if period == "weekly":
+        return ["qdr:w", "qdr:m"]
+    return ["qdr:w"]
 
 
 def refresh_injected_web_trends(
@@ -437,6 +533,7 @@ def refresh_web_trends_for_period(
     enrich_limit: int | None = None,
     fetch_source_page: FetchSourcePage | None = None,
     profile: TrendScoutProfile | None = None,
+    exclude_source_urls: set[str] | None = None,
 ) -> list[TrendItem]:
     profile = profile or build_trend_scout_profile(store)
     articles: list[dict[str, object]] = []
@@ -457,20 +554,32 @@ def refresh_web_trends_for_period(
             errors.append(f"{period} Scrapingdog Google Trends failed: {exc}")
 
         if len(select_web_trend_articles(articles, limit=limit)) < limit:
-            try:
-                articles.extend(
-                    scrapingdog_news_articles(
-                        fetch_scrapingdog_google_news(
-                            api_key=scrapingdog_api_key,
-                            tbs="qdr:d" if period == "daily" else "qdr:w",
-                            limit=25,
-                            query=scrapingdog_news_query(profile),
+            fetched_news = False
+            news_errors: list[str] = []
+            for news_tbs in scrapingdog_news_windows(period):
+                if len(select_web_trend_articles(articles, limit=limit)) >= limit:
+                    break
+                for query in scrapingdog_news_queries(profile)[:SCRAPINGDOG_NEWS_QUERIES_PER_WINDOW]:
+                    if len(select_web_trend_articles(articles, limit=limit)) >= limit:
+                        break
+                    try:
+                        articles.extend(
+                            scrapingdog_news_articles(
+                                fetch_scrapingdog_google_news(
+                                    api_key=scrapingdog_api_key,
+                                    tbs=news_tbs,
+                                    limit=25,
+                                    query=query,
+                                )
+                            )
                         )
-                    )
-                )
+                        fetched_news = True
+                    except Exception as exc:  # noqa: BLE001 - third-party trend source can fail independently.
+                        news_errors.append(str(exc))
+            if fetched_news:
                 sources.append("Scrapingdog Google News")
-            except Exception as exc:  # noqa: BLE001 - third-party trend source can fail independently.
-                errors.append(f"{period} Scrapingdog Google News failed: {exc}")
+            elif news_errors:
+                errors.append(f"{period} Scrapingdog Google News failed: {news_errors[0]}")
 
     stats["candidates_found"] += len(articles)
     selected = select_web_trend_articles(articles, limit=limit)
@@ -485,6 +594,7 @@ def refresh_web_trends_for_period(
         enrich_limit=enrich_limit,
         fetch_source_page=fetch_source_page,
         profile=profile,
+        exclude_source_urls=exclude_source_urls,
     )
 
 
@@ -648,9 +758,11 @@ def web_trend_rank_key(article: dict[str, object]) -> tuple[int, int, int]:
 
 def web_trend_relevance_score(article: dict[str, object]) -> int:
     text = article_relevance_text(article)
+    if article_looks_like_hard_reject(text):
+        return 0
     if article_looks_like_investing_pick(article, text):
         return 0
-    if not any(text_matches_term(text, term) for term in TREND_REQUIRED_RELEVANCE_TERMS):
+    if not has_required_relevance_context(text):
         return 0
     positive = sum(
         weight
@@ -665,6 +777,10 @@ def web_trend_relevance_score(article: dict[str, object]) -> int:
     return max(0, positive - negative)
 
 
+def article_looks_like_hard_reject(text: str) -> bool:
+    return any(text_matches_term(text, term) for term in TREND_HARD_REJECT_TERMS)
+
+
 def article_looks_like_investing_pick(article: dict[str, object], text: str | None = None) -> bool:
     text = text or article_relevance_text(article)
     source = clean_text(
@@ -677,7 +793,17 @@ def article_looks_like_investing_pick(article: dict[str, object], text: str | No
     has_finance_source = any(term in source for term in TREND_FINANCE_SOURCE_TERMS)
     if not has_finance_language and not has_finance_source:
         return False
-    return not any(text_matches_term(text, term) for term in TREND_REQUIRED_RELEVANCE_TERMS)
+    protected_terms = TREND_REQUIRED_RELEVANCE_TERMS - TREND_AMBIGUOUS_REQUIRED_RELEVANCE_TERMS
+    return not any(text_matches_term(text, term) for term in protected_terms)
+
+
+def has_required_relevance_context(text: str) -> bool:
+    strong_terms = TREND_REQUIRED_RELEVANCE_TERMS - TREND_AMBIGUOUS_REQUIRED_RELEVANCE_TERMS
+    if any(text_matches_term(text, term) for term in strong_terms):
+        return True
+    has_ambiguous_term = any(text_matches_term(text, term) for term in TREND_AMBIGUOUS_REQUIRED_RELEVANCE_TERMS)
+    has_supporting_term = any(text_matches_term(text, term) for term in TREND_SUPPORTING_RELEVANCE_TERMS)
+    return has_ambiguous_term and has_supporting_term
 
 
 def article_relevance_text(article: dict[str, object]) -> str:
@@ -700,6 +826,16 @@ def text_matches_term(text: str, term: str) -> bool:
     return term in text
 
 
+def canonical_source_url(value: object) -> str:
+    text = clean_text(value).lower()
+    if not text:
+        return ""
+    parsed = urlparse(text)
+    if not parsed.scheme or not parsed.netloc:
+        return text.rstrip("/")
+    return parsed._replace(query="", fragment="").geturl().rstrip("/")
+
+
 def save_web_trend_articles(
     store: SQLiteStore,
     *,
@@ -713,10 +849,12 @@ def save_web_trend_articles(
     fetch_source_page: FetchSourcePage | None = None,
     count_candidates: bool = True,
     profile: TrendScoutProfile | None = None,
+    exclude_source_urls: set[str] | None = None,
 ) -> list[TrendItem]:
     profile = profile or build_trend_scout_profile(store)
     saved: list[TrendItem] = []
     seen: set[str] = set()
+    excluded_urls = {canonical_source_url(url) for url in exclude_source_urls or set() if canonical_source_url(url)}
     if stats is not None and count_candidates:
         stats["candidates_found"] += len(articles)
     attempted_enrichments = 0
@@ -725,6 +863,8 @@ def save_web_trend_articles(
         title = clean_text(article.get("title"))
         url = clean_text(article.get("url") or article.get("url_mobile"))
         if not title:
+            continue
+        if canonical_source_url(url) in excluded_urls:
             continue
         if web_trend_relevance_score(article) < TREND_RELEVANCE_KEEP_THRESHOLD:
             continue
@@ -849,7 +989,7 @@ def enrich_trend_source(
         trend,
         summary=clean_text(digest.get("what_happened")) or trend.summary,
         why_it_matters=clean_text(digest.get("why_it_matters")) or trend.why_it_matters,
-        leadpoet_angle=clean_text(digest.get("leadpoet_angle")) or trend.leadpoet_angle,
+        leadpoet_angle=positioned_leadpoet_angle(digest.get("leadpoet_angle"), trend=trend, profile=profile),
         suggested_hooks="\n".join(hooks) if hooks else trend.suggested_hooks,
         source_title=source_title,
         source_author=source_author,
@@ -863,6 +1003,45 @@ def enrich_trend_source(
         enriched_at=utc_now(),
         enrichment_status=status,
         enrichment_error=enrichment_error,
+    )
+
+
+def positioned_leadpoet_angle(value: object, *, trend: TrendItem, profile: TrendScoutProfile) -> str:
+    angle = clean_text(value) or trend.leadpoet_angle
+    if leadpoet_angle_needs_positioning_rewrite(angle, profile=profile):
+        return default_positioned_leadpoet_angle(profile)
+    return angle
+
+
+def leadpoet_angle_needs_positioning_rewrite(angle: str, *, profile: TrendScoutProfile) -> bool:
+    lowered = angle.lower()
+    risky_phrases = [
+        "leverage insights from",
+        "leverage similar",
+        "learn from",
+        "can leverage",
+        "could leverage",
+        "inspired by",
+        "borrow from",
+        "copy",
+    ]
+    if any(phrase in lowered for phrase in risky_phrases):
+        return True
+    workspace = profile.workspace_name.lower()
+    if workspace and workspace not in lowered:
+        return False
+    return False
+
+
+def default_positioned_leadpoet_angle(profile: TrendScoutProfile) -> str:
+    if profile.workspace_name == "Leadpoet":
+        return (
+            "Leadpoet's angle: this is market proof that buyer timing, account context, "
+            "and intent signals are becoming the core layer in sales AI, not a feature bolted onto generic automation."
+        )
+    return (
+        f"{profile.workspace_name}'s angle: treat this source as market proof for the saved positioning, "
+        "not as the source of the company's wedge."
     )
 
 
@@ -1041,6 +1220,9 @@ Rules:
 - relevance_score is 0-10.
 - If keep is false or relevance_score is below 6, set leadpoet_angle to an empty string and explain reject_reason.
 - Do not invent a {profile.workspace_name} angle. If the source does not connect naturally to the saved workspace context, buyer timing, proprietary context, account signals, or sales workflow timing, reject it.
+- In leadpoet_angle, never frame another tool, agent, or case study as the source of {profile.workspace_name}'s unique wedge.
+- If another company is mentioned, treat it as market proof, then pull the point back to {profile.workspace_name} owning the saved positioning.
+- Avoid wording like "{profile.workspace_name} can leverage insights from..." or "{profile.workspace_name} can learn from..." unless the sentence immediately names {profile.workspace_name}'s own buyer timing, proprietary context, or account-level intent.
 - Keep each value specific and concise.
 - suggested_hooks and possible_post_angles must be arrays."""
 
@@ -1275,6 +1457,28 @@ def trend_is_recent(trend: TrendItem, now: datetime, *, days: int) -> bool:
 def parse_trend_date(value: str | None) -> datetime | None:
     if not value:
         return None
+    lowered = value.strip().lower()
+    if lowered in {"just now", "now"}:
+        return datetime.now(timezone.utc)
+    if lowered == "yesterday":
+        return datetime.now(timezone.utc) - timedelta(days=1)
+    relative = re.match(r"^(?:about\s+)?(?P<count>\d+|a|an)\s+(?P<unit>minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years)\s+ago$", lowered)
+    if relative:
+        raw_count = relative.group("count")
+        count = 1 if raw_count in {"a", "an"} else int(raw_count)
+        unit = relative.group("unit")
+        if unit.startswith("minute"):
+            return datetime.now(timezone.utc) - timedelta(minutes=count)
+        if unit.startswith("hour"):
+            return datetime.now(timezone.utc) - timedelta(hours=count)
+        if unit.startswith("day"):
+            return datetime.now(timezone.utc) - timedelta(days=count)
+        if unit.startswith("week"):
+            return datetime.now(timezone.utc) - timedelta(weeks=count)
+        if unit.startswith("month"):
+            return datetime.now(timezone.utc) - timedelta(days=30 * count)
+        if unit.startswith("year"):
+            return datetime.now(timezone.utc) - timedelta(days=365 * count)
     for candidate in [value, value.replace("Z", "+00:00")]:
         try:
             parsed = datetime.fromisoformat(candidate)

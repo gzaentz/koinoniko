@@ -6,6 +6,9 @@ from typing import Any
 from uuid import uuid4
 
 
+DEFAULT_WORKSPACE_ID = "default"
+
+
 def new_id() -> str:
     return uuid4().hex
 
@@ -66,6 +69,7 @@ class SocialPost:
     status: str = "example"
     source_draft_id: str | None = None
     id: str = field(default_factory=new_id)
+    workspace_id: str = DEFAULT_WORKSPACE_ID
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
 
@@ -105,6 +109,7 @@ class Pattern:
     example_post_ids: list[str] = field(default_factory=list)
     active: bool = True
     id: str = field(default_factory=new_id)
+    workspace_id: str = DEFAULT_WORKSPACE_ID
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
 
@@ -138,6 +143,7 @@ class ViralPattern:
     status: str = "active"
     raw_text: str | None = None
     id: str = field(default_factory=new_id)
+    workspace_id: str = DEFAULT_WORKSPACE_ID
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
 
@@ -150,6 +156,7 @@ class ContextSection:
     weight: float = 1.0
     active: bool = True
     id: str = field(default_factory=new_id)
+    workspace_id: str = DEFAULT_WORKSPACE_ID
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
 
@@ -182,6 +189,7 @@ class TrendItem:
     enrichment_status: str = "not_attempted"
     enrichment_error: str | None = None
     id: str = field(default_factory=new_id)
+    workspace_id: str = DEFAULT_WORKSPACE_ID
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
 
@@ -204,6 +212,7 @@ class ContentQueueItem:
     x_url: str | None = None
     failure_reason: str | None = None
     id: str = field(default_factory=new_id)
+    workspace_id: str = DEFAULT_WORKSPACE_ID
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
 
@@ -224,6 +233,7 @@ class WebAuthUser:
     password_hash: str
     salt: str
     iterations: int
+    workspace_id: str = DEFAULT_WORKSPACE_ID
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
 
@@ -231,6 +241,7 @@ class WebAuthUser:
 @dataclass(frozen=True)
 class SyncMetadata:
     key: str
+    workspace_id: str = DEFAULT_WORKSPACE_ID
     last_started_at: str | None = None
     last_completed_at: str | None = None
     status: str = "success"
@@ -264,6 +275,7 @@ class GeneratedDraft:
     influences: list[str]
     context_snapshot: "JsonDict" = field(default_factory=dict)
     id: str = field(default_factory=new_id)
+    workspace_id: str = DEFAULT_WORKSPACE_ID
     created_at: str = field(default_factory=utc_now)
 
 
@@ -279,6 +291,7 @@ class ContextBundle:
     notes_by_post_id: dict[str, PostNote]
     metrics_by_post_id: dict[str, EngagementMetrics]
     analytics_hints: list[str]
+    workspace_id: str = DEFAULT_WORKSPACE_ID
 
     def influence_labels(self) -> list[str]:
         labels: list[str] = []
