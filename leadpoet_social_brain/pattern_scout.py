@@ -8,7 +8,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from leadpoet_social_brain.core.models import ViralPattern, utc_now
 from leadpoet_social_brain.providers import DraftProvider, generate_with_provider
@@ -16,8 +16,11 @@ from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 from leadpoet_social_brain.trend_scout import (
     SCRAPINGDOG_NEWS_URL,
     SCRAPINGDOG_TIMEOUT_SECONDS,
+    TREND_RELEVANCE_KEEP_THRESHOLD,
     fetch_json,
     scrapingdog_api_key,
+    text_matches_term,
+    web_trend_relevance_score,
 )
 
 
@@ -27,9 +30,79 @@ PATTERN_REFRESH_MISSING_SCRAPINGDOG = (
 PATTERN_REFRESH_MISSING_PROVIDER = "Pattern refresh requires an LLM provider."
 PATTERN_CATEGORIES = {"ai", "sales", "lead gen", "gtm", "bittensor", "founder", "product", "other"}
 PATTERN_REFRESH_QUERY = (
-    'site:x.com ("AI" OR "sales" OR "lead generation" OR GTM OR "AI SDR" OR Bittensor) '
-    '("likes" OR "reposted" OR "bookmarks" OR "founder")'
+    '("AI SDR" OR "sales AI" OR "outbound AI" OR "GTM AI" OR "sales automation") '
+    '("buyer intent" OR "account signals" OR "buyer timing" OR "lead generation" OR RevOps)'
 )
+PATTERN_CONTEXT_TERMS = (
+    "buyer intent",
+    "account signals",
+    "buyer timing",
+    "intent data",
+    "sales AI",
+    "AI SDR",
+    "outbound",
+    "GTM",
+    "lead generation",
+    "lead gen",
+    "RevOps",
+    "pipeline",
+    "CRM",
+    "data enrichment",
+    "sales automation",
+    "sales engagement",
+    "prospecting",
+)
+PATTERN_REFRESH_BASE_QUERIES = (
+    PATTERN_REFRESH_QUERY,
+    '("sales AI" OR "AI SDR" OR "sales automation") ("buyer intent" OR "account signals" OR "buyer timing" OR "intent data")',
+    '("lead generation" OR "lead gen" OR prospecting) ("intent data" OR "data enrichment" OR "account signals")',
+    '(RevOps OR CRM OR pipeline) (AI OR automation OR agents) (sales OR outbound OR "go-to-market")',
+    '("sales engagement" OR outbound OR "go-to-market") ("AI" OR automation) ("buyer intent" OR "account context")',
+    '("buyer signals" OR "buying signals" OR "intent data") (pipeline OR "sales workflow" OR RevOps OR GTM)',
+    '("account intelligence" OR "account context" OR "go-to-market intelligence") (AI OR agents OR automation OR sales)',
+    '("AI sales agent" OR "AI sales agents" OR "sales assistant" OR "agentic CRM") (CRM OR pipeline OR prospecting)',
+    '("buyer signals" OR "buyer intent") (pipeline OR "demand generation" OR "revenue marketing")',
+    '("data enrichment" OR "B2B data" OR "go-to-market data") (AI OR "lead generation" OR outbound)',
+    '(AI OR agents OR automation) (sales OR GTM OR CRM OR B2B)',
+    '(Salesforce OR HubSpot OR ZoomInfo OR Apollo OR Clay OR Gong OR Outreach OR Salesloft) (AI OR agent OR signals OR intent)',
+    '("buyer intelligence" OR "account intelligence" OR "revenue intelligence") (AI OR sales OR GTM)',
+    '("B2B marketing" OR "demand generation" OR "revenue marketing") (AI OR "buyer signals" OR intent)',
+    '(pipeline OR prospecting OR outbound) ("AI agent" OR "AI agents" OR automation) B2B',
+    '("sales workflow" OR "sales workflows" OR selling) ("AI agents" OR "agentic AI" OR CRM)',
+)
+PATTERN_REFRESH_RESULTS_PER_QUERY = 10
+PATTERN_NEGATIVE_RELEVANCE_WEIGHTS = {
+    "after hours trading": 8,
+    "basketball": 5,
+    "best brokers": 8,
+    "buy stock": 8,
+    "celebrity": 7,
+    "election": 6,
+    "earnings call transcript": 8,
+    "fan engagement": 8,
+    "flight bookings": 8,
+    "formula 1": 8,
+    "football": 5,
+    "fundamentals": 6,
+    "governor": 5,
+    "hospitality": 7,
+    "hotel": 6,
+    "investor letter": 8,
+    "nosediving": 8,
+    "politics": 7,
+    "racing": 6,
+    "senate": 5,
+    "shares": 5,
+    "sports": 7,
+    "stock": 7,
+    "stock price": 8,
+    "stocks to buy": 8,
+    "summer travel": 8,
+    "top 10 best": 5,
+    "travel": 6,
+    "wealth management": 8,
+    "world cup": 6,
+}
 DEFAULT_PATTERN_NAME = "Observed pattern"
 DEFAULT_ADAPTATION_RULE = "Use the structure, not the wording."
 MIN_PATTERN_SOURCE_TEXT_LENGTH = 40
@@ -183,7 +256,11 @@ def refresh_patterns(
     candidates = (
         fetch_candidates(limit=limit)
         if fetch_candidates
-        else fetch_scrapingdog_pattern_candidates(limit=limit, window=window)
+        else fetch_scrapingdog_pattern_candidates(
+            limit=limit,
+            window=window,
+            context_terms=pattern_context_terms(store),
+        )
     )
     stored: list[ViralPattern] = []
     errors: list[str] = []
@@ -199,7 +276,12 @@ def refresh_patterns(
                 continue
             source_url = clean_optional(candidate.get("source_url") or candidate.get("url") or candidate.get("link"))
             source_text = clean_optional(candidate.get("source_text") or candidate.get("text") or candidate.get("snippet") or candidate.get("description") or candidate.get("title"))
-            source_summary = clean_optional(analysis.get("source_summary") or candidate.get("summary") or candidate.get("title"))
+            source_summary = clean_optional(
+                analysis.get("source_summary")
+                or candidate.get("source_summary")
+                or candidate.get("summary")
+                or candidate.get("title")
+            )
             pattern_name = clean_optional(analysis.get("pattern_name"))
             pattern_identity = source_url or f"{pattern_name}:{source_text}:{source_summary}"
             pattern = add_pattern_example(
@@ -225,6 +307,7 @@ def refresh_patterns(
                 quotes=optional_int(candidate.get("quotes")),
                 bookmarks=optional_int(candidate.get("bookmarks")),
                 impressions=optional_int(candidate.get("impressions")),
+                platform=clean_optional(candidate.get("platform")) or platform_for_source_url(source_url),
                 window=window,
                 status="active",
                 raw_text=json.dumps({"candidate": candidate, "analysis": analysis}, sort_keys=True),
@@ -262,53 +345,60 @@ def select_relevant_patterns(
     return ranked[:limit]
 
 
-def fetch_scrapingdog_pattern_candidates(*, limit: int = 5, window: str = "weekly") -> list[dict[str, object]]:
+def fetch_scrapingdog_pattern_candidates(
+    *,
+    limit: int = 5,
+    window: str = "weekly",
+    context_terms: list[str] | None = None,
+) -> list[dict[str, object]]:
     api_key = scrapingdog_api_key()
     if not api_key:
         raise ValueError(PATTERN_REFRESH_MISSING_SCRAPINGDOG)
-    payload = fetch_json(
-        SCRAPINGDOG_NEWS_URL,
-        {
-            "api_key": api_key,
-            "query": PATTERN_REFRESH_QUERY,
-            "results": str(max(limit, 5)),
-            "country": "us",
-            "language": "en",
-            "tbs": {"daily": "qdr:d", "weekly": "qdr:w", "monthly": "qdr:m"}.get(window, "qdr:w"),
-        },
-        timeout=SCRAPINGDOG_TIMEOUT_SECONDS,
-    )
-    results = payload.get("news_results", [])
-    if not isinstance(results, list):
-        return []
     candidates: list[dict[str, object]] = []
-    for item in results:
-        if not isinstance(item, dict):
-            continue
-        source = item.get("source")
-        candidates.append(
+    seen: set[str] = set()
+    for query in build_pattern_refresh_queries(context_terms):
+        payload = fetch_json(
+            SCRAPINGDOG_NEWS_URL,
             {
-                "source_url": item.get("link") or item.get("url"),
-                "source_author": source.get("name") if isinstance(source, dict) else source,
-                "source_text": item.get("snippet") or item.get("description") or item.get("title"),
-                "source_summary": item.get("title"),
-                "raw": item,
-            }
+                "api_key": api_key,
+                "query": query,
+                "results": str(max(PATTERN_REFRESH_RESULTS_PER_QUERY, min(limit, 30))),
+                "country": "us",
+                "language": "en",
+                "tbs": {"daily": "qdr:d", "weekly": "qdr:w", "monthly": "qdr:m"}.get(window, "qdr:w"),
+            },
+            timeout=SCRAPINGDOG_TIMEOUT_SECONDS,
         )
-        if len(candidates) >= limit:
+        results = payload.get("news_results", [])
+        if not isinstance(results, list):
+            continue
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            candidate = scrapingdog_pattern_candidate(item, query=query)
+            keys = pattern_candidate_dedupe_keys(candidate)
+            if any(key in seen for key in keys):
+                continue
+            seen.update(keys)
+            candidates.append(candidate)
+        if len(select_pattern_candidates(candidates, limit=limit)) >= limit:
             break
-    return candidates
+    return select_pattern_candidates(candidates, limit=limit)
 
 
 def analyze_pattern_candidate(provider: DraftProvider, candidate: dict[str, object]) -> dict[str, object]:
     source_text = clean_text(candidate.get("source_text") or candidate.get("text") or candidate.get("snippet") or candidate.get("title"))
     source_url = clean_text(candidate.get("source_url") or candidate.get("url") or candidate.get("link"))
-    prompt = f"""Analyze this source X/social post as a reusable post structure for Koinoniko.
+    source_summary = clean_text(candidate.get("source_summary") or candidate.get("summary") or candidate.get("title"))
+    prompt = f"""Analyze this source news item or social post as a reusable post structure for Koinoniko.
 
 Do not copy the wording. Extract the mechanic only.
 
 Source URL:
 {source_url or "unknown"}
+
+Source summary:
+{source_summary or "No summary provided."}
 
 Source text:
 {source_text or "No text provided."}
@@ -401,8 +491,163 @@ def candidate_source_text(candidate: dict[str, object]) -> str:
     )
 
 
+def platform_for_source_url(source_url: str | None) -> str:
+    host = urlparse(source_url or "").netloc.lower()
+    return "x" if host.endswith("x.com") or host.endswith("twitter.com") else "web"
+
+
+def pattern_context_terms(store: SQLiteStore, *, limit: int = 8) -> list[str]:
+    sections = store.list_context_sections(active_only=True)
+    context_text = " ".join(section.content for section in sections).lower()
+    scored: list[tuple[int, int, str]] = []
+    for index, term in enumerate(PATTERN_CONTEXT_TERMS):
+        score = 1
+        if context_text and term.lower() in context_text:
+            score += 3
+        scored.append((score, -index, term))
+    return [term for _, _, term in sorted(scored, reverse=True)[:limit]]
+
+
+def build_pattern_refresh_queries(context_terms: list[str] | None = None) -> list[str]:
+    terms = unique_texts([*cleaned_context_terms(context_terms), *PATTERN_CONTEXT_TERMS])[:8]
+    context_query = ""
+    if terms:
+        context_query = (
+            f"({google_or_terms(terms[:5])}) "
+            '("sales AI" OR "AI SDR" OR outbound OR GTM OR RevOps OR "lead generation")'
+        )
+    return unique_texts([context_query, *PATTERN_REFRESH_BASE_QUERIES])
+
+
+def cleaned_context_terms(context_terms: list[str] | None) -> list[str]:
+    known_terms = {term.lower(): term for term in PATTERN_CONTEXT_TERMS}
+    return [
+        known_terms[term.lower()]
+        for term in unique_texts([clean_text(term) for term in context_terms or []])
+        if term.lower() in known_terms
+    ]
+
+
+def google_or_terms(terms: list[str]) -> str:
+    return " OR ".join(google_query_term(term) for term in terms)
+
+
+def google_query_term(term: str) -> str:
+    return f'"{term}"' if " " in term else term
+
+
+def scrapingdog_pattern_candidate(item: dict[str, object], *, query: str) -> dict[str, object]:
+    source = item.get("source")
+    source_name = clean_text(source.get("name")) if isinstance(source, dict) else clean_text(source)
+    title = clean_text(item.get("title"))
+    snippet = clean_text(item.get("snippet") or item.get("description"))
+    source_text = ". ".join(unique_texts([title, snippet])) or title or snippet
+    url = clean_text(item.get("link") or item.get("url"))
+    candidate = {
+        "platform": platform_for_source_url(url),
+        "source_url": url,
+        "source_author": source_name or "Google News",
+        "source_text": source_text,
+        "source_summary": title or summarize_source(source_text),
+        "search_query": query,
+        "raw": item,
+    }
+    candidate["relevance_score"] = pattern_candidate_relevance_score(candidate)
+    return candidate
+
+
+def select_pattern_candidates(candidates: list[dict[str, object]], *, limit: int) -> list[dict[str, object]]:
+    selected: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for candidate in sorted(candidates, key=pattern_candidate_rank_key, reverse=True):
+        if not is_meaningful_pattern_source(candidate):
+            continue
+        if pattern_candidate_relevance_score(candidate) < TREND_RELEVANCE_KEEP_THRESHOLD:
+            continue
+        keys = pattern_candidate_dedupe_keys(candidate)
+        if any(key in seen for key in keys):
+            continue
+        seen.update(keys)
+        selected.append(candidate)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def pattern_candidate_rank_key(candidate: dict[str, object]) -> tuple[int, int, int, str]:
+    url = clean_text(candidate.get("source_url"))
+    has_article_url = 1 if url and platform_for_source_url(url) == "web" else 0
+    return (
+        pattern_candidate_relevance_score(candidate),
+        has_article_url,
+        len(candidate_source_text(candidate)),
+        clean_text(candidate.get("source_summary")),
+    )
+
+
+def pattern_candidate_relevance_score(candidate: dict[str, object]) -> int:
+    score = optional_int(candidate.get("relevance_score"))
+    if score is not None:
+        return score
+    base_score = web_trend_relevance_score(
+        {
+            "title": candidate.get("source_summary") or candidate.get("title"),
+            "summary": candidate_source_text(candidate),
+            "snippet": candidate_source_text(candidate),
+            "description": candidate_source_text(candidate),
+            "sourceCommonName": candidate.get("source_author") or candidate.get("source"),
+        }
+    )
+    text = pattern_candidate_relevance_text(candidate)
+    negative = sum(
+        weight
+        for term, weight in PATTERN_NEGATIVE_RELEVANCE_WEIGHTS.items()
+        if text_matches_term(text, term)
+    )
+    return max(0, base_score - negative)
+
+
+def pattern_candidate_relevance_text(candidate: dict[str, object]) -> str:
+    return " ".join(
+        clean_text(value)
+        for value in [
+            candidate.get("source_summary"),
+            candidate_source_text(candidate),
+            candidate.get("source_author"),
+        ]
+    ).lower()
+
+
+def pattern_candidate_dedupe_key(candidate: dict[str, object]) -> str:
+    keys = pattern_candidate_dedupe_keys(candidate)
+    return keys[0] if keys else ""
+
+
+def pattern_candidate_dedupe_keys(candidate: dict[str, object]) -> list[str]:
+    url = clean_text(candidate.get("source_url")).lower()
+    title = normalize_dedupe_title(candidate.get("source_summary"))
+    text = normalize_dedupe_title(candidate_source_text(candidate))
+    keys = []
+    if url:
+        keys.append(f"url:{url}")
+    if title:
+        keys.append(f"title:{title}")
+    if text and text != title:
+        keys.append(f"text:{text[:160]}")
+    return keys
+
+
+def normalize_dedupe_title(value: object) -> str:
+    text = clean_text(value).lower()
+    text = re.sub(r"\s*[-|]\s*[a-z0-9 .,&]+$", "", text)
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return clean_text(text)
+
+
 def is_meaningful_pattern_source(candidate: dict[str, object]) -> bool:
-    return is_meaningful_pattern_source_text(candidate_source_text(candidate))
+    return is_meaningful_pattern_source_text(candidate_source_text(candidate)) and is_meaningful_source_url(
+        candidate.get("source_url") or candidate.get("url") or candidate.get("link")
+    )
 
 
 def is_meaningful_pattern_source_text(value: object) -> bool:
@@ -414,6 +659,14 @@ def is_meaningful_pattern_source_text(value: object) -> bool:
         return False
     if re.search(r"\(@[^)]+\)\s*/\s*(posts|with replies|replies|media|likes)\s*/\s*x$", cleaned, flags=re.I):
         return False
+    return True
+
+
+def is_meaningful_source_url(value: object) -> bool:
+    parsed = urlparse(clean_text(value))
+    host = parsed.netloc.lower()
+    if host.endswith("x.com") or host.endswith("twitter.com"):
+        return "/status/" in parsed.path
     return True
 
 
@@ -461,6 +714,19 @@ def normalize_category(value: object) -> str:
     if "ai" in cleaned or "agent" in cleaned:
         return "ai"
     return "other"
+
+
+def unique_texts(values: list[object]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        cleaned = clean_text(value)
+        key = cleaned.lower()
+        if not cleaned or key in seen:
+            continue
+        seen.add(key)
+        unique.append(cleaned)
+    return unique
 
 
 def cell(row: dict[str, str], key: str) -> str:

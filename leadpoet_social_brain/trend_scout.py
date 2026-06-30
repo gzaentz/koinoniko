@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 from leadpoet_social_brain.core.models import TrendItem, utc_now
 from leadpoet_social_brain.providers import DraftProvider, generate_with_provider
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
+from leadpoet_social_brain.voice import load_positioning_rules, load_voice_rules_override
 
 
 SCRAPINGDOG_API_KEY_ENV = "SCRAPINGDOG_API_KEY"
@@ -201,6 +202,37 @@ class WebTrendGroups:
 
 
 @dataclass(frozen=True)
+class TrendScoutProfile:
+    user_name: str = "Gavin"
+    workspace_name: str = "Leadpoet"
+    positioning_rules: list[str] = field(default_factory=list)
+    voice_rules: list[str] = field(default_factory=list)
+    context_sections: list[str] = field(default_factory=list)
+
+    @property
+    def focus_summary(self) -> str:
+        pieces = [
+            *self.positioning_rules[:4],
+            *self.context_sections[:6],
+        ]
+        return "\n".join(f"- {piece}" for piece in pieces if piece) or "- No saved context yet."
+
+    @property
+    def keep_guidance(self) -> str:
+        return (
+            "B2B GTM, outbound, lead generation, AI SDRs, sales workflows, buyer intent, "
+            "account signals, pipeline prioritization, CRM/RevOps, data enrichment, buyer timing, "
+            "or a directly relevant saved company priority."
+        )
+
+    @property
+    def default_angle(self) -> str:
+        if self.workspace_name == "Leadpoet":
+            return "Tie the signal back to buyer timing, proprietary context, and why generic sales automation is not enough."
+        return f"Tie the signal back to {self.workspace_name}'s saved positioning and why this market shift matters now."
+
+
+@dataclass(frozen=True)
 class SourcePageDetails:
     title: str | None = None
     author: str | None = None
@@ -223,6 +255,7 @@ def refresh_web_trends(
     enrich_limit: int | None = None,
     fetch_source_page: FetchSourcePage | None = None,
 ) -> WebTrendGroups:
+    profile = build_trend_scout_profile(store)
     if fetch_articles:
         return refresh_injected_web_trends(
             store,
@@ -232,6 +265,7 @@ def refresh_web_trends(
             enrich=enrich,
             enrich_limit=enrich_limit,
             fetch_source_page=fetch_source_page,
+            profile=profile,
         )
 
     errors: list[str] = []
@@ -255,6 +289,7 @@ def refresh_web_trends(
         enrich=enrich,
         enrich_limit=enrich_limit,
         fetch_source_page=fetch_source_page,
+        profile=profile,
     )
     weekly = refresh_web_trends_for_period(
         store,
@@ -270,6 +305,7 @@ def refresh_web_trends(
         enrich=enrich,
         enrich_limit=enrich_limit,
         fetch_source_page=fetch_source_page,
+        profile=profile,
     )
     return WebTrendGroups(daily=daily, weekly=weekly, errors=errors, sources=unique_texts(sources), **stats)
 
@@ -282,6 +318,67 @@ def scrapingdog_configured() -> bool:
     return bool(scrapingdog_api_key())
 
 
+def build_trend_scout_profile(store: SQLiteStore) -> TrendScoutProfile:
+    positioning_rules = load_positioning_rules(store)
+    voice_rules = load_voice_rules_override(store) or []
+    context_sections = [
+        f"{section.kind}/{section.name}: {truncate_text(section.content, 520)}"
+        for section in store.list_context_sections(
+            kinds={"writer", "product", "audience", "positioning", "proof", "priority", "guardrail", "sales_llm_vision", "bittensor"},
+            active_only=True,
+        )
+        if clean_text(section.content)
+    ]
+    workspace_name = workspace_name_from_text("\n".join([*positioning_rules, *context_sections])) or "Leadpoet"
+    return TrendScoutProfile(
+        workspace_name=workspace_name,
+        positioning_rules=positioning_rules,
+        voice_rules=voice_rules,
+        context_sections=context_sections,
+    )
+
+
+def workspace_name_from_text(text: str) -> str | None:
+    stopwords = {
+        "A",
+        "AI",
+        "An",
+        "Bittensor",
+        "Context",
+        "Facts",
+        "Gavin",
+        "Koinoniko",
+        "Lead",
+        "Other",
+        "Sales",
+        "The",
+        "This",
+        "When",
+    }
+    patterns = [
+        r"\b([A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*){0,2})\s+(?:is|owns|helps|turns|gives|makes|builds|provides)\b",
+        r"\b([A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*){0,2})'s\s+(?:core|unique|main|primary|product|platform|wedge|advantage)\b",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            candidate = " ".join(match.group(1).split())
+            words = candidate.split()
+            if candidate and len(words) <= 3 and not any(word in stopwords for word in words):
+                return candidate
+    if re.search(r"\bLeadpoet\b", text):
+        return "Leadpoet"
+    return None
+
+
+def scrapingdog_news_query(profile: TrendScoutProfile) -> str:
+    if profile.workspace_name == "Leadpoet":
+        return SCRAPINGDOG_NEWS_QUERY
+    return (
+        f'{SCRAPINGDOG_NEWS_QUERY} OR "{profile.workspace_name}" '
+        'OR "account intelligence" OR "buyer timing" OR "account signals"'
+    )
+
+
 def refresh_injected_web_trends(
     store: SQLiteStore,
     *,
@@ -291,7 +388,9 @@ def refresh_injected_web_trends(
     enrich: bool = True,
     enrich_limit: int | None = None,
     fetch_source_page: FetchSourcePage | None = None,
+    profile: TrendScoutProfile | None = None,
 ) -> WebTrendGroups:
+    profile = profile or build_trend_scout_profile(store)
     stats = empty_refresh_stats()
     daily = save_web_trend_articles(
         store,
@@ -303,6 +402,7 @@ def refresh_injected_web_trends(
         enrich=enrich,
         enrich_limit=enrich_limit,
         fetch_source_page=fetch_source_page,
+        profile=profile,
         count_candidates=True,
     )
     weekly = save_web_trend_articles(
@@ -315,6 +415,7 @@ def refresh_injected_web_trends(
         enrich=enrich,
         enrich_limit=enrich_limit,
         fetch_source_page=fetch_source_page,
+        profile=profile,
         count_candidates=True,
     )
     return WebTrendGroups(daily=daily, weekly=weekly, sources=["Injected test source"], **stats)
@@ -335,7 +436,9 @@ def refresh_web_trends_for_period(
     enrich: bool = True,
     enrich_limit: int | None = None,
     fetch_source_page: FetchSourcePage | None = None,
+    profile: TrendScoutProfile | None = None,
 ) -> list[TrendItem]:
+    profile = profile or build_trend_scout_profile(store)
     articles: list[dict[str, object]] = []
     if scrapingdog_api_key:
         try:
@@ -361,6 +464,7 @@ def refresh_web_trends_for_period(
                             api_key=scrapingdog_api_key,
                             tbs="qdr:d" if period == "daily" else "qdr:w",
                             limit=25,
+                            query=scrapingdog_news_query(profile),
                         )
                     )
                 )
@@ -380,6 +484,7 @@ def refresh_web_trends_for_period(
         enrich=enrich,
         enrich_limit=enrich_limit,
         fetch_source_page=fetch_source_page,
+        profile=profile,
     )
 
 
@@ -414,12 +519,13 @@ def fetch_scrapingdog_google_news(
     limit: int = 25,
     country: str = "us",
     language: str = "en",
+    query: str | None = None,
 ) -> list[dict[str, object]]:
     payload = fetch_json(
         SCRAPINGDOG_NEWS_URL,
         {
             "api_key": api_key,
-            "query": SCRAPINGDOG_NEWS_QUERY,
+            "query": query or SCRAPINGDOG_NEWS_QUERY,
             "results": str(limit),
             "country": country,
             "language": language,
@@ -606,7 +712,9 @@ def save_web_trend_articles(
     enrich_limit: int | None = None,
     fetch_source_page: FetchSourcePage | None = None,
     count_candidates: bool = True,
+    profile: TrendScoutProfile | None = None,
 ) -> list[TrendItem]:
+    profile = profile or build_trend_scout_profile(store)
     saved: list[TrendItem] = []
     seen: set[str] = set()
     if stats is not None and count_candidates:
@@ -624,7 +732,7 @@ def save_web_trend_articles(
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
-        trend = web_trend_from_article(article, source_type=source_type)
+        trend = web_trend_from_article(article, source_type=source_type, profile=profile)
         if enrich and attempted_enrichments < max_enrichments and (provider or fetch_source_page):
             attempted_enrichments += 1
             trend = enrich_trend_source(
@@ -632,6 +740,7 @@ def save_web_trend_articles(
                 article,
                 provider=provider,
                 fetch_source_page=fetch_source_page or fetch_source_page_text,
+                profile=profile,
             )
             if stats is not None:
                 if trend.enrichment_status == "enriched":
@@ -661,7 +770,9 @@ def enrich_trend_source(
     *,
     provider: DraftProvider | None,
     fetch_source_page: FetchSourcePage,
+    profile: TrendScoutProfile | None = None,
 ) -> TrendItem:
+    profile = profile or TrendScoutProfile()
     page = SourcePageDetails()
     page_error = ""
     url = trend.source_url or clean_text(article.get("link") or article.get("url") or article.get("url_mobile"))
@@ -683,7 +794,7 @@ def enrich_trend_source(
         try:
             raw_digest = generate_with_provider(
                 provider,
-                build_trend_digest_prompt(trend, article, page),
+                build_trend_digest_prompt(trend, article, page, profile=profile),
                 variants=1,
             )[0]
             digest = parse_trend_digest(raw_digest)
@@ -874,7 +985,14 @@ class ArticleTextParser(HTMLParser):
             self._parts.append(data)
 
 
-def build_trend_digest_prompt(trend: TrendItem, article: dict[str, object], page: SourcePageDetails) -> str:
+def build_trend_digest_prompt(
+    trend: TrendItem,
+    article: dict[str, object],
+    page: SourcePageDetails,
+    *,
+    profile: TrendScoutProfile | None = None,
+) -> str:
+    profile = profile or TrendScoutProfile()
     provider_metadata = {
         "title": trend.title,
         "source_url": trend.source_url,
@@ -894,13 +1012,16 @@ def build_trend_digest_prompt(trend: TrendItem, article: dict[str, object], page
         "product_company_names": page.mentioned_names[:10],
     }
     text_excerpt = truncate_text(page.text_excerpt or trend.source_text_excerpt or "", SOURCE_PROMPT_TEXT_CHARS)
-    return f"""Create a concise Trend Scout digest for Gavin at Leadpoet.
+    return f"""Create a concise Trend Scout digest for {profile.user_name} at {profile.workspace_name}.
 
-First decide whether this source is actually worth surfacing for Leadpoet.
+First decide whether this source is actually worth surfacing for this workspace.
 
-Keep only if it directly affects B2B GTM, outbound, lead generation, AI SDRs, sales workflows, buyer intent, account signals, pipeline prioritization, CRM/RevOps, data enrichment, or buyer timing.
+Saved workspace context:
+{profile.focus_summary}
 
-Reject if it is generic AI news, consumer tech, politics, entertainment, broad market chatter, or if the Leadpoet angle would need to be forced.
+Keep only if it directly affects {profile.keep_guidance}
+
+Reject if it is generic AI news, consumer tech, politics, entertainment, broad market chatter, or if the {profile.workspace_name} angle would need to be forced.
 
 Use source details for understanding, not copying. Do not quote long passages.
 
@@ -919,7 +1040,7 @@ keep, relevance_score, relevance_reason, reject_reason, what_happened, what_is_n
 Rules:
 - relevance_score is 0-10.
 - If keep is false or relevance_score is below 6, set leadpoet_angle to an empty string and explain reject_reason.
-- Do not invent a Leadpoet angle. If the source does not connect naturally to buyer timing, proprietary context, account signals, or sales workflow timing, reject it.
+- Do not invent a {profile.workspace_name} angle. If the source does not connect naturally to the saved workspace context, buyer timing, proprietary context, account signals, or sales workflow timing, reject it.
 - Keep each value specific and concise.
 - suggested_hooks and possible_post_angles must be arrays."""
 
@@ -1095,7 +1216,13 @@ def select_trend_group(
     return [*recent, *fallback][:limit]
 
 
-def web_trend_from_article(article: dict[str, object], *, source_type: str) -> TrendItem:
+def web_trend_from_article(
+    article: dict[str, object],
+    *,
+    source_type: str,
+    profile: TrendScoutProfile | None = None,
+) -> TrendItem:
+    profile = profile or TrendScoutProfile()
     title = clean_text(article.get("title")) or "Untitled trend"
     url = clean_text(article.get("url") or article.get("link") or article.get("url_mobile")) or None
     source = clean_text(
@@ -1120,7 +1247,7 @@ def web_trend_from_article(article: dict[str, object], *, source_type: str) -> T
         topic=topic,
         summary=summary,
         why_it_matters="This may shift buyer priorities, sales workflows, or the market timing behind AI-led pipeline work.",
-        leadpoet_angle="Tie the signal back to buyer timing, proprietary context, and why generic sales automation is not enough.",
+        leadpoet_angle=profile.default_angle,
         suggested_hooks=suggested_hook_for_topic(topic),
         urgency="high" if source_type == WEB_DAILY_SOURCE_TYPE else "medium",
         date=date_value,
@@ -1134,7 +1261,7 @@ def web_trend_from_article(article: dict[str, object], *, source_type: str) -> T
         source_text_excerpt=None,
         key_points_json=json.dumps(normalize_string_list([summary, article.get("trend_breakdown_text")], limit=4)),
         important_claims_json=json.dumps([]),
-        post_angles_json=json.dumps([f"Use this to talk about {topic} through the lens of buyer timing."]),
+        post_angles_json=json.dumps([f"Use this to talk about {topic} through the lens of {profile.workspace_name}'s saved positioning."]),
         source_confidence="low",
         enrichment_status="not_attempted",
     )

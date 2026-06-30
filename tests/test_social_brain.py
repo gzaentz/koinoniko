@@ -22,7 +22,7 @@ from leadpoet_social_brain.categorization import XPostLLMCategorizer, parse_x_ca
 from leadpoet_social_brain.content_queue import create_post_x, plan_week_x, post_queue_item_x
 from leadpoet_social_brain.cli import build_parser as build_cli_parser, main as cli_main
 from leadpoet_social_brain.context import ContextManager
-from leadpoet_social_brain.core.models import ContentQueueItem, DraftRequest, EngagementMetrics, PostNote, SocialPost, SyncMetadata, TrendItem, utc_now
+from leadpoet_social_brain.core.models import ContentQueueItem, ContextSection, DraftRequest, EngagementMetrics, PostNote, SocialPost, SyncMetadata, TrendItem, utc_now
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator, clean_generated_text
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
 from leadpoet_social_brain.openrouter_provider import OpenRouterProvider, create_provider
@@ -30,7 +30,9 @@ from leadpoet_social_brain.pattern_scout import (
     PATTERN_REFRESH_MISSING_SCRAPINGDOG,
     PatternRefreshResult,
     add_pattern_example,
+    fetch_scrapingdog_pattern_candidates,
     ingest_patterns_batch_csv,
+    pattern_context_terms,
     pattern_groups,
     refresh_patterns,
 )
@@ -2641,6 +2643,78 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(all(trend.id.startswith("trend_web_daily_") for trend in grouped.daily))
             store.close()
 
+    def test_web_trend_scout_uses_saved_workspace_context_in_digest_prompt(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            save_positioning_rules(
+                store,
+                [
+                    "AcmeOS is the core account intelligence layer: first-party CRM context, renewal timing, and buyer intent.",
+                    "Competitor agents are proof that account timing matters, not the source of AcmeOS's wedge.",
+                ],
+            )
+            store.save_context_section(
+                ContextSection(
+                    kind="product",
+                    name="acme_product",
+                    content="AcmeOS helps revenue teams spot renewal timing and expansion intent before AI outreach.",
+                )
+            )
+            provider = FakeProvider(["{}"])
+
+            def fake_fetch(*, timespan: str, limit: int):
+                return [
+                    {
+                        "title": f"{timespan} sales AI account signals trend",
+                        "url": f"https://example.com/acme/{timespan}",
+                        "summary": "AI sales agents are using CRM account signals before outreach.",
+                        "seendate": "20260626120000",
+                        "sourceCommonName": "Example News",
+                    }
+                ]
+
+            refresh_web_trends(
+                store,
+                fetch_articles=fake_fetch,
+                limit=1,
+                provider=provider,
+                fetch_source_page=lambda _: "<html><title>Account signals</title><p>Sales AI tools are using CRM account signals and renewal timing before outreach.</p></html>",
+            )
+
+            prompt = provider.prompts[0]
+            self.assertIn("Gavin at AcmeOS", prompt)
+            self.assertIn("AcmeOS is the core account intelligence layer", prompt)
+            self.assertIn("renewal timing and expansion intent", prompt)
+            self.assertNotIn("Gavin at Leadpoet", prompt)
+            store.close()
+
+    def test_web_trend_fallback_angle_uses_saved_workspace_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            save_positioning_rules(
+                store,
+                [
+                    "AcmeOS is the core account intelligence layer for renewal timing.",
+                ],
+            )
+
+            def fake_fetch(*, timespan: str, limit: int):
+                return [
+                    {
+                        "title": f"{timespan} sales AI account signals trend",
+                        "url": f"https://example.com/acme-fallback/{timespan}",
+                        "summary": "AI sales tools are adding account signals to CRM workflows.",
+                        "seendate": "20260626120000",
+                        "sourceCommonName": "Example News",
+                    }
+                ]
+
+            refreshed = refresh_web_trends(store, fetch_articles=fake_fetch, limit=1, enrich=False)
+
+            self.assertIn("AcmeOS", refreshed.daily[0].leadpoet_angle)
+            self.assertNotIn("Leadpoet", refreshed.daily[0].leadpoet_angle)
+            store.close()
+
     def test_web_trend_groups_backfill_older_unused_daily_trends(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -2837,6 +2911,98 @@ class SocialBrainTest(unittest.TestCase):
 
             self.assertEqual(str(error.exception), PATTERN_REFRESH_MISSING_SCRAPINGDOG)
             store.close()
+
+    def test_pattern_context_terms_prioritize_saved_context(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.save_context_section(
+                ContextSection(
+                    kind="positioning",
+                    name="core",
+                    content="Leadpoet is focused on RevOps, CRM account signals, and data enrichment.",
+                    weight=2.0,
+                )
+            )
+
+            terms = pattern_context_terms(store, limit=5)
+
+            self.assertIn("account signals", terms[:3])
+            self.assertIn("RevOps", terms)
+            self.assertIn("data enrichment", terms)
+            store.close()
+
+    def test_pattern_fetch_uses_context_queries_and_filters_irrelevant_news(self):
+        responses = [
+            [
+                {
+                    "title": "Kling AI (@Kling_ai) / Posts / X",
+                    "link": "https://x.com/Kling_ai",
+                    "source": "X",
+                    "snippet": "Kling AI (@Kling_ai) / Posts / X",
+                },
+                {
+                    "title": "Budget fight mentions AI procurement",
+                    "link": "https://example.com/politics",
+                    "source": "Example News",
+                    "snippet": "Governor and senate leaders negotiated a political budget deal.",
+                },
+                {
+                    "title": "AI SDR teams add buyer intent signals",
+                    "link": "https://example.com/ai-sdr-intent",
+                    "source": "GTM News",
+                    "snippet": "Outbound teams are using account signals and buyer timing to prioritize pipeline.",
+                },
+            ],
+            [
+                {
+                    "title": "Consumer AI photo app launches new filters",
+                    "link": "https://example.com/photo-app",
+                    "source": "Consumer News",
+                    "snippet": "The generic AI update focuses on a consumer photo app.",
+                },
+                {
+                    "title": "Lead generation vendors invest in data enrichment",
+                    "link": "https://example.com/lead-gen-enrichment",
+                    "source": "GTM News",
+                    "snippet": "Sales teams want account context before outreach and better intent data.",
+                },
+            ],
+            [
+                {
+                    "title": "RevOps teams connect CRM data to sales automation",
+                    "link": "https://example.com/revops-crm-automation",
+                    "source": "RevOps Weekly",
+                    "snippet": "Pipeline teams are using CRM signals to tune outbound workflow timing.",
+                }
+            ],
+        ]
+        calls: list[dict[str, str]] = []
+
+        def fake_fetch_json(url: str, params: dict[str, str], *, timeout: int):
+            calls.append(params)
+            index = min(len(calls), len(responses)) - 1
+            return {"news_results": responses[index]}
+
+        with patch.dict(os.environ, {"SCRAPINGDOG_API_KEY": "dog-key"}, clear=False):
+            with patch("leadpoet_social_brain.pattern_scout.fetch_json", side_effect=fake_fetch_json):
+                candidates = fetch_scrapingdog_pattern_candidates(
+                    limit=3,
+                    window="weekly",
+                    context_terms=["data enrichment", "CRM"],
+                )
+
+        self.assertEqual(len(candidates), 3)
+        self.assertGreaterEqual(len(calls), 3)
+        self.assertIn('"data enrichment"', calls[0]["query"])
+        self.assertTrue(all("x.com/Kling_ai" not in str(candidate.get("source_url")) for candidate in candidates))
+        self.assertEqual(
+            [candidate["source_summary"] for candidate in candidates],
+            [
+                "AI SDR teams add buyer intent signals",
+                "Lead generation vendors invest in data enrichment",
+                "RevOps teams connect CRM data to sales automation",
+            ],
+        )
 
     def test_pattern_refresh_stores_provider_analysis_with_mocked_candidates(self):
         with tempfile.TemporaryDirectory() as tmpdir:

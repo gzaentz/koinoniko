@@ -175,8 +175,17 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
                     {"title": f"Celebrity gossip {hours}", "search_volume": 900000},
                 ]
 
-            def fake_google_news(*, api_key: str, tbs: str, limit: int, country: str = "us", language: str = "en"):
+            def fake_google_news(
+                *,
+                api_key: str,
+                tbs: str,
+                limit: int,
+                country: str = "us",
+                language: str = "en",
+                query: str | None = None,
+            ):
                 self.assertEqual(api_key, "dog-key")
+                self.assertIn("sales AI", query or "")
                 slug = tbs.replace(":", "-")
                 return [
                     {
