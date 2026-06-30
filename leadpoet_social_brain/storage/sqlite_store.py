@@ -7,6 +7,7 @@ import json
 import os
 import secrets
 import sqlite3
+import time
 from collections.abc import Iterable
 from pathlib import Path
 import re
@@ -38,6 +39,8 @@ RAILWAY_VOLUME_MOUNT_ENV_VAR = "RAILWAY_VOLUME_MOUNT_PATH"
 DEFAULT_WEB_AUTH_USERNAME = "gavinz444"
 PASSWORD_HASH_ITERATIONS = 310_000
 WORKSPACE_ID_MAX_LENGTH = 80
+SQLITE_BUSY_TIMEOUT_MS = 5_000
+SQLITE_BUSY_RETRY_SECONDS = 10.0
 
 
 def resolve_db_path(path: str | Path | None = None) -> Path:
@@ -57,18 +60,33 @@ class SQLiteStore:
         self.path = resolve_db_path(path)
         self.workspace_id = normalize_workspace_id(workspace_id)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.path)
+        self.conn = sqlite3.connect(self.path, timeout=SQLITE_BUSY_RETRY_SECONDS)
         self.conn.row_factory = sqlite3.Row
         self._configure_connection()
-        self.initialize()
+        self._run_with_busy_retry(self.initialize)
 
     def close(self) -> None:
         self.conn.close()
 
     def _configure_connection(self) -> None:
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA busy_timeout=5000")
+        self.conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+        self._run_with_busy_retry(lambda: self.conn.execute("PRAGMA journal_mode=WAL").fetchone())
         self.conn.execute("PRAGMA foreign_keys=ON")
+
+    def _run_with_busy_retry(self, operation):
+        deadline = time.monotonic() + SQLITE_BUSY_RETRY_SECONDS
+        while True:
+            try:
+                return operation()
+            except sqlite3.OperationalError as exc:
+                if not self._is_busy_error(exc) or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.05)
+
+    @staticmethod
+    def _is_busy_error(exc: sqlite3.OperationalError) -> bool:
+        message = str(exc).lower()
+        return "database is locked" in message or "database table is locked" in message
 
     def initialize(self) -> None:
         self.conn.executescript(
@@ -369,27 +387,48 @@ class SQLiteStore:
             self._rebuild_sync_metadata_table()
 
     def _recreate_workspace_indexes(self) -> None:
-        self.conn.execute("DROP INDEX IF EXISTS idx_pattern_examples_lookup")
-        self.conn.execute(
+        self._ensure_index(
+            "idx_pattern_examples_lookup",
+            ["workspace_id", "status", "window", "category", "topic", "collected_at"],
             """
-            CREATE INDEX idx_pattern_examples_lookup
+            CREATE INDEX IF NOT EXISTS idx_pattern_examples_lookup
             ON pattern_examples(workspace_id, status, window, category, topic, collected_at)
-            """
+            """,
         )
-        self.conn.execute("DROP INDEX IF EXISTS idx_trend_items_lookup")
-        self.conn.execute(
+        self._ensure_index(
+            "idx_trend_items_lookup",
+            ["workspace_id", "status", "urgency", "topic", "date"],
             """
-            CREATE INDEX idx_trend_items_lookup
+            CREATE INDEX IF NOT EXISTS idx_trend_items_lookup
             ON trend_items(workspace_id, status, urgency, topic, date)
-            """
+            """,
         )
-        self.conn.execute("DROP INDEX IF EXISTS idx_content_queue_status_scheduled")
-        self.conn.execute(
+        self._ensure_index(
+            "idx_content_queue_status_scheduled",
+            ["workspace_id", "status", "scheduled_at"],
             """
-            CREATE INDEX idx_content_queue_status_scheduled
+            CREATE INDEX IF NOT EXISTS idx_content_queue_status_scheduled
             ON content_queue(workspace_id, status, scheduled_at)
-            """
+            """,
         )
+
+    def _ensure_index(self, index_name: str, columns: list[str], create_sql: str) -> None:
+        existing_columns = self._index_columns(index_name)
+        if existing_columns == columns:
+            return
+        if existing_columns is not None:
+            self.conn.execute(f"DROP INDEX IF EXISTS {index_name}")
+        self.conn.execute(create_sql)
+
+    def _index_columns(self, index_name: str) -> list[str] | None:
+        row = self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?",
+            (index_name,),
+        ).fetchone()
+        if not row:
+            return None
+        rows = self.conn.execute(f"PRAGMA index_info({index_name})").fetchall()
+        return [row["name"] for row in rows]
 
     def _ensure_required_context_sections(self) -> None:
         for section in required_context_sections():

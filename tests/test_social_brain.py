@@ -7,6 +7,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from contextlib import redirect_stderr, redirect_stdout
@@ -422,6 +423,28 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(alice_store.get_sync_metadata("x_posts_sync").summary["imported"], 2)
             default_store.close()
             alice_store.close()
+
+    def test_store_initialization_can_run_concurrently_without_index_races(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+
+            def initialize_store(_index: int) -> tuple[str, ...]:
+                store = SQLiteStore(db_path)
+                try:
+                    rows = store.conn.execute("PRAGMA index_info(idx_pattern_examples_lookup)").fetchall()
+                    return tuple(row["name"] for row in rows)
+                finally:
+                    store.close()
+
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                columns = list(executor.map(initialize_store, range(24)))
+
+            self.assertTrue(columns)
+            self.assertTrue(all(column_set == columns[0] for column_set in columns))
+            self.assertEqual(
+                columns[0],
+                ("workspace_id", "status", "window", "category", "topic", "collected_at"),
+            )
 
     def test_web_auth_uses_stored_password_hash_and_signed_session_cookie(self):
         with tempfile.TemporaryDirectory() as tmpdir:
