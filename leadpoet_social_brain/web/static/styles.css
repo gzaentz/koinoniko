@@ -2488,15 +2488,10 @@ main {
   gap: 12px;
 }
 
-.intent-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.intent-actions button {
-  min-height: 34px;
-  font-size: 14px;
+.ai-revision-composer textarea {
+  min-height: 72px;
+  resize: vertical;
+  background: var(--soft);
 }
 
 .form-grid {

@@ -1600,7 +1600,6 @@ function renderQueueModal() {
   const item = state.queueDetail;
   if (!item) return;
   const canUseAI = Boolean(state.status?.provider_configured);
-  const canPost = item.status === "approved" && Boolean(state.status?.x_write_configured);
   const scheduledValue = dateTimeLocalValue(item.scheduled_at);
   $("queueModalTitle").textContent = item.focus || summarize(item.text, 70);
   $("queueModalBody").innerHTML = `
@@ -1626,20 +1625,9 @@ function renderQueueModal() {
     </div>
     <div class="modal-actions">
       <button onclick="saveQueueDetail(event)">Save changes</button>
-      <button class="secondary" onclick="reviseDetail(event)" ${canUseAI ? "" : "disabled"} title="${canUseAI ? "" : "Provider-backed generation is not connected."}">Improve with AI</button>
-      ${item.status !== "approved" ? `<button class="secondary" onclick='approveQueue(event, ${jsArg(item.id)})'>Approve</button>` : `<button class="secondary" onclick='moveToReview(event, ${jsArg(item.id)})'>Move to review</button>`}
-      ${item.status === "approved" ? `<button class="secondary" onclick='postNow(event, ${jsArg(item.id)})' ${canPost ? "" : "disabled"} title="${state.status?.x_write_configured ? "" : "X write auth is not connected."}">Post now</button>` : ""}
-      <button class="quiet-button" onclick='skipQueue(event, ${jsArg(item.id)})'>Skip</button>
     </div>
     <div class="revision-box">
-      <label>AI instruction<textarea id="revisionInstruction" rows="3" placeholder="Make it sharper, less corporate, or tie it more directly to saved context."></textarea></label>
-      <div class="intent-actions">
-        <button class="secondary" onclick='reviseWithPreset(event, "Make this more natural and less polished.")' ${canUseAI ? "" : "disabled"}>Make More Natural</button>
-        <button class="secondary" onclick='reviseWithPreset(event, "Make this sharper and more opinionated.")' ${canUseAI ? "" : "disabled"}>Make Sharper</button>
-        <button class="secondary" onclick='reviseWithPreset(event, "Make this more founder-led and specific.")' ${canUseAI ? "" : "disabled"}>Make More Founder-Led</button>
-        <button class="secondary" onclick='reviseWithPreset(event, "Shorten this while keeping the point.")' ${canUseAI ? "" : "disabled"}>Shorten</button>
-        <button class="secondary" onclick='reviseWithPreset(event, "Tie this more clearly to saved facts and context without making it salesy.")' ${canUseAI ? "" : "disabled"}>Tie More to Context</button>
-      </div>
+      <label class="ai-revision-composer">AI instruction<textarea id="revisionInstruction" rows="2" placeholder="${canUseAI ? "Ask for a rewrite..." : "Connect a provider to ask for revisions."}" onkeydown="submitRevisionInstructionFromKey(event)" ${canUseAI ? "" : "disabled"} title="${canUseAI ? "" : "Provider-backed generation is not connected."}"></textarea></label>
       <div id="revisionList" class="revision-list">${revisionList(item.versions || [])}</div>
     </div>
   `;
@@ -1677,26 +1665,22 @@ window.saveQueueDetail = (event) => {
   });
 };
 
-window.reviseDetail = (event) => {
-  runButton(event.currentTarget, "Improving...", async () => {
-    const instruction = $("revisionInstruction").value.trim();
-    if (!instruction) throw new Error("Add an AI revision instruction first.");
-    const payload = await api(`/api/queue/${encodeURIComponent(state.queueDetail.id)}/revise`, {
-      method: "POST",
-      body: JSON.stringify({ instruction }),
-    });
-    state.queueDetail = {
-      ...state.queueDetail,
-      versions: payload.versions,
-    };
-    showMessage("Revision options generated.");
-    renderQueueModal();
-  });
-};
+async function submitRevisionInstruction(input) {
+  const instruction = input?.value.trim() || "";
+  if (!instruction) {
+    input?.focus();
+    showMessage("Add an AI revision instruction first.", true);
+    return;
+  }
+  if (!state.status?.provider_configured) {
+    showMessage("Provider-backed generation is not connected.", true);
+    return;
+  }
 
-window.reviseWithPreset = (event, instruction) => {
-  $("revisionInstruction").value = instruction;
-  runButton(event.currentTarget, "Generating...", async () => {
+  const originalPlaceholder = input.placeholder;
+  input.disabled = true;
+  input.placeholder = "Suggesting updated post text...";
+  try {
     const payload = await api(`/api/queue/${encodeURIComponent(state.queueDetail.id)}/revise`, {
       method: "POST",
       body: JSON.stringify({ instruction }),
@@ -1707,7 +1691,20 @@ window.reviseWithPreset = (event, instruction) => {
     };
     showMessage("Revision generated. Accept it when it is ready.");
     renderQueueModal();
-  });
+  } catch (error) {
+    input.disabled = false;
+    input.placeholder = originalPlaceholder;
+    input.focus();
+    showMessage(error.message, true);
+  } finally {
+    if (state.status) updateGlobalControls();
+  }
+}
+
+window.submitRevisionInstructionFromKey = (event) => {
+  if (event.key !== "Enter" || event.shiftKey) return;
+  event.preventDefault();
+  submitRevisionInstruction(event.currentTarget);
 };
 
 window.acceptRevision = (event, queueId, versionId) => {
