@@ -500,7 +500,7 @@ python -m leadpoet_social_brain.web.task_client refresh-trends
 python -m leadpoet_social_brain.web.task_client refresh-patterns-weekly
 ```
 
-`publish-due-x` checks approved queue items and posts anything whose scheduled time has passed. Railway Cron has a 5-minute minimum interval, so approved posts can go out up to a few minutes after their scheduled time. `sync-x-posts` is incremental by default: after the first import, it asks X only for posts newer than the latest stored X post. The `refresh-patterns-weekly` task refreshes both weekly and monthly Pattern Scout windows, 5 examples each by default. The default cron payloads also keep post and metric limits modest to avoid repeated backfills.
+`publish-due-x` checks approved queue items and posts anything whose scheduled time has passed. Railway Cron has a 5-minute minimum interval, so approved posts can go out up to a few minutes after their scheduled time. `sync-x-posts` is incremental by default: after the first import, it asks X only for posts newer than the latest stored X post. The `refresh-trends` task uses a bounded, no-enrichment payload so slow ScrapingDog calls do not exceed hosted request limits. The `refresh-patterns-weekly` task refreshes both weekly and monthly Pattern Scout windows, 5 examples each by default. The default cron payloads also keep post and metric limits modest to avoid repeated backfills.
 
 Set these variables on each Cron service:
 

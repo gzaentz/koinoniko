@@ -5,6 +5,7 @@ import html
 import json
 import os
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
@@ -327,6 +328,9 @@ def refresh_web_trends(
     enrich: bool = True,
     enrich_limit: int | None = None,
     fetch_source_page: FetchSourcePage | None = None,
+    scrapingdog_timeout_seconds: int = SCRAPINGDOG_TIMEOUT_SECONDS,
+    max_news_queries_per_window: int = SCRAPINGDOG_NEWS_QUERIES_PER_WINDOW,
+    deadline_seconds: int | None = None,
 ) -> WebTrendGroups:
     profile = build_trend_scout_profile(store)
     if fetch_articles:
@@ -344,6 +348,7 @@ def refresh_web_trends(
     errors: list[str] = []
     sources: list[str] = []
     stats = empty_refresh_stats()
+    deadline = trend_refresh_deadline(deadline_seconds)
     api_key = scrapingdog_api_key()
     if not api_key:
         errors.append(MISSING_SCRAPINGDOG_TRENDS_MESSAGE)
@@ -363,6 +368,9 @@ def refresh_web_trends(
         enrich_limit=enrich_limit,
         fetch_source_page=fetch_source_page,
         profile=profile,
+        scrapingdog_timeout_seconds=scrapingdog_timeout_seconds,
+        max_news_queries_per_window=max_news_queries_per_window,
+        deadline=deadline,
     )
     daily_urls = {canonical_source_url(trend.source_url) for trend in daily if canonical_source_url(trend.source_url)}
     weekly = refresh_web_trends_for_period(
@@ -381,8 +389,27 @@ def refresh_web_trends(
         fetch_source_page=fetch_source_page,
         profile=profile,
         exclude_source_urls=daily_urls,
+        scrapingdog_timeout_seconds=scrapingdog_timeout_seconds,
+        max_news_queries_per_window=max_news_queries_per_window,
+        deadline=deadline,
     )
     return WebTrendGroups(daily=daily, weekly=weekly, errors=errors, sources=unique_texts(sources), **stats)
+
+
+def trend_refresh_deadline(deadline_seconds: int | None) -> float | None:
+    if deadline_seconds is None or deadline_seconds <= 0:
+        return None
+    return time.monotonic() + deadline_seconds
+
+
+def trend_refresh_call_timeout(deadline: float | None, requested_timeout: int) -> int:
+    requested_timeout = max(1, requested_timeout)
+    if deadline is None:
+        return requested_timeout
+    remaining = deadline - time.monotonic() - 1.0
+    if remaining < 1:
+        return 0
+    return max(1, min(requested_timeout, int(remaining)))
 
 
 def scrapingdog_api_key() -> str:
@@ -534,10 +561,17 @@ def refresh_web_trends_for_period(
     fetch_source_page: FetchSourcePage | None = None,
     profile: TrendScoutProfile | None = None,
     exclude_source_urls: set[str] | None = None,
+    scrapingdog_timeout_seconds: int = SCRAPINGDOG_TIMEOUT_SECONDS,
+    max_news_queries_per_window: int = SCRAPINGDOG_NEWS_QUERIES_PER_WINDOW,
+    deadline: float | None = None,
 ) -> list[TrendItem]:
     profile = profile or build_trend_scout_profile(store)
     articles: list[dict[str, object]] = []
     if scrapingdog_api_key:
+        call_timeout = trend_refresh_call_timeout(deadline, scrapingdog_timeout_seconds)
+        if call_timeout <= 0:
+            errors.append(f"{period} Scrapingdog Google Trends skipped because refresh time budget was exhausted.")
+            return []
         try:
             articles.extend(
                 scrapingdog_trending_articles(
@@ -545,6 +579,7 @@ def refresh_web_trends_for_period(
                         api_key=scrapingdog_api_key,
                         hours=scrapingdog_hours,
                         limit=50,
+                        timeout_seconds=call_timeout,
                     ),
                     hours=scrapingdog_hours,
                 )
@@ -556,11 +591,16 @@ def refresh_web_trends_for_period(
         if len(select_web_trend_articles(articles, limit=limit)) < limit:
             fetched_news = False
             news_errors: list[str] = []
+            stopped_for_budget = False
             for news_tbs in scrapingdog_news_windows(period):
                 if len(select_web_trend_articles(articles, limit=limit)) >= limit:
                     break
-                for query in scrapingdog_news_queries(profile)[:SCRAPINGDOG_NEWS_QUERIES_PER_WINDOW]:
+                for query in scrapingdog_news_queries(profile)[: max(0, max_news_queries_per_window)]:
                     if len(select_web_trend_articles(articles, limit=limit)) >= limit:
+                        break
+                    call_timeout = trend_refresh_call_timeout(deadline, scrapingdog_timeout_seconds)
+                    if call_timeout <= 0:
+                        stopped_for_budget = True
                         break
                     try:
                         articles.extend(
@@ -570,14 +610,19 @@ def refresh_web_trends_for_period(
                                     tbs=news_tbs,
                                     limit=25,
                                     query=query,
+                                    timeout_seconds=call_timeout,
                                 )
                             )
                         )
                         fetched_news = True
                     except Exception as exc:  # noqa: BLE001 - third-party trend source can fail independently.
                         news_errors.append(str(exc))
+                if stopped_for_budget:
+                    break
             if fetched_news:
                 sources.append("Scrapingdog Google News")
+            if stopped_for_budget:
+                errors.append(f"{period} Scrapingdog Google News stopped because refresh time budget was exhausted.")
             elif news_errors:
                 errors.append(f"{period} Scrapingdog Google News failed: {news_errors[0]}")
 
@@ -605,6 +650,7 @@ def fetch_scrapingdog_trending_now(
     limit: int = 50,
     geo: str = "US",
     language: str = "en",
+    timeout_seconds: int = SCRAPINGDOG_TIMEOUT_SECONDS,
 ) -> list[dict[str, object]]:
     payload = fetch_json(
         SCRAPINGDOG_TRENDS_URL,
@@ -614,7 +660,7 @@ def fetch_scrapingdog_trending_now(
             "language": language,
             "hours": str(hours),
         },
-        timeout=SCRAPINGDOG_TIMEOUT_SECONDS,
+        timeout=timeout_seconds,
     )
     searches = payload.get("trending_searches", [])
     if not isinstance(searches, list):
@@ -630,6 +676,7 @@ def fetch_scrapingdog_google_news(
     country: str = "us",
     language: str = "en",
     query: str | None = None,
+    timeout_seconds: int = SCRAPINGDOG_TIMEOUT_SECONDS,
 ) -> list[dict[str, object]]:
     payload = fetch_json(
         SCRAPINGDOG_NEWS_URL,
@@ -641,7 +688,7 @@ def fetch_scrapingdog_google_news(
             "language": language,
             "tbs": tbs,
         },
-        timeout=SCRAPINGDOG_TIMEOUT_SECONDS,
+        timeout=timeout_seconds,
     )
     results = payload.get("news_results", [])
     if not isinstance(results, list):

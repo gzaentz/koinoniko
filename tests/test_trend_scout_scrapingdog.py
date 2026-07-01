@@ -217,7 +217,15 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
 
-            def fake_trending_now(*, api_key: str, hours: int, limit: int, geo: str = "US", language: str = "en"):
+            def fake_trending_now(
+                *,
+                api_key: str,
+                hours: int,
+                limit: int,
+                geo: str = "US",
+                language: str = "en",
+                timeout_seconds: int = 45,
+            ):
                 self.assertEqual(api_key, "dog-key")
                 return [
                     {
@@ -238,6 +246,7 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
                 country: str = "us",
                 language: str = "en",
                 query: str | None = None,
+                timeout_seconds: int = 45,
             ):
                 self.assertEqual(api_key, "dog-key")
                 self.assertIn("sales AI", query or "")
@@ -269,6 +278,68 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
             self.assertIn("Scrapingdog Google Trends", groups.sources)
             self.assertIn("Scrapingdog Google News", groups.sources)
             self.assertFalse(any("Celebrity gossip" in trend.title for trend in groups.daily))
+            store.close()
+
+    def test_scrapingdog_refresh_bounds_news_queries_for_hosted_tasks(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            news_calls: list[tuple[str, str | None, int]] = []
+
+            def fake_trending_now(
+                *,
+                api_key: str,
+                hours: int,
+                limit: int,
+                geo: str = "US",
+                language: str = "en",
+                timeout_seconds: int = 45,
+            ):
+                self.assertEqual(timeout_seconds, 7)
+                return [{"title": f"Celebrity gossip {hours}", "search_volume": 900000}]
+
+            def fake_google_news(
+                *,
+                api_key: str,
+                tbs: str,
+                limit: int,
+                country: str = "us",
+                language: str = "en",
+                query: str | None = None,
+                timeout_seconds: int = 45,
+            ):
+                news_calls.append((tbs, query, timeout_seconds))
+                return [
+                    {
+                        "title": f"Celebrity gossip {tbs}",
+                        "link": f"https://example.com/{tbs}/celebrity",
+                        "source": "Example News",
+                        "snippet": "Entertainment update without GTM or sales relevance.",
+                    }
+                ]
+
+            with patch.dict(os.environ, {"SCRAPINGDOG_API_KEY": "dog-key"}, clear=False):
+                with patch(
+                    "leadpoet_social_brain.trend_scout.fetch_scrapingdog_trending_now",
+                    side_effect=fake_trending_now,
+                ):
+                    with patch(
+                        "leadpoet_social_brain.trend_scout.fetch_scrapingdog_google_news",
+                        side_effect=fake_google_news,
+                    ):
+                        groups = refresh_web_trends(
+                            store,
+                            limit=1,
+                            enrich=False,
+                            scrapingdog_timeout_seconds=7,
+                            max_news_queries_per_window=1,
+                            deadline_seconds=90,
+                        )
+
+            self.assertEqual(groups.daily, [])
+            self.assertEqual(groups.weekly, [])
+            self.assertEqual(len(news_calls), 4)
+            self.assertTrue(all(call[2] == 7 for call in news_calls))
+            self.assertEqual([call[0] for call in news_calls], ["qdr:d", "qdr:w", "qdr:w", "qdr:m"])
             store.close()
 
     def test_scrapingdog_missing_key_reports_clear_warning(self):

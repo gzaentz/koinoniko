@@ -18,7 +18,13 @@ TASK_DEFAULTS: dict[str, dict[str, Any]] = {
     "sync-x-all": {"post_limit": 25, "metrics_limit": 250, "since_days": 30},
     "sync-x-daily": {"post_limit": 25, "metrics_limit": 250, "since_days": 30},
     "publish-due-x": {"limit": 20},
-    "refresh-trends": {"limit": 5},
+    "refresh-trends": {
+        "limit": 5,
+        "no_enrich": True,
+        "scrapingdog_timeout_seconds": 12,
+        "max_news_queries_per_window": 2,
+        "deadline_seconds": 85,
+    },
     "refresh-patterns": {"limit": 5, "window": "weekly"},
     "refresh-patterns-weekly": {"limit": 5, "windows": ["weekly", "monthly"]},
 }

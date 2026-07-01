@@ -1150,8 +1150,15 @@ def refresh_trends_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> 
     started_at = utc_now()
     try:
         limit = int(payload.get("limit") or 5)
-        no_enrich = bool(payload.get("no_enrich", False))
+        no_enrich = bool_from_payload(payload, "no_enrich", False)
         enrich_limit = int(payload.get("enrich_limit") or limit)
+        scrapingdog_timeout_seconds = optional_int(payload.get("scrapingdog_timeout_seconds"))
+        max_news_queries_per_window = optional_int(payload.get("max_news_queries_per_window"))
+        deadline_seconds = optional_int(payload.get("deadline_seconds"))
+        if scrapingdog_timeout_seconds is None:
+            scrapingdog_timeout_seconds = 45
+        if max_news_queries_per_window is None:
+            max_news_queries_per_window = 6
         provider = None
         provider_warning = ""
         if not no_enrich:
@@ -1165,6 +1172,9 @@ def refresh_trends_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> 
             provider=provider,
             enrich=not no_enrich,
             enrich_limit=enrich_limit,
+            scrapingdog_timeout_seconds=scrapingdog_timeout_seconds,
+            max_news_queries_per_window=max_news_queries_per_window,
+            deadline_seconds=deadline_seconds,
         )
         completed_at = utc_now()
         errors = list(groups.errors)
@@ -1231,6 +1241,9 @@ def call_refresh_web_trends(
     provider: Any | None,
     enrich: bool,
     enrich_limit: int,
+    scrapingdog_timeout_seconds: int,
+    max_news_queries_per_window: int,
+    deadline_seconds: int | None,
 ):
     try:
         return refresh_web_trends(
@@ -1239,6 +1252,9 @@ def call_refresh_web_trends(
             provider=provider,
             enrich=enrich,
             enrich_limit=enrich_limit,
+            scrapingdog_timeout_seconds=scrapingdog_timeout_seconds,
+            max_news_queries_per_window=max_news_queries_per_window,
+            deadline_seconds=deadline_seconds,
         )
     except TypeError as exc:
         if "unexpected keyword argument" not in str(exc):

@@ -3556,11 +3556,19 @@ class SocialBrainTest(unittest.TestCase):
                 sources=["Scrapingdog Google Trends"],
             )
 
-            with patch("leadpoet_social_brain.web.app.refresh_web_trends", return_value=groups):
+            with patch("leadpoet_social_brain.web.app.refresh_web_trends", return_value=groups) as refresh:
                 status, payload = handle_api_request(
                     "POST",
                     "/tasks/refresh-trends",
-                    json.dumps({"limit": 5}),
+                    json.dumps(
+                        {
+                            "limit": 5,
+                            "no_enrich": True,
+                            "scrapingdog_timeout_seconds": 12,
+                            "max_news_queries_per_window": 2,
+                            "deadline_seconds": 85,
+                        }
+                    ),
                     db_path=db_path,
                 )
 
@@ -3574,6 +3582,12 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(metadata.status, "partial")
             self.assertEqual(metadata.summary["daily_trends"], 1)
             store.close()
+            refresh.assert_called_once()
+            refresh_kwargs = refresh.call_args.kwargs
+            self.assertFalse(refresh_kwargs["enrich"])
+            self.assertEqual(refresh_kwargs["scrapingdog_timeout_seconds"], 12)
+            self.assertEqual(refresh_kwargs["max_news_queries_per_window"], 2)
+            self.assertEqual(refresh_kwargs["deadline_seconds"], 85)
 
     def test_web_dashboard_caps_recent_posts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -4612,7 +4626,16 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(TASK_DEFAULTS["sync-x-metrics"]["since_days"], 30)
         self.assertEqual(TASK_DEFAULTS["sync-x-metrics"]["limit"], 250)
         self.assertEqual(TASK_DEFAULTS["publish-due-x"], {"limit": 20})
-        self.assertEqual(TASK_DEFAULTS["refresh-trends"], {"limit": 5})
+        self.assertEqual(
+            TASK_DEFAULTS["refresh-trends"],
+            {
+                "limit": 5,
+                "no_enrich": True,
+                "scrapingdog_timeout_seconds": 12,
+                "max_news_queries_per_window": 2,
+                "deadline_seconds": 85,
+            },
+        )
         self.assertEqual(TASK_DEFAULTS["refresh-patterns"], {"limit": 5, "window": "weekly"})
         self.assertEqual(TASK_DEFAULTS["refresh-patterns-weekly"], {"limit": 5, "windows": ["weekly", "monthly"]})
         self.assertEqual(task_client.DEFAULT_TASK_TIMEOUT_SECONDS, 180)
@@ -4662,7 +4685,7 @@ class SocialBrainTest(unittest.TestCase):
                 "sync": {"status": "partial"},
                 "trends_stored": 1,
             },
-        ):
+        ) as post_task:
             with redirect_stdout(io.StringIO()):
                 exit_code = task_client_main(
                     [
@@ -4671,9 +4694,24 @@ class SocialBrainTest(unittest.TestCase):
                         "https://example.com",
                         "--secret",
                         "task-secret",
+                        "--payload",
+                        '{"limit":3}',
                     ]
                 )
         self.assertEqual(exit_code, 0)
+        post_task.assert_called_once_with(
+            "https://example.com",
+            "refresh-trends",
+            "task-secret",
+            {
+                "limit": 3,
+                "no_enrich": True,
+                "scrapingdog_timeout_seconds": 12,
+                "max_news_queries_per_window": 2,
+                "deadline_seconds": 85,
+            },
+            timeout_seconds=180,
+        )
         with patch(
             "leadpoet_social_brain.web.task_client.post_task",
             return_value={
