@@ -2146,10 +2146,10 @@ class SocialBrainTest(unittest.TestCase):
                 if "Repair this X post" in prompt:
                     self.repair_count += 1
                     repairs = [
-                        "Static records answer who exists.\n\nFor Leadpoet, the harder question is why this account is worth action now.",
+                        "Static records answer who exists. Leadpoet should explain why this account is worth action now.",
                         "A rep does not need another prettier list.\n\nThey need the account where something changed. That is the Leadpoet lane.",
-                        "Context only matters when it changes action.\n\nLeadpoet has to turn that into timing a rep can actually use.",
-                        "Buyer timing beats another warmed-up account score.\n\nThe Leadpoet signal has to explain why now.",
+                        "What changes when context is real?\n\nLeadpoet has to turn it into timing a rep can actually use.",
+                        "- Signal\n- Context\n- A reason now\n\nThe Leadpoet signal has to explain why now.",
                         "A contact record can be correct and still useless today.\n\nThat is where Leadpoet focuses: buyer context with a reason to act.",
                     ]
                     return [repairs[(self.repair_count - 1) % len(repairs)]]
@@ -2263,10 +2263,10 @@ class SocialBrainTest(unittest.TestCase):
                 if "Repair this X post" in prompt:
                     self.repair_count += 1
                     repairs = [
-                        "Static records answer who exists.\n\nFor Leadpoet, the harder question is why this account is worth action now.",
+                        "Static records answer who exists. Leadpoet should explain why this account is worth action now.",
                         "A rep does not need another prettier list.\n\nThey need the account where something changed. That is the Leadpoet lane.",
-                        "Context only matters when it changes action.\n\nLeadpoet has to turn that into timing a rep can actually use.",
-                        "Buyer timing beats another warmed-up account score.\n\nThe Leadpoet signal has to explain why now.",
+                        "What changes when context is real?\n\nLeadpoet has to turn it into timing a rep can actually use.",
+                        "- Signal\n- Context\n- A reason now\n\nThe Leadpoet signal has to explain why now.",
                         "A contact record can be correct and still useless today.\n\nThat is where Leadpoet focuses: buyer context with a reason to act.",
                     ]
                     return [repairs[(self.repair_count - 1) % len(repairs)]]
@@ -2334,10 +2334,71 @@ class SocialBrainTest(unittest.TestCase):
             self.assertGreaterEqual(len(payload["first_structure_option_counts"]), 5)
             self.assertGreaterEqual(len(payload["first_product_mention_lane_counts"]), 5)
             self.assertGreaterEqual(len(payload["leadpoet_mention_pattern_counts"]), 5)
+            self.assertGreaterEqual(len(payload["layout_fingerprint_counts"]), 4)
             self.assertLess(max(payload["leadpoet_mention_pattern_counts"].values()), 10)
             self.assertNotIn("leadpoet_is_building", payload["leadpoet_shapes"])
             self.assertNotIn("leadpoet_is_built", payload["leadpoet_shapes"])
             self.assertNotIn("leadpoet_is", payload["leadpoet_shapes"])
+            store.close()
+
+    def test_audit_naturalness_x_warns_on_repeated_generated_layout(self):
+        class RepeatedLayoutProvider:
+            def __init__(self):
+                self.final_count = 0
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "Static records answer who exists.\n\nFor Leadpoet, timing is the useful question.",
+                        "The CRM record can be correct.\n\nThat is where Leadpoet focuses: timing.",
+                        "Account lists can still be late.\n\nThe Leadpoet signal should explain why now.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    texts = [
+                        "Static records answer who exists.\n\nFor Leadpoet, timing is the useful question.",
+                        "The CRM record can be correct.\n\nThat is where Leadpoet focuses: timing.",
+                        "Account lists can still be late.\n\nThe Leadpoet signal should explain why now.",
+                        "Generic data ages quickly.\n\nLeadpoet has to make timing visible.",
+                        "Buyer context changes prioritization.\n\nLeadpoet focuses on the account reason.",
+                    ]
+                    text = texts[self.final_count % len(texts)]
+                    self.final_count += 1
+                    return [evaluation_json(text)]
+                return ["Static records answer who exists.\n\nFor Leadpoet, timing is the useful question."]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            for index in range(5):
+                store.save_trend_item(
+                    TrendItem(
+                        title=f"Trend {index}",
+                        source_type="web",
+                        topic="sales AI",
+                        summary="A trend about GTM context.",
+                        why_it_matters="It shows timing matters.",
+                        leadpoet_angle="Buyer timing needs proprietary account context.",
+                        date=utc_now(),
+                    )
+                )
+
+            payload = build_naturalness_audit(
+                store,
+                SocialBrainGenerator(store, provider=RepeatedLayoutProvider()),
+                count=5,
+                trend_limit=5,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+                save_drafts=False,
+            )
+
+            self.assertEqual(len(payload["layout_fingerprint_counts"]), 1)
+            self.assertTrue(
+                any("Generated post layouts are not varied enough" in warning for warning in payload["warnings"])
+            )
             store.close()
 
     def test_audit_naturalness_x_warns_on_repeated_leadpoet_mention_pattern(self):

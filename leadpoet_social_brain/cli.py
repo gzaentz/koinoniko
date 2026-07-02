@@ -812,6 +812,9 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
     print("Leadpoet mention pattern counts:")
     for key, value in sorted(payload["leadpoet_mention_pattern_counts"].items()):
         print(f"- {key}: {value}")
+    print("Generated layout fingerprint counts:")
+    for key, value in sorted(payload["layout_fingerprint_counts"].items()):
+        print(f"- {key}: {value}")
     if payload["warnings"]:
         print("Warnings:")
         for warning in payload["warnings"]:
@@ -892,6 +895,7 @@ def build_naturalness_audit(
                 "chars": len(draft.text),
                 "leadpoet_shape": leadpoet_mention_shape(draft.text),
                 "leadpoet_mention_pattern": leadpoet_mention_pattern(draft.text),
+                "layout_fingerprint": post_layout_fingerprint(draft.text),
                 "first_line": first_nonempty_line(draft.text),
                 "primary_structure_option": primary_structure,
                 "first_structure_option": first_structure,
@@ -937,6 +941,12 @@ def build_naturalness_audit(
     if mention_pattern_counts and mention_pattern_counts.most_common(1)[0][1] >= max(3, (len(rows) + 1) // 2):
         pattern, pattern_count = mention_pattern_counts.most_common(1)[0]
         warnings.append(f"Leadpoet mention phrasing is too concentrated: {pattern} appears {pattern_count}/{len(rows)} times.")
+    layout_counts = Counter(str(row["layout_fingerprint"]) for row in rows if row["layout_fingerprint"])
+    if len(layout_counts) < min(4, len(rows)):
+        warnings.append("Generated post layouts are not varied enough.")
+    elif layout_counts and layout_counts.most_common(1)[0][1] >= max(3, (len(rows) + 1) // 2):
+        layout, layout_count = layout_counts.most_common(1)[0]
+        warnings.append(f"Generated post layouts are too concentrated: {layout} appears {layout_count}/{len(rows)} times.")
     return {
         "trend_count": len(trends),
         "post_count": len(rows),
@@ -952,9 +962,60 @@ def build_naturalness_audit(
         "first_structure_option_counts": dict(first_structure_counts or primary_structure_counts),
         "first_product_mention_lane_counts": dict(first_product_lane_counts or primary_product_lane_counts),
         "leadpoet_mention_pattern_counts": dict(mention_pattern_counts),
+        "layout_fingerprint_counts": dict(layout_counts),
         "warnings": warnings,
         "rows": rows,
     }
+
+
+def post_layout_fingerprint(text: str) -> str:
+    paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\s*\n+", text.strip()) if paragraph.strip()]
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    paragraph_bucket = bucket_count(len(paragraphs), "p")
+    line_bucket = bucket_count(len(lines), "l")
+    opener = lines[0] if lines else ""
+    return f"{paragraph_bucket}|{line_bucket}|{opener_shape(opener)}|leadpoet_{leadpoet_paragraph_position(paragraphs)}"
+
+
+def bucket_count(count: int, prefix: str) -> str:
+    if count >= 4:
+        return f"{prefix}4plus"
+    return f"{prefix}{count}"
+
+
+def opener_shape(line: str) -> str:
+    stripped = line.strip()
+    lowered = stripped.lower()
+    if not stripped:
+        return "empty"
+    if re.match(r"(?:[-*•]\s+|\d+[.)]\s+)", stripped):
+        return "list"
+    if stripped.endswith("?"):
+        return "question"
+    if ":" in stripped:
+        return "colon"
+    if re.search(r"\b(?:not|instead|but|versus|vs\.?|beats|before|after)\b", lowered):
+        return "contrast"
+    if len(stripped) <= 55:
+        return "short_claim"
+    return "long_claim"
+
+
+def leadpoet_paragraph_position(paragraphs: list[str]) -> str:
+    leadpoet_indexes = [
+        index for index, paragraph in enumerate(paragraphs)
+        if re.search(r"\bleadpoet\b", paragraph, flags=re.I)
+    ]
+    if not leadpoet_indexes:
+        return "none"
+    if len(paragraphs) == 1:
+        return "single"
+    first_index = leadpoet_indexes[0]
+    if first_index == 0:
+        return "first"
+    if first_index == len(paragraphs) - 1:
+        return "last"
+    return "middle"
 
 
 def leadpoet_mention_shape(text: str) -> str:
