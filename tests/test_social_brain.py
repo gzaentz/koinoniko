@@ -3473,6 +3473,39 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(any("were not covered" in warning for warning in payload["warnings"]))
             store.close()
 
+    def test_audit_naturalness_x_plan_only_warns_on_concentrated_assignments(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            store.save_trend_item(
+                TrendItem(
+                    title="One repeated trend",
+                    source_type="web",
+                    topic="sales AI",
+                    summary="A trend about GTM context.",
+                    why_it_matters="It shows timing matters.",
+                    leadpoet_angle="Buyer timing needs proprietary account context.",
+                    date=utc_now(),
+                )
+            )
+
+            payload = build_naturalness_plan_audit(
+                store,
+                count=5,
+                trend_limit=0,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+            )
+
+            self.assertTrue(
+                any("Structure guidance is too concentrated" in warning for warning in payload["warnings"])
+            )
+            self.assertTrue(
+                any("Product mention syntax guidance is too concentrated" in warning for warning in payload["warnings"])
+            )
+            store.close()
+
     def test_audit_naturalness_x_plan_only_cli_skips_provider_load(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"

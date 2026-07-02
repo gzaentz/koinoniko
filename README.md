@@ -820,7 +820,8 @@ This command uses the configured LLM provider, so a live audit sends the selecte
 
 Use `--plan-only` for a no-provider preflight that checks the deterministic prompt plan
 against current trends. It reports trend coverage plus planned structure, layout, closing,
-rhythm, and product mention variation without sending prompts to an LLM provider.
+rhythm, and product mention variation without sending prompts to an LLM provider. It also
+warns when one planned assignment is too concentrated across the batch.
 
 In the web UI, `Create Post` includes:
 

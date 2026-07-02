@@ -1002,6 +1002,23 @@ def build_naturalness_plan_audit(
         warnings.append("Closing target guidance did not vary enough across trends.")
     if len(primary_human_rhythm_target_counts) < min(4, len(trends), count):
         warnings.append("Human rhythm guidance did not vary enough across trends.")
+    append_plan_concentration_warning(warnings, "Structure guidance", primary_structure_counts, len(rows))
+    append_plan_concentration_warning(warnings, "Product mention guidance", primary_product_lane_counts, len(rows))
+    append_plan_concentration_warning(
+        warnings,
+        "Product mention placement guidance",
+        primary_product_placement_counts,
+        len(rows),
+    )
+    append_plan_concentration_warning(
+        warnings,
+        "Product mention syntax guidance",
+        primary_product_syntax_counts,
+        len(rows),
+    )
+    append_plan_concentration_warning(warnings, "Layout target guidance", primary_layout_target_counts, len(rows))
+    append_plan_concentration_warning(warnings, "Closing target guidance", primary_closing_target_counts, len(rows))
+    append_plan_concentration_warning(warnings, "Human rhythm guidance", primary_human_rhythm_target_counts, len(rows))
     if uncovered_trend_count:
         warnings.append(
             f"{uncovered_trend_count} loaded trend(s) were not covered; raise --count or lower --trend-limit for full coverage."
@@ -1024,6 +1041,20 @@ def build_naturalness_plan_audit(
         "warnings": warnings,
         "rows": rows,
     }
+
+
+def append_plan_concentration_warning(
+    warnings: list[str],
+    label: str,
+    counts: Counter[str],
+    total: int,
+) -> None:
+    if not counts or total <= 1:
+        return
+    threshold = max(4, (total + 1) // 2)
+    value, value_count = counts.most_common(1)[0]
+    if value_count >= threshold:
+        warnings.append(f"{label} is too concentrated: {value} appears {value_count}/{total} planned post(s).")
 
 
 def naturalness_audit_request_for_trend(
