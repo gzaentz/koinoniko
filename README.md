@@ -833,7 +833,8 @@ intent, and the evaluator rewrites if the result is generic, unsupported, or too
 Active Writing Rules also repair obvious violations such as missing Leadpoet positioning,
 blocked phrases, formulaic `Leadpoet is...` / `For Leadpoet...` / `Leadpoet should...`
 style modal phrasing, `That is where Leadpoet...` wrappers, `That is the Leadpoet...`
-closers, `The Leadpoet ... is...` definitions, or em dashes.
+closers, `The Leadpoet ... is...` definitions, repeated `Leadpoet belongs...` style
+fallback lead-ins, or em dashes.
 The natural writer also receives a per-option variation map so draft options use different
 structures, layouts, rhythms, product mention lanes, and product placement targets before
 the evaluator chooses the final post.

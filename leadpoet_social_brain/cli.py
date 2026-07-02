@@ -107,6 +107,7 @@ LEADPOET_AUDIT_BAD_PATTERNS = [
     ("that/this is where leadpoet", r"\b(?:that|this)\s+is\s+where\s+leadpoet\b|\bthat['’]?s\s+where\s+leadpoet\b"),
     ("that is the leadpoet closer", r"\bthat\s+is\s+the\s+leadpoet\s+(?:job|bar|point|constraint|product belief)\b"),
     ("the leadpoet noun-is definition", r"\bthe\s+leadpoet\s+(?:product belief|signal|point|constraint|job|bar|part)\s+is\b"),
+    ("leadpoet fallback lead-in", r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:belongs|only\s+matters|must)\b"),
     ("leadpoet bet/job/role", r"(?m)(?:^|\n\n)\s*leadpoet(?:'s|’s)?\s+(?:bet|job|role)\b"),
     ("the layer worth building", r"(?m)(?:^|\n\n)\s*the\s+layer\s+worth\s+building\b"),
 ]
@@ -1274,6 +1275,12 @@ def leadpoet_mention_pattern(text: str) -> str:
         return "that_is_the_leadpoet_closer"
     if re.search(r"\bthe\s+leadpoet\s+(?:product belief|signal|point|constraint|job|bar|part)\s+is\b", text, flags=re.I):
         return "the_leadpoet_noun_is"
+    if re.search(r"\bleadpoet\s+belongs\b", text, flags=re.I):
+        return "leadpoet_belongs"
+    if re.search(r"\bleadpoet\s+only\s+matters\b", text, flags=re.I):
+        return "leadpoet_only_matters"
+    if re.search(r"\bleadpoet\s+must\b", text, flags=re.I):
+        return "leadpoet_must"
     if re.search(r"\bleadpoet\s+lane\b|\bleadpoet's\s+lane\b|\bleadpoet’s\s+lane\b", text, flags=re.I):
         return "leadpoet_lane"
     if re.search(r"\bleadpoet\s+signal\b|\bleadpoet's\s+signal\b|\bleadpoet’s\s+signal\b", text, flags=re.I):

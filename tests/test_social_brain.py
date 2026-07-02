@@ -1742,7 +1742,7 @@ class SocialBrainTest(unittest.TestCase):
 
             self.assertEqual(
                 drafts[0].text,
-                "That only matters if Leadpoet makes it actionable: useful sales AI starts with knowing which account is moving now.",
+                "That only matters if the Leadpoet line makes it actionable: useful sales AI starts with knowing which account is moving now.",
             )
             self.assertNotIn("For Leadpoet", drafts[0].text)
             self.assertEqual(len(provider.prompts), 6)
@@ -2297,7 +2297,7 @@ class SocialBrainTest(unittest.TestCase):
                 draft.text,
                 "Verified data tells an agent who exists.\n\n"
                 "The harder question is why this account is worth action now. "
-                "Leadpoet belongs close to that account-timing problem, not in a definition line.",
+                "Keep the Leadpoet mention close to account timing, not in a definition line.",
             )
             self.assertNotIn("Leadpoet is building", draft.text)
             self.assertNotIn("For Leadpoet", draft.text)
@@ -2341,7 +2341,7 @@ class SocialBrainTest(unittest.TestCase):
                 draft.text,
                 "Verified data tells an agent who exists.\n\n"
                 "The harder question is why this account is worth action now. "
-                "Leadpoet belongs close to that account-timing problem, not in a definition line.",
+                "Keep the Leadpoet mention close to account timing, not in a definition line.",
             )
             self.assertNotIn("For Leadpoet", draft.text)
             self.assertIn("avoid formulaic 'For Leadpoet...' product lead-in", provider.prompts[-1])
@@ -2381,7 +2381,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(
                 draft.text,
                 "Static records answer who exists.\n\n"
-                "The account-timing question is the Leadpoet part when it can make buyer timing visible.",
+                "The account-timing question gets concrete inside Leadpoet when it can make buyer timing visible.",
             )
             self.assertNotIn("Leadpoet should", draft.text)
             self.assertIn("avoid formulaic Leadpoet modal lead-in", provider.prompts[-1])
@@ -2604,8 +2604,8 @@ class SocialBrainTest(unittest.TestCase):
         combined = "\n".join(outputs_by_lane.values())
         for banned in ["Leadpoet is", "Leadpoet is building", "For Leadpoet", "Leadpoet should"]:
             self.assertNotIn(banned.lower(), combined.lower())
-        self.assertIn("Leadpoet belongs in that mechanism", combined)
-        self.assertIn("Leadpoet only matters when that answer changes the next action", combined)
+        self.assertIn("Put Leadpoet inside that account-change check", combined)
+        self.assertIn("before Leadpoet earns the line", combined)
         self.assertIn("Inside Leadpoet, that belief beats another volume claim", combined)
 
     def test_missing_anchor_fallback_varies_leadpoet_line_by_trend(self):
@@ -3129,7 +3129,7 @@ class SocialBrainTest(unittest.TestCase):
                     endings = [
                         "Leadpoet owns that part.",
                         "The Leadpoet edge stays there.",
-                        "Leadpoet belongs there.",
+                        "The Leadpoet edge remains there.",
                         "Leadpoet keeps that constraint visible.",
                         "Leadpoet makes that constraint visible.",
                     ]
@@ -3241,6 +3241,9 @@ class SocialBrainTest(unittest.TestCase):
             "That’s where Leadpoet focuses: timing before copy.": "that_is_where_leadpoet",
             "That is the Leadpoet point.": "that_is_the_leadpoet_closer",
             "The Leadpoet signal is buyer timing.": "the_leadpoet_noun_is",
+            "Leadpoet belongs close to account timing.": "leadpoet_belongs",
+            "Leadpoet only matters when timing is visible.": "leadpoet_only_matters",
+            "Leadpoet must make timing useful.": "leadpoet_must",
         }
 
         for text, expected in cases.items():
@@ -3257,6 +3260,7 @@ class SocialBrainTest(unittest.TestCase):
                 "That’s where Leadpoet focuses on account context.",
                 "That is the Leadpoet point.",
                 "The Leadpoet signal is buyer timing.",
+                "Leadpoet belongs close to account timing.",
                 "Leadpoet's job is account timing.",
                 "The layer worth building starts before sequence copy.",
             ]
@@ -3271,6 +3275,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(counts["that/this is where leadpoet"], 2)
         self.assertEqual(counts["that is the leadpoet closer"], 1)
         self.assertEqual(counts["the leadpoet noun-is definition"], 1)
+        self.assertEqual(counts["leadpoet fallback lead-in"], 1)
         self.assertEqual(counts["leadpoet bet/job/role"], 1)
         self.assertEqual(counts["the layer worth building"], 1)
 
