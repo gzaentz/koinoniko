@@ -2010,8 +2010,13 @@ async function createPost() {
   state.selectedTrendForCreate = null;
   state.selectedPatternForCreate = null;
   renderCreatePostPatternHint();
-  if (createdQueueId && !payload.item) markQueueItemArrived(createdQueueId);
-  await refresh();
+  if (createdQueueId) {
+    if (!payload.item) markQueueItemArrived(createdQueueId);
+    await refresh();
+    await openQueueDetailById(createdQueueId);
+  } else {
+    await refresh();
+  }
 }
 
 async function planWeek() {
