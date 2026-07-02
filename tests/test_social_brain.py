@@ -1847,6 +1847,71 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(rows[0]["topic_scope"], "other_topic")
             store.close()
 
+    def test_generation_repairs_exact_recent_output_repetition(self):
+        class RepeatingRecentOutputProvider:
+            def __init__(self):
+                self.repair_count = 0
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "Static records answer who exists.\n\nThe useful Leadpoet question is why this account now.",
+                        "The CRM can be right and still late.\n\nInside Leadpoet, timing has to explain why now.",
+                        "More names do not fix account judgment.\n\nThe sequence is downstream.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    return [
+                        evaluation_json(
+                            "Static records answer who exists.\n\n"
+                            "The useful Leadpoet question is why this account now."
+                        )
+                    ]
+                if "Repair this X post" in prompt:
+                    self.repair_count += 1
+                    return [
+                        "A correct contact record can still be late.\n\n"
+                        "Inside Leadpoet, the account reason has to come before generated copy."
+                    ]
+                return ["A correct contact record can still be late."]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            store.save_content_queue_item(
+                ContentQueueItem(
+                    text=(
+                        "Static records answer who exists.\n\n"
+                        "The useful Leadpoet question is why this account now."
+                    ),
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    scheduled_at="2026-07-03T10:00:00+00:00",
+                )
+            )
+            provider = RepeatingRecentOutputProvider()
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle="account timing beats more generated email",
+                ),
+                variants=1,
+            )[0]
+
+            self.assertEqual(provider.repair_count, 1)
+            self.assertEqual(
+                draft.text,
+                "A correct contact record can still be late.\n\n"
+                "Inside Leadpoet, the account reason has to come before generated copy.",
+            )
+            self.assertNotIn("The useful Leadpoet question is why this account now.", draft.text)
+            self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
+            store.close()
+
     def test_generation_retries_when_writer_options_are_unusable(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -3369,6 +3434,16 @@ class SocialBrainTest(unittest.TestCase):
                     line = first_lines[self.final_count % len(first_lines)]
                     self.final_count += 1
                     return [evaluation_json(f"{line} The Leadpoet signal makes timing visible.\n\nThe useful question is why now.")]
+                if "Repair this X post" in prompt:
+                    first_lines = [
+                        "Static records answer who exists.",
+                        "The CRM can be correct.",
+                        "More names do not fix judgment.",
+                        "Context only matters when it changes action.",
+                        "A sales agent needs timing before copy.",
+                    ]
+                    line = first_lines[(self.final_count - 1) % len(first_lines)]
+                    return [f"{line} The Leadpoet signal makes timing visible.\n\nThe useful question is why now."]
                 return ["Static records answer who exists. The Leadpoet signal makes timing visible.\n\nThe useful question is why now."]
 
         with tempfile.TemporaryDirectory() as tmpdir:

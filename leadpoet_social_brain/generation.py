@@ -480,6 +480,7 @@ class SocialBrainGenerator:
             max_chars=max_chars,
             model=model_routing.natural_writer,
             recent_outputs_section=recent_output_context["section"],
+            recent_output_rows=recent_output_context["rows"],
         )
         repaired_successfully = text != final_text and not rule_warnings
         if rule_warnings:
@@ -504,6 +505,7 @@ class SocialBrainGenerator:
             avoid_phrases=avoid_phrases,
             active_rules=active_rules,
             repaired_successfully=repaired_successfully,
+            recent_output_rows=recent_output_context["rows"],
         )
         adapter.validate_text(text, max_chars=max_chars)
         notes = quality_notes or build_quality_notes(request, bundle, trends=trends)
@@ -1713,6 +1715,7 @@ def clean_evaluation_warnings_after_final_text(
     avoid_phrases: list[str],
     active_rules: dict[str, list[str]],
     repaired_successfully: bool,
+    recent_output_rows: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
     warnings = evaluation.get("warnings")
     if not isinstance(warnings, list):
@@ -1725,6 +1728,7 @@ def clean_evaluation_warnings_after_final_text(
         trends=trends,
         avoid_phrases=avoid_phrases,
         active_rules=active_rules,
+        recent_output_rows=recent_output_rows,
     )
     cleaned: list[object] = []
     for warning in warnings:
@@ -1763,6 +1767,7 @@ def repair_draft_against_rules(
     max_chars: int,
     model: str | None,
     recent_outputs_section: str = "",
+    recent_output_rows: list[dict[str, str]] | None = None,
 ) -> tuple[str, list[str]]:
     violations = draft_rule_violations(
         text,
@@ -1771,6 +1776,7 @@ def repair_draft_against_rules(
         trends=trends,
         avoid_phrases=avoid_phrases,
         active_rules=active_rules,
+        recent_output_rows=recent_output_rows,
     )
     repaired = text
     for _ in range(2):
@@ -1797,6 +1803,7 @@ def repair_draft_against_rules(
                 active_rules=active_rules,
                 max_chars=max_chars,
                 previous_violations=violations,
+                recent_output_rows=recent_output_rows,
             )
         repaired_raw = repair_options[0]
         repaired = fit_generated_text_to_limit(
@@ -1813,6 +1820,7 @@ def repair_draft_against_rules(
             trends=trends,
             avoid_phrases=avoid_phrases,
             active_rules=active_rules,
+            recent_output_rows=recent_output_rows,
         )
     repaired, violations = apply_deterministic_rule_repair(
         repaired,
@@ -1823,6 +1831,7 @@ def repair_draft_against_rules(
         active_rules=active_rules,
         max_chars=max_chars,
         previous_violations=violations,
+        recent_output_rows=recent_output_rows,
     )
     anchored = anchor_draft_to_workspace(
         repaired,
@@ -1840,6 +1849,7 @@ def repair_draft_against_rules(
             trends=trends,
             avoid_phrases=avoid_phrases,
             active_rules=active_rules,
+            recent_output_rows=recent_output_rows,
         )
         return anchored, violations
     return repaired, violations
@@ -1855,6 +1865,7 @@ def apply_deterministic_rule_repair(
     active_rules: dict[str, list[str]],
     max_chars: int,
     previous_violations: list[str],
+    recent_output_rows: list[dict[str, str]] | None = None,
 ) -> tuple[str, list[str]]:
     repaired = deterministic_leadpoet_definition_repair(
         text,
@@ -1871,6 +1882,7 @@ def apply_deterministic_rule_repair(
         trends=trends,
         avoid_phrases=avoid_phrases,
         active_rules=active_rules,
+        recent_output_rows=recent_output_rows,
     )
     if len(violations) <= len(previous_violations):
         return repaired, violations
@@ -2150,6 +2162,7 @@ def draft_rule_violations(
     trends: list[TrendItem],
     avoid_phrases: list[str],
     active_rules: dict[str, list[str]],
+    recent_output_rows: list[dict[str, str]] | None = None,
 ) -> list[str]:
     lowered = text.lower()
     violations: list[str] = []
@@ -2168,6 +2181,7 @@ def draft_rule_violations(
     if re.search(r"\b(cannot proceed|no product update supplied|provide:|provide more details|need more details|to write this post)\b", lowered):
         violations.append("return a publishable post, not a refusal, caveat, or request for more details")
     violations.extend(natural_voice_violations(text, request))
+    violations.extend(recent_output_repetition_violations(text, recent_output_rows))
     anchor = workspace_anchor_name(bundle, active_rules)
     if anchor and re.search(rf"\b(i do not|i don't) know enough about {re.escape(anchor.lower())}\b", lowered):
         violations.append(f"remove model uncertainty about {anchor}; use saved context or make a narrower claim")
@@ -2179,6 +2193,34 @@ def draft_rule_violations(
     ):
         violations.append(f"anchor the point to {anchor} as the source of the core wedge")
     return dedupe_preserve_order(violations)
+
+
+def recent_output_repetition_violations(
+    text: str,
+    recent_output_rows: list[dict[str, str]] | None,
+) -> list[str]:
+    if not recent_output_rows:
+        return []
+    cleaned = clean_recent_output_text(text)
+    first = normalize_recent_output_fragment(first_sentence_or_line(cleaned))
+    last = normalize_recent_output_fragment(last_nonempty_text_line(cleaned))
+    leadpoet_sentence = normalize_recent_output_fragment(first_sentence_with_word(cleaned, "Leadpoet"))
+    violations: list[str] = []
+    for row in recent_output_rows:
+        row_first = normalize_recent_output_fragment(row.get("first_line", ""))
+        row_last = normalize_recent_output_fragment(row.get("last_line", ""))
+        row_leadpoet = normalize_recent_output_fragment(row.get("leadpoet_sentence", ""))
+        if first and row_first and first == row_first:
+            violations.append("change repeated recent opening line")
+        if last and row_last and last == row_last and last != first:
+            violations.append("change repeated recent closing line")
+        if leadpoet_sentence and row_leadpoet and leadpoet_sentence == row_leadpoet:
+            violations.append("change repeated recent Leadpoet sentence")
+    return dedupe_preserve_order(violations)
+
+
+def normalize_recent_output_fragment(text: str) -> str:
+    return " ".join(str(text or "").lower().split()).strip(" .!?")
 
 
 def natural_voice_violations(text: str, request: DraftRequest) -> list[str]:

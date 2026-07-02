@@ -845,7 +845,8 @@ structures, layouts, rhythms, product mention lanes, product placement targets, 
 product mention syntax targets before the evaluator chooses the final post.
 Recent queued and published posts, including cross-topic queue context after same-topic
 matches, add anti-sameness context so new drafts avoid repeating their openings, closers,
-layouts, and Leadpoet sentence grammar.
+layouts, and Leadpoet sentence grammar. Final drafts are also repaired if they exactly
+repeat a recent opener, closer, or Leadpoet sentence.
 The user only reviews the final queued post, not the internal brief.
 
 `Use in Post` on a trend or `Use Pattern` on a pattern opens Create Post with that source preselected. Generated output still enters the review queue; it does not publish automatically.
