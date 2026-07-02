@@ -1202,7 +1202,16 @@ def repair_draft_against_rules(
         )
         repair_options = generate_with_provider(provider, repair_prompt, variants=1, model=model)
         if not repair_options:
-            return repaired, violations
+            return apply_deterministic_rule_repair(
+                repaired,
+                request,
+                bundle,
+                trends=trends,
+                avoid_phrases=avoid_phrases,
+                active_rules=active_rules,
+                max_chars=max_chars,
+                previous_violations=violations,
+            )
         repaired_raw = repair_options[0]
         repaired = fit_generated_text_to_limit(
             provider,
@@ -1219,6 +1228,16 @@ def repair_draft_against_rules(
             avoid_phrases=avoid_phrases,
             active_rules=active_rules,
         )
+    repaired, violations = apply_deterministic_rule_repair(
+        repaired,
+        request,
+        bundle,
+        trends=trends,
+        avoid_phrases=avoid_phrases,
+        active_rules=active_rules,
+        max_chars=max_chars,
+        previous_violations=violations,
+    )
     anchored = anchor_draft_to_workspace(
         repaired,
         request,
@@ -1238,6 +1257,62 @@ def repair_draft_against_rules(
         )
         return anchored, violations
     return repaired, violations
+
+
+def apply_deterministic_rule_repair(
+    text: str,
+    request: DraftRequest,
+    bundle: ContextBundle,
+    *,
+    trends: list[TrendItem],
+    avoid_phrases: list[str],
+    active_rules: dict[str, list[str]],
+    max_chars: int,
+    previous_violations: list[str],
+) -> tuple[str, list[str]]:
+    repaired = deterministic_leadpoet_definition_repair(text, max_chars=max_chars)
+    if repaired == text:
+        return text, previous_violations
+    violations = draft_rule_violations(
+        repaired,
+        request,
+        bundle,
+        trends=trends,
+        avoid_phrases=avoid_phrases,
+        active_rules=active_rules,
+    )
+    if len(violations) <= len(previous_violations):
+        return repaired, violations
+    return text, previous_violations
+
+
+def deterministic_leadpoet_definition_repair(text: str, *, max_chars: int) -> str:
+    repaired = text
+    for pattern in [
+        r"\bLeadpoet\s+is\s+building[^.!?\n]*(?:[.!?]|$)",
+        r"\bLeadpoet\s+is\s+built[^.!?\n]*(?:[.!?]|$)",
+        r"\bLeadpoet\s+is[^.!?\n]*(?:[.!?]|$)",
+        r"\bLeadpoet(?:'s|’s)\s+(?:bet|job|role)\s+is[^.!?\n]*(?:[.!?]|$)",
+    ]:
+        repaired = re.sub(pattern, leadpoet_definition_replacement, repaired, flags=re.I)
+    cleaned = clean_generated_text(repaired, max_chars=max_chars)
+    if not cleaned or len(cleaned) > max_chars:
+        return text
+    return cleaned
+
+
+def leadpoet_definition_replacement(match: re.Match[str]) -> str:
+    original = " ".join(match.group(0).strip().split())
+    lowered = original.lower()
+    if "not another" in lowered or "not a " in lowered or "not the " in lowered:
+        return "Leadpoet should give a better reason to choose the account now."
+    if "context" in lowered:
+        return "For Leadpoet, context only matters when it changes the account a rep works next."
+    if "timing" in lowered or "intent" in lowered:
+        return "For Leadpoet, buyer timing has to explain why this account is worth action now."
+    if "layer" in lowered or "signal" in lowered:
+        return "The Leadpoet signal has to connect timing to the next account worth working."
+    return "For Leadpoet, the useful question is why this account deserves action now."
 
 
 def draft_rule_violations(

@@ -1976,6 +1976,46 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("avoid default 'Leadpoet is building...' product definition", provider.prompts[-1])
             store.close()
 
+    def test_generation_locally_cleans_stubborn_leadpoet_definition(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            bad_text = (
+                "Verified data tells an agent who exists.\n\n"
+                "Leadpoet is building the intent layer for buyer context and timing signals."
+            )
+            provider = SequentialProvider(
+                [
+                    strategy_json(
+                        thesis="Buyer timing needs account context.",
+                        concrete_detail="verified data versus buyer timing",
+                        source_bridge="ZoomInfo proves context matters, but not proprietary buyer timing.",
+                    ),
+                    bad_text,
+                    "ZoomInfo proves context is moving into GTM.\n\nLeadpoet is the timing layer.",
+                    "The hard part is not the contact record. It is knowing why this account should hear from you now.",
+                    evaluation_json(bad_text),
+                    bad_text,
+                    bad_text,
+                ]
+            )
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle="ZoomInfo context layer proves intent matters.",
+                )
+            )[0]
+
+            self.assertIn("Verified data tells an agent who exists.", draft.text)
+            self.assertIn("For Leadpoet, context only matters", draft.text)
+            self.assertNotIn("Leadpoet is", draft.text)
+            self.assertNotIn("Leadpoet is building", draft.text)
+            self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
+            store.close()
+
     def test_generation_repairs_cookie_cutter_leadpoet_mentions_across_current_trend_batch(self):
         class CookieCutterTrendProvider:
             def __init__(self):
