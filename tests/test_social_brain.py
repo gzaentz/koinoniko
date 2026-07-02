@@ -4875,6 +4875,54 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Provider calls: no", output.getvalue())
             self.assertNotIn("Warnings:", output.getvalue())
 
+    def test_audit_naturalness_x_plan_only_cli_fails_on_prompt_seed_warning(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.seed_defaults()
+            store.save_context_section(
+                ContextSection(
+                    kind="positioning",
+                    name="Risky positioning note",
+                    content="Leadpoet is building the intent layer for buyer timing.",
+                )
+            )
+            store.save_trend_item(
+                TrendItem(
+                    title="HubSpot Adds Buyer Intent Signals",
+                    source_type="web",
+                    topic="sales AI",
+                    summary="A trend about CRM intent.",
+                    why_it_matters="It shows timing matters.",
+                    leadpoet_angle="Buyer timing needs proprietary account context.",
+                    date=utc_now(),
+                )
+            )
+            store.close()
+
+            with patch("leadpoet_social_brain.cli.load_configured_provider") as load_provider:
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    exit_code = cli_main(
+                        [
+                            "--db",
+                            str(db_path),
+                            "audit-naturalness-x",
+                            "--count",
+                            "1",
+                            "--plan-only",
+                            "--fail-on-warning",
+                        ]
+                    )
+
+            printed = output.getvalue()
+            self.assertEqual(exit_code, 1)
+            load_provider.assert_not_called()
+            self.assertIn("Provider calls: no", printed)
+            self.assertIn("Prompt seed scan:", printed)
+            self.assertIn("Prompt seed scan found", printed)
+            self.assertIn("Warnings:", printed)
+
     def test_audit_naturalness_x_warns_on_repeated_closing_line(self):
         class RepeatedCloserProvider:
             def __init__(self):
