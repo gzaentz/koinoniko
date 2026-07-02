@@ -43,6 +43,7 @@ from leadpoet_social_brain.generation import (
     primary_product_mention_lane,
     primary_product_mention_placement_target,
     primary_product_mention_syntax_target,
+    primary_product_name_usage_target,
     primary_structure_shape,
     trend_angle_for_generation,
 )
@@ -928,6 +929,9 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
     print("Primary product mention syntax target counts:")
     for key, value in sorted(payload["primary_product_mention_syntax_target_counts"].items()):
         print(f"- {key}: {value}")
+    print("Primary product name usage target counts:")
+    for key, value in sorted(payload["primary_product_name_usage_target_counts"].items()):
+        print(f"- {key}: {value}")
     print("Primary layout target counts:")
     for key, value in sorted(payload["primary_layout_target_counts"].items()):
         print(f"- {key}: {value}")
@@ -1028,6 +1032,7 @@ def build_naturalness_plan_audit(
     primary_product_lane_counts = Counter(str(row["primary_product_mention_lane"]) for row in rows)
     primary_product_placement_counts = Counter(str(row["primary_product_mention_placement_target"]) for row in rows)
     primary_product_syntax_counts = Counter(str(row["primary_product_mention_syntax_target"]) for row in rows)
+    primary_product_name_usage_counts = Counter(str(row["primary_product_name_usage_target"]) for row in rows)
     request_angle_counts = Counter(str(row["request_angle"]) for row in rows if row["request_angle"])
     product_name_optional_guidance_count = sum(
         1
@@ -1047,6 +1052,8 @@ def build_naturalness_plan_audit(
         warnings.append("Product mention placement guidance did not vary enough across trends.")
     if len(primary_product_syntax_counts) < min(4, len(trends), count):
         warnings.append("Product mention syntax guidance did not vary enough across trends.")
+    if len(primary_product_name_usage_counts) < min(3, len(trends), count):
+        warnings.append("Product name usage guidance did not vary enough across trends.")
     if len(rows) >= 8 and product_name_optional_guidance_count < max(2, len(rows) // 5):
         warnings.append("Product-name-optional guidance did not appear often enough across trends.")
     if len(primary_layout_target_counts) < min(4, len(trends), count):
@@ -1069,6 +1076,12 @@ def build_naturalness_plan_audit(
         warnings,
         "Product mention syntax guidance",
         primary_product_syntax_counts,
+        len(rows),
+    )
+    append_plan_concentration_warning(
+        warnings,
+        "Product name usage guidance",
+        primary_product_name_usage_counts,
         len(rows),
     )
     append_plan_concentration_warning(warnings, "Layout target guidance", primary_layout_target_counts, len(rows))
@@ -1100,6 +1113,7 @@ def build_naturalness_plan_audit(
         "primary_product_mention_lane_counts": dict(primary_product_lane_counts),
         "primary_product_mention_placement_target_counts": dict(primary_product_placement_counts),
         "primary_product_mention_syntax_target_counts": dict(primary_product_syntax_counts),
+        "primary_product_name_usage_target_counts": dict(primary_product_name_usage_counts),
         "product_name_optional_guidance_count": product_name_optional_guidance_count,
         "request_angle_counts": dict(request_angle_counts),
         "primary_layout_target_counts": dict(primary_layout_target_counts),
@@ -1207,6 +1221,7 @@ NATURALNESS_ASSIGNMENT_FIELDS = (
     "primary_product_mention_lane",
     "primary_product_mention_placement_target",
     "primary_product_mention_syntax_target",
+    "primary_product_name_usage_target",
     "primary_layout_target",
     "primary_closing_target",
     "primary_human_rhythm_target",
@@ -1226,10 +1241,10 @@ def naturalness_audit_request_plan(
     }
     combo_counts: Counter[tuple[str, ...]] = Counter()
     plan: list[tuple[int, TrendItem, DraftRequest, dict[str, str]]] = []
-    candidate_slot_count = max(24, count * 3)
+    candidate_slot_count = max(60, count * 3)
     for index in range(count):
         trend = trends[index % len(trends)]
-        best_score: tuple[int, int, int, int, int] | None = None
+        best_score: tuple[int, ...] | None = None
         best_request: DraftRequest | None = None
         best_assignment: dict[str, str] | None = None
         for slot in range(candidate_slot_count):
@@ -1267,6 +1282,7 @@ def naturalness_guidance_assignment(request: DraftRequest, trend: TrendItem) -> 
         "primary_product_mention_lane": primary_product_mention_lane(request, trends)[0],
         "primary_product_mention_placement_target": primary_product_mention_placement_target(request, trends)[0],
         "primary_product_mention_syntax_target": primary_product_mention_syntax_target(request, trends)[0],
+        "primary_product_name_usage_target": primary_product_name_usage_target(request, trends)[0],
         "primary_layout_target": primary_layout_target(request, trends)[0],
         "primary_closing_target": primary_closing_target(request, trends)[0],
         "primary_human_rhythm_target": primary_human_rhythm_target(request, trends)[0],
@@ -1280,10 +1296,18 @@ def naturalness_assignment_balance_score(
     combo_counts: Counter[tuple[str, ...]],
     previous_assignment: dict[str, str] | None,
     slot: int,
-) -> tuple[int, int, int, int, int]:
+) -> tuple[int, int, int, int, int, int, int, int]:
     next_counts = [
         counters[field][assignment[field]] + 1
         for field in NATURALNESS_ASSIGNMENT_FIELDS
+    ]
+    core_fields = tuple(
+        field for field in NATURALNESS_ASSIGNMENT_FIELDS
+        if field != "primary_product_name_usage_target"
+    )
+    core_next_counts = [
+        counters[field][assignment[field]] + 1
+        for field in core_fields
     ]
     combo = tuple(assignment[field] for field in NATURALNESS_ASSIGNMENT_FIELDS)
     consecutive_overlap = 0
@@ -1294,7 +1318,10 @@ def naturalness_assignment_balance_score(
             if assignment[field] == previous_assignment[field]
         )
     return (
+        max(core_next_counts),
+        counters["primary_product_mention_lane"][assignment["primary_product_mention_lane"]] + 1,
         max(next_counts),
+        sum(count * count for count in core_next_counts),
         sum(count * count for count in next_counts),
         combo_counts[combo] + 1,
         consecutive_overlap,
@@ -1410,6 +1437,14 @@ def build_naturalness_audit(
         )
         if isinstance(product_syntax_option, dict):
             primary_product_syntax = str(product_syntax_option.get("name") or "")
+        primary_product_name_usage = ""
+        product_name_usage_option = (
+            draft.context_snapshot.get("primary_product_name_usage_target")
+            if isinstance(draft.context_snapshot, dict)
+            else None
+        )
+        if isinstance(product_name_usage_option, dict):
+            primary_product_name_usage = str(product_name_usage_option.get("name") or "")
         primary_layout_target = ""
         layout_option = (
             draft.context_snapshot.get("primary_layout_target")
@@ -1461,6 +1496,7 @@ def build_naturalness_audit(
                 "first_product_mention_lane": first_product_lane,
                 "primary_product_mention_placement_target": primary_product_placement,
                 "primary_product_mention_syntax_target": primary_product_syntax,
+                "primary_product_name_usage_target": primary_product_name_usage,
                 "primary_layout_target": primary_layout_target,
                 "primary_closing_target": primary_closing_target,
                 "primary_human_rhythm_target": primary_human_rhythm_target,
@@ -1502,6 +1538,11 @@ def build_naturalness_audit(
         for row in rows
         if row["primary_product_mention_syntax_target"]
     )
+    primary_product_name_usage_counts = Counter(
+        str(row["primary_product_name_usage_target"])
+        for row in rows
+        if row["primary_product_name_usage_target"]
+    )
     request_angle_counts = Counter(str(row["request_angle"]) for row in rows if row["request_angle"])
     product_name_optional_guidance_count = sum(
         1
@@ -1511,6 +1552,8 @@ def build_naturalness_audit(
     )
     if len(primary_product_syntax_counts) < min(4, len(trends), count):
         warnings.append("Product mention syntax guidance did not vary enough across trends.")
+    if len(primary_product_name_usage_counts) < min(3, len(trends), count):
+        warnings.append("Product name usage guidance did not vary enough across trends.")
     if len(rows) >= 8 and product_name_optional_guidance_count < max(2, len(rows) // 5):
         warnings.append("Product-name-optional guidance did not appear often enough across trends.")
     primary_layout_target_counts = Counter(str(row["primary_layout_target"]) for row in rows if row["primary_layout_target"])
@@ -1538,6 +1581,12 @@ def build_naturalness_audit(
         warnings,
         "Product mention syntax guidance",
         primary_product_syntax_counts,
+        len(rows),
+    )
+    append_plan_concentration_warning(
+        warnings,
+        "Product name usage guidance",
+        primary_product_name_usage_counts,
         len(rows),
     )
     append_plan_concentration_warning(warnings, "Layout target guidance", primary_layout_target_counts, len(rows))
@@ -1676,6 +1725,7 @@ def build_naturalness_audit(
         "primary_product_mention_lane_counts": dict(primary_product_lane_counts),
         "primary_product_mention_placement_target_counts": dict(primary_product_placement_counts),
         "primary_product_mention_syntax_target_counts": dict(primary_product_syntax_counts),
+        "primary_product_name_usage_target_counts": dict(primary_product_name_usage_counts),
         "product_name_optional_guidance_count": product_name_optional_guidance_count,
         "request_angle_counts": dict(request_angle_counts),
         "primary_layout_target_counts": dict(primary_layout_target_counts),

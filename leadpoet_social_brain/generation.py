@@ -385,6 +385,30 @@ PRODUCT_MENTION_SYNTAX_TARGETS = [
     ),
 ]
 
+PRODUCT_NAME_USAGE_TARGETS = [
+    (
+        "omit product name",
+        "Do not write the product name in this option; let buyer timing, account context, or the why-now signal carry the point.",
+    ),
+    (
+        "mention once embedded",
+        "Use the product name at most once, inside a sentence after the mechanism is already concrete.",
+    ),
+    (
+        "mention once late",
+        "Keep the first line product-free and use the product name at most once near the consequence, not as a closer.",
+    ),
+    (
+        "name optional",
+        "Use the product name only if it materially clarifies the saved-context wedge; otherwise omit it.",
+    ),
+]
+
+PRODUCT_NAME_USAGE_TARGETS_BY_NAME = {
+    name: (name, guidance)
+    for name, guidance in PRODUCT_NAME_USAGE_TARGETS
+}
+
 
 class SocialBrainGenerator:
     def __init__(self, store: SQLiteStore, provider: DraftProvider | None = None):
@@ -824,6 +848,9 @@ def product_mention_prompt_section(
     )
     syntax_name, syntax_guidance = syntax_selected[0]
     syntax_options = "\n".join(f"- {name}: {guidance}" for name, guidance in syntax_selected)
+    usage_selected = selected_product_name_usage_targets(request, trends or [], count=4) if request else PRODUCT_NAME_USAGE_TARGETS[:4]
+    usage_name, usage_guidance = usage_selected[0]
+    usage_options = "\n".join(f"- {name}: {guidance}" for name, guidance in usage_selected)
     return (
         "Dynamic Product Mention:\n"
         "- Do not make the product mention the same final paragraph every time.\n"
@@ -836,14 +863,18 @@ def product_mention_prompt_section(
         f"Primary product mention lane for this request: {primary_name}: {primary_guidance}\n"
         f"Primary product mention placement target for this request: {placement_name}: {placement_guidance}\n"
         f"Primary product mention syntax target for this request: {syntax_name}: {syntax_guidance}\n"
+        f"Primary product name usage target for this request: {usage_name}: {usage_guidance}\n"
         "Use the lane for the rhetorical job, the placement target for where the name enters, and the syntax target for the grammar of the product mention.\n"
+        "Use the product name usage target as a hard constraint for whether the name appears and how many times it appears.\n"
         "Product mention lanes for this request:\n"
         f"{lane_options}\n"
         "Product mention placement targets for this request:\n"
         f"{placement_options}\n"
         "Product mention syntax targets for this request:\n"
         f"{syntax_options}\n"
-        "- In multi-option prompts, option 1 should use the primary lane/syntax and each option should use a different product mention lane and syntax."
+        "Product name usage targets for this request:\n"
+        f"{usage_options}\n"
+        "- In multi-option prompts, option 1 should use the primary lane/syntax/name-usage target and each option should use a different product mention lane, syntax, and name-usage route."
     )
 
 
@@ -914,6 +945,53 @@ def selected_product_mention_syntax_targets(
 
 def primary_product_mention_syntax_target(request: DraftRequest, trends: list[TrendItem]) -> tuple[str, str]:
     return selected_product_mention_syntax_targets(request, trends, count=1)[0]
+
+
+def selected_product_name_usage_targets(
+    request: DraftRequest,
+    trends: list[TrendItem],
+    *,
+    count: int,
+) -> list[tuple[str, str]]:
+    lanes = selected_product_mention_lanes(request, trends, count=count)
+    placements = selected_product_mention_placement_targets(request, trends, count=count)
+    syntaxes = selected_product_mention_syntax_targets(request, trends, count=count)
+    seed_source = variation_seed_source(request, trends)
+    digest = hashlib.sha256(f"product-name-usage|{seed_source}".encode("utf-8")).hexdigest()
+    start = int(digest[:8], 16) % len(PRODUCT_NAME_USAGE_TARGETS)
+    defaults = [
+        PRODUCT_NAME_USAGE_TARGETS[(start + offset) % len(PRODUCT_NAME_USAGE_TARGETS)]
+        for offset in range(count)
+    ]
+    return [
+        product_name_usage_target_for_assignment(
+            lane=lanes[index][0],
+            placement=placements[index][0],
+            syntax=syntaxes[index][0],
+            default=defaults[index],
+        )
+        for index in range(min(count, len(lanes), len(placements), len(syntaxes)))
+    ]
+
+
+def product_name_usage_target_for_assignment(
+    *,
+    lane: str,
+    placement: str,
+    syntax: str,
+    default: tuple[str, str],
+) -> tuple[str, str]:
+    if product_lane_omits_name(lane) or syntax == "name omitted":
+        return PRODUCT_NAME_USAGE_TARGETS_BY_NAME["omit product name"]
+    if placement == "late consequence":
+        return PRODUCT_NAME_USAGE_TARGETS_BY_NAME["mention once late"]
+    if placement == "product-free close" and default[0] == "mention once late":
+        return PRODUCT_NAME_USAGE_TARGETS_BY_NAME["mention once embedded"]
+    return default
+
+
+def primary_product_name_usage_target(request: DraftRequest, trends: list[TrendItem]) -> tuple[str, str]:
+    return selected_product_name_usage_targets(request, trends, count=1)[0]
 
 
 def selected_structure_shapes(
@@ -996,6 +1074,7 @@ def draft_option_variation_matrix(request: DraftRequest, trends: list[TrendItem]
     lanes = selected_product_mention_lanes(request, trends, count=count)
     placements = selected_product_mention_placement_targets(request, trends, count=count)
     syntaxes = selected_product_mention_syntax_targets(request, trends, count=count)
+    usages = selected_product_name_usage_targets(request, trends, count=count)
     lines = [
         "Draft Option Variation Map:",
         "Use these as distinct assignments, not labels to print in the post.",
@@ -1010,7 +1089,8 @@ def draft_option_variation_matrix(request: DraftRequest, trends: list[TrendItem]
                 f"rhythm={rhythms[index][0]}; "
                 f"product mention lane={lanes[index][0]}; "
                 f"product placement={placements[index][0]}; "
-                f"product syntax={syntaxes[index][0]}"
+                f"product syntax={syntaxes[index][0]}; "
+                f"product name usage={usages[index][0]}"
             )
         )
     return "\n".join(lines)
@@ -1835,6 +1915,7 @@ def build_context_snapshot(
     primary_product_lane = primary_product_mention_lane(request, trends)
     primary_product_placement = primary_product_mention_placement_target(request, trends)
     primary_product_syntax = primary_product_mention_syntax_target(request, trends)
+    primary_product_name_usage = primary_product_name_usage_target(request, trends)
     primary_layout = primary_layout_target(request, trends)
     primary_closing = primary_closing_target(request, trends)
     primary_rhythm = primary_human_rhythm_target(request, trends)
@@ -1882,6 +1963,10 @@ def build_context_snapshot(
             "name": primary_product_syntax[0],
             "guidance": primary_product_syntax[1],
         },
+        "primary_product_name_usage_target": {
+            "name": primary_product_name_usage[0],
+            "guidance": primary_product_name_usage[1],
+        },
         "primary_layout_target": {
             "name": primary_layout[0],
             "guidance": primary_layout[1],
@@ -1921,6 +2006,10 @@ def build_context_snapshot(
         "product_mention_syntax_options": [
             {"name": name, "guidance": guidance}
             for name, guidance in selected_product_mention_syntax_targets(request, trends, count=4)
+        ],
+        "product_name_usage_options": [
+            {"name": name, "guidance": guidance}
+            for name, guidance in selected_product_name_usage_targets(request, trends, count=4)
         ],
         "avoid_phrases": avoid_phrases or [],
         "active_writing_rules": active_rules or {},

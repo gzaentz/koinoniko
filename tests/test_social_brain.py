@@ -53,6 +53,7 @@ from leadpoet_social_brain.generation import (
     primary_product_mention_lane,
     primary_product_mention_placement_target,
     primary_product_mention_syntax_target,
+    primary_product_name_usage_target,
     primary_structure_shape,
     product_lane_omits_name,
     selected_closing_targets,
@@ -61,6 +62,7 @@ from leadpoet_social_brain.generation import (
     selected_product_mention_lanes,
     selected_product_mention_placement_targets,
     selected_product_mention_syntax_targets,
+    selected_product_name_usage_targets,
     selected_structure_shapes,
     trend_angle_for_generation,
     workspace_anchor_candidates,
@@ -1202,8 +1204,12 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Dynamic Product Mention:", prompt)
             self.assertIn("Primary product mention lane for this request:", prompt)
             self.assertIn("Primary product mention placement target for this request:", prompt)
+            self.assertIn("Primary product mention syntax target for this request:", prompt)
+            self.assertIn("Primary product name usage target for this request:", prompt)
             self.assertIn("Product mention lanes for this request:", prompt)
             self.assertIn("Product mention placement targets for this request:", prompt)
+            self.assertIn("Product mention syntax targets for this request:", prompt)
+            self.assertIn("Product name usage targets for this request:", prompt)
             self.assertIn("Avoid product-subject helper/tagline lead-ins using verbs like helps", prompt)
             self.assertNotIn("\"Leadpoet is...\"", prompt)
             self.assertNotIn("\"Leadpoet is building...\"", prompt)
@@ -1577,6 +1583,40 @@ class SocialBrainTest(unittest.TestCase):
             primary_syntaxes.add(syntaxes[0])
 
         self.assertGreaterEqual(len(primary_syntaxes), 4)
+
+    def test_product_name_usage_targets_rotate_and_respect_omission_lanes(self):
+        primary_targets = []
+        for index in range(40):
+            trend = TrendItem(
+                id=f"name_usage_trend_{index}",
+                title=f"Name usage trend {index}",
+                source_type="web",
+                topic="sales AI",
+                summary="Context layer",
+                why_it_matters="It proves context matters.",
+                leadpoet_angle=f"Buyer timing beats generic data {index}.",
+                date=utc_now(),
+            )
+            request = DraftRequest(
+                platform="x",
+                topic="sales AI",
+                post_type="founder_insight",
+                angle=trend.leadpoet_angle,
+                trend_ids=[trend.id],
+            )
+
+            targets = [name for name, _ in selected_product_name_usage_targets(request, [trend], count=4)]
+            lane = primary_product_mention_lane(request, [trend])[0]
+            syntax = primary_product_mention_syntax_target(request, [trend])[0]
+            primary_target = primary_product_name_usage_target(request, [trend])[0]
+
+            self.assertEqual(primary_target, targets[0])
+            if lane in PRODUCT_NAME_OPTIONAL_LANE_NAMES or syntax == "name omitted":
+                self.assertEqual(primary_target, "omit product name")
+            primary_targets.append(primary_target)
+
+        self.assertIn("omit product name", primary_targets)
+        self.assertGreaterEqual(len(set(primary_targets)), 3)
 
     def test_workspace_anchor_candidates_respect_product_placement(self):
         text = "Buyer timing should choose the account.\n\nCopy comes later."
@@ -1981,6 +2021,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("primary_product_mention_lane", saved_draft.context_snapshot)
             self.assertIn("primary_product_mention_placement_target", saved_draft.context_snapshot)
             self.assertIn("primary_product_mention_syntax_target", saved_draft.context_snapshot)
+            self.assertIn("primary_product_name_usage_target", saved_draft.context_snapshot)
             self.assertIn("primary_layout_target", saved_draft.context_snapshot)
             self.assertIn("primary_closing_target", saved_draft.context_snapshot)
             self.assertIn("primary_human_rhythm_target", saved_draft.context_snapshot)
@@ -1988,6 +2029,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertGreaterEqual(len(saved_draft.context_snapshot["product_mention_options"]), 1)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["product_mention_placement_options"]), 1)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["product_mention_syntax_options"]), 1)
+            self.assertGreaterEqual(len(saved_draft.context_snapshot["product_name_usage_options"]), 1)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["layout_target_options"]), 1)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["closing_target_options"]), 1)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["human_rhythm_options"]), 1)
@@ -2006,6 +2048,10 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(
                 saved_draft.context_snapshot["primary_product_mention_syntax_target"]["name"],
                 saved_draft.context_snapshot["product_mention_syntax_options"][0]["name"],
+            )
+            self.assertEqual(
+                saved_draft.context_snapshot["primary_product_name_usage_target"]["name"],
+                saved_draft.context_snapshot["product_name_usage_options"][0]["name"],
             )
             self.assertEqual(
                 saved_draft.context_snapshot["primary_layout_target"]["name"],
@@ -2047,6 +2093,10 @@ class SocialBrainTest(unittest.TestCase):
             )
             self.assertIn(
                 f"product syntax={saved_draft.context_snapshot['product_mention_syntax_options'][0]['name']}",
+                option_lines[0],
+            )
+            self.assertIn(
+                f"product name usage={saved_draft.context_snapshot['product_name_usage_options'][0]['name']}",
                 option_lines[0],
             )
             self.assertIn("skills", saved_draft.context_snapshot)
@@ -3619,6 +3669,7 @@ class SocialBrainTest(unittest.TestCase):
                 "Primary product mention lane for this request:",
                 "Primary product mention placement target for this request:",
                 "Primary product mention syntax target for this request:",
+                "Primary product name usage target for this request:",
             ]:
                 self.assertEqual(primary_line(writer_prompt, prefix), primary_line(evaluator_prompt, prefix))
                 self.assertEqual(primary_line(writer_prompt, prefix), primary_line(repair_prompt, prefix))
@@ -4608,6 +4659,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertGreaterEqual(len(payload["primary_product_mention_lane_counts"]), 5)
             self.assertGreaterEqual(len(payload["primary_product_mention_placement_target_counts"]), 4)
             self.assertGreaterEqual(len(payload["primary_product_mention_syntax_target_counts"]), 4)
+            self.assertGreaterEqual(len(payload["primary_product_name_usage_target_counts"]), 3)
             self.assertGreaterEqual(payload["product_name_optional_guidance_count"], 4)
             self.assertGreaterEqual(len(payload["primary_layout_target_counts"]), 4)
             self.assertGreaterEqual(len(payload["primary_closing_target_counts"]), 4)
@@ -4727,9 +4779,11 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(payload["primary_product_mention_lane_counts"])
             self.assertTrue(payload["primary_product_mention_placement_target_counts"])
             self.assertTrue(payload["primary_product_mention_syntax_target_counts"])
+            self.assertTrue(payload["primary_product_name_usage_target_counts"])
             self.assertTrue(payload["primary_layout_target_counts"])
             self.assertIn("primary_structure_option", payload["rows"][0])
             self.assertIn("primary_product_mention_syntax_target", payload["rows"][0])
+            self.assertIn("primary_product_name_usage_target", payload["rows"][0])
             self.assertEqual(payload["prompt_seed_violations"], [])
             self.assertTrue(any("were not covered" in warning for warning in payload["warnings"]))
             store.close()
@@ -5133,10 +5187,12 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(len(payload["primary_product_mention_lane_counts"]), 5)
             self.assertGreaterEqual(len(payload["primary_product_mention_placement_target_counts"]), 4)
             self.assertEqual(len(payload["primary_product_mention_syntax_target_counts"]), 5)
+            self.assertGreaterEqual(len(payload["primary_product_name_usage_target_counts"]), 2)
             self.assertLessEqual(max(payload["primary_structure_option_counts"].values()), 2)
             self.assertLessEqual(max(payload["primary_product_mention_lane_counts"].values()), 2)
             self.assertLessEqual(max(payload["primary_product_mention_placement_target_counts"].values()), 2)
             self.assertLessEqual(max(payload["primary_product_mention_syntax_target_counts"].values()), 2)
+            self.assertLessEqual(max(payload["primary_product_name_usage_target_counts"].values()), 3)
             self.assertFalse(
                 any("guidance is too concentrated" in warning for warning in payload["warnings"])
             )
@@ -5198,6 +5254,7 @@ class SocialBrainTest(unittest.TestCase):
             )
             self.assertGreaterEqual(len(payload["primary_structure_option_counts"]), 4)
             self.assertGreaterEqual(len(payload["primary_product_mention_syntax_target_counts"]), 4)
+            self.assertGreaterEqual(len(payload["primary_product_name_usage_target_counts"]), 3)
             self.assertTrue(
                 any("Generated post layouts are not varied enough" in warning for warning in payload["warnings"])
             )
@@ -7000,6 +7057,8 @@ class SocialBrainTest(unittest.TestCase):
                 "Primary human rhythm target for this request:",
                 "Primary product mention lane for this request:",
                 "Primary product mention placement target for this request:",
+                "Primary product mention syntax target for this request:",
+                "Primary product name usage target for this request:",
             ]:
                 writer_line = next(line for line in provider.prompts[1].splitlines() if line.startswith(prefix))
                 evaluator_line = next(line for line in provider.prompts[2].splitlines() if line.startswith(prefix))
