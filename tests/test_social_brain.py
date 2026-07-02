@@ -23,7 +23,12 @@ from leadpoet_social_brain.assistant_context import (
 )
 from leadpoet_social_brain.categorization import XPostLLMCategorizer, parse_x_category_response
 from leadpoet_social_brain.content_queue import create_post_x, plan_week_x, post_queue_item_x
-from leadpoet_social_brain.cli import build_naturalness_audit, build_parser as build_cli_parser, main as cli_main
+from leadpoet_social_brain.cli import (
+    build_naturalness_audit,
+    build_parser as build_cli_parser,
+    leadpoet_mention_pattern,
+    main as cli_main,
+)
 from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.core.models import ContentQueueItem, ContextSection, DraftRequest, EngagementMetrics, Pattern, PostNote, SocialPost, SyncMetadata, TrendItem, utc_now
 from leadpoet_social_brain.generation import (
@@ -2398,6 +2403,19 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotIn("leadpoet_is_built", payload["leadpoet_shapes"])
             self.assertNotIn("leadpoet_is", payload["leadpoet_shapes"])
             store.close()
+
+    def test_leadpoet_mention_pattern_classifies_common_dynamic_verbs(self):
+        cases = {
+            "Leadpoet should explain why now.": "leadpoet_should",
+            "Leadpoet needs to make timing visible.": "leadpoet_needs",
+            "Leadpoet owns the account-timing question.": "leadpoet_owns",
+            "Leadpoet starts before the sequence.": "leadpoet_starts",
+            "Leadpoet can show the account reason.": "leadpoet_can",
+        }
+
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(leadpoet_mention_pattern(text), expected)
 
     def test_audit_naturalness_x_warns_on_repeated_generated_layout(self):
         class RepeatedLayoutProvider:

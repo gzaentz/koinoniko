@@ -1050,6 +1050,16 @@ def leadpoet_mention_pattern(text: str) -> str:
         return "leadpoet_signal"
     if re.search(r"\bleadpoet\s+has\s+to\b", text, flags=re.I):
         return "leadpoet_has_to"
+    if re.search(r"\bleadpoet\s+should\b", text, flags=re.I):
+        return "leadpoet_should"
+    if re.search(r"\bleadpoet\s+needs?\b", text, flags=re.I):
+        return "leadpoet_needs"
+    if re.search(r"\bleadpoet\s+owns?\b", text, flags=re.I):
+        return "leadpoet_owns"
+    if re.search(r"\bleadpoet\s+starts?\b", text, flags=re.I):
+        return "leadpoet_starts"
+    if re.search(r"\bleadpoet\s+can\b", text, flags=re.I):
+        return "leadpoet_can"
     if re.search(r"\bleadpoet\s+focuses\b", text, flags=re.I):
         return "leadpoet_focuses"
     if re.search(r"(?m)^\s*leadpoet\b", text, flags=re.I):
