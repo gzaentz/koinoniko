@@ -1176,7 +1176,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("## skills/review_filter.md", prompt)
             self.assertIn("# Review Filter", prompt)
             self.assertIn("Use saved Facts & Context as the source of truth", prompt)
-            self.assertIn("Do not frame another tool, agent, or case study as owning the workspace's core advantage", prompt)
+            self.assertIn("Do not make another tool, agent, or case study supply the workspace's core mechanism", prompt)
             self.assertIn("explain the exact mechanism that transfers to saved Facts & Context", prompt)
             self.assertIn("Natural Voice Calibration:", prompt)
             self.assertIn("Sound like one specific founder noticing a real thing", prompt)
@@ -4882,7 +4882,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Gavin at AcmeOS", prompt)
             self.assertIn("AcmeOS is the core account intelligence layer", prompt)
             self.assertIn("renewal timing and expansion intent", prompt)
-            self.assertIn("never frame another tool, agent, or case study as the source of AcmeOS's unique wedge", prompt)
+            self.assertIn("never make another tool, agent, or case study supply AcmeOS's saved wedge", prompt)
             self.assertIn("Avoid wording like \"AcmeOS can leverage insights from", prompt)
             self.assertNotIn("Gavin at Leadpoet", prompt)
             store.close()
@@ -6003,6 +6003,7 @@ class SocialBrainTest(unittest.TestCase):
 
             self.assertTrue(any("Keep the Leadpoet wedge concrete" in rule for rule in rules))
             self.assertIn("buyer timing and proprietary context inside Leadpoet", rules_text)
+            self.assertIn("not the mechanism to copy", rules_text)
             self.assertNotIn("Leadpoet owns the intent wedge", rules_text)
             self.assertNotRegex(rules_text, r"\bLeadpoet\s+(?:owns|is|should|can|needs?|has\s+to|starts)\b")
             self.assertNotIn("Leadpoet is the core intent layer", rules_text)
@@ -6056,7 +6057,7 @@ class SocialBrainTest(unittest.TestCase):
                 any("Facts & Context" in item for item in groups["Positioning Rules"]["items"])
             )
             self.assertTrue(
-                any("workspace's core advantage" in item for item in groups["Review Filters"]["items"])
+                any("workspace's core mechanism" in item for item in groups["Review Filters"]["items"])
             )
             self.assertTrue(
                 any("worth posting now" in item for item in groups["Review Filters"]["items"])

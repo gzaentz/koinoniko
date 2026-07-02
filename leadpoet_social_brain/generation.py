@@ -1191,7 +1191,7 @@ Final evaluator should check:
 - strategy fidelity: the draft expresses the thesis and uses the concrete detail
 - post-worthiness: there is a clear reason this should be posted now; a topical source by itself is not enough
 - source bridge: any trend/company/product/case study reference states the transferable mechanism instead of relying on a loose analogy
-- positioning fidelity: if saved Facts & Context names a company/product as owning the core wedge, the final draft must frame that company/product as the source of the wedge
+- positioning fidelity: if saved Facts & Context names a company/product in the core mechanism, the final draft must keep that name attached to the concrete saved-context mechanism
 - generic swap test: the draft would still be specific if company and product names were removed; if it could apply to any workspace, fail it
 - evidence safety: no invented first-person anecdote, fake customer story, fake quote, fake metric, unsupported reading/research session, or unsupported product claim
 - natural voice: sounds like a specific person posting a useful thought, not an AI recap, brand post, or launch page

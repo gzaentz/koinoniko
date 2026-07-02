@@ -1267,8 +1267,8 @@ Rules:
 - relevance_score is 0-10.
 - If keep is false or relevance_score is below 6, set leadpoet_angle to an empty string and explain reject_reason.
 - Do not invent a {profile.workspace_name} angle. If the source does not connect naturally to the saved workspace context, buyer timing, proprietary context, account signals, or sales workflow timing, reject it.
-- In leadpoet_angle, never frame another tool, agent, or case study as the source of {profile.workspace_name}'s unique wedge.
-- If another company is mentioned, treat it as market proof, then pull the point back to {profile.workspace_name} owning the saved positioning.
+- In leadpoet_angle, never make another tool, agent, or case study supply {profile.workspace_name}'s saved wedge.
+- If another company is mentioned, treat it as market proof, then bring the point back to the saved buyer-timing, proprietary-context, or account-signal mechanism inside {profile.workspace_name}.
 - Avoid wording like "{profile.workspace_name} can leverage insights from..." or "{profile.workspace_name} can learn from..." unless the sentence immediately names {profile.workspace_name}'s own buyer timing, proprietary context, or account-level intent.
 - Keep each value specific and concise.
 - suggested_hooks and possible_post_angles must be arrays."""
