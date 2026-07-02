@@ -2000,6 +2000,64 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("avoid default 'Leadpoet is building...' product definition", provider.prompts[-1])
             store.close()
 
+    def test_generation_keeps_trend_specific_lanes_through_evaluation_and_repair(self):
+        def primary_line(prompt: str, prefix: str) -> str:
+            return next(line for line in prompt.splitlines() if line.startswith(prefix))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            trend = store.save_trend_item(
+                TrendItem(
+                    id="trend_lane_consistency",
+                    title="ZoomInfo context layer",
+                    source_type="web",
+                    topic="sales AI",
+                    summary="Context layer",
+                    why_it_matters="It proves context matters.",
+                    leadpoet_angle="Buyer timing beats generic data.",
+                    date=utc_now(),
+                )
+            )
+            provider = SequentialProvider(
+                [
+                    strategy_json(
+                        thesis="Buyer timing needs account context.",
+                        concrete_detail="verified data versus buyer timing",
+                        source_bridge="ZoomInfo proves context matters, but not proprietary buyer timing.",
+                    ),
+                    "Verified data tells an agent who exists.\n\nLeadpoet is building the intent layer for who is worth action now.",
+                    "ZoomInfo proves context is moving into GTM.\n\nLeadpoet is the timing layer.",
+                    "The hard part is not the contact record. It is knowing why this account should hear from you now.",
+                    evaluation_json(
+                        "Verified data tells an agent who exists.\n\nLeadpoet is building the intent layer for buyer context and timing signals.",
+                    ),
+                    "Verified data tells an agent who exists.\n\nThe Leadpoet signal should explain why now.",
+                ]
+            )
+
+            SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle="ZoomInfo context layer proves intent matters.",
+                    use_trends=True,
+                    trend_ids=[trend.id],
+                )
+            )
+
+            writer_prompt = provider.prompts[1]
+            evaluator_prompt = provider.prompts[2]
+            repair_prompt = provider.prompts[-1]
+            for prefix in [
+                "Primary structure for this request:",
+                "Primary product mention lane for this request:",
+            ]:
+                self.assertEqual(primary_line(writer_prompt, prefix), primary_line(evaluator_prompt, prefix))
+                self.assertEqual(primary_line(writer_prompt, prefix), primary_line(repair_prompt, prefix))
+            store.close()
+
     def test_generation_locally_cleans_stubborn_leadpoet_definition(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -3363,12 +3421,24 @@ class SocialBrainTest(unittest.TestCase):
             store = SQLiteStore(db_path)
             store.seed_defaults()
             save_avoid_phrases(store, ["game changer"])
+            trend = store.save_trend_item(
+                TrendItem(
+                    title="ZoomInfo context layer",
+                    source_type="web",
+                    topic="sales LLMs",
+                    summary="Context layer",
+                    why_it_matters="It proves context matters.",
+                    leadpoet_angle="Buyer timing beats generic data.",
+                    date=utc_now(),
+                )
+            )
             item = store.save_content_queue_item(
                 ContentQueueItem(
                     text="Original queued post.",
                     topic="sales LLMs",
                     post_type="founder_insight",
                     scheduled_at="2026-06-30T10:00:00-04:00",
+                    trend_ids=[trend.id],
                 )
             )
             store.close()
@@ -3387,6 +3457,13 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Original queued post.", provider.prompts[0])
             self.assertIn("Avoid Phrases:", provider.prompts[0])
             self.assertIn("- game changer", provider.prompts[0])
+            for prefix in [
+                "Primary structure for this request:",
+                "Primary product mention lane for this request:",
+            ]:
+                writer_line = next(line for line in provider.prompts[1].splitlines() if line.startswith(prefix))
+                evaluator_line = next(line for line in provider.prompts[2].splitlines() if line.startswith(prefix))
+                self.assertEqual(writer_line, evaluator_line)
 
             store = SQLiteStore(db_path)
             unchanged = store.get_content_queue_item(item.id)

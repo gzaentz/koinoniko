@@ -289,6 +289,7 @@ class SocialBrainGenerator:
             skills=skills,
             strategy_summary=strategy_summary,
             draft_options=cleaned_options,
+            trends=trends,
             avoid_phrases=avoid_phrases,
             active_rules=active_rules,
             max_chars=max_chars,
@@ -867,6 +868,7 @@ def build_evaluation_prompt(
     skills: list[SkillAsset],
     strategy_summary: dict[str, object],
     draft_options: list[str],
+    trends: list[TrendItem],
     max_chars: int,
     avoid_phrases: list[str] | None = None,
     active_rules: dict[str, list[str]] | None = None,
@@ -881,8 +883,8 @@ def build_evaluation_prompt(
     length_section = length_prompt_section(request, max_chars)
     anchor = workspace_anchor_from_active_rules(active_rules or {})
     natural_voice_section = natural_voice_prompt_section(anchor=anchor)
-    structure_section = structure_variation_prompt_section(request, [])
-    product_mention_section = product_mention_prompt_section(anchor, request=request, trends=[])
+    structure_section = structure_variation_prompt_section(request, trends)
+    product_mention_section = product_mention_prompt_section(anchor, request=request, trends=trends)
     return f"""Choose the best X post for this workspace and clean it up lightly.
 
 Original request:
@@ -1220,6 +1222,7 @@ def repair_draft_against_rules(
             violations=violations,
             request=request,
             bundle=bundle,
+            trends=trends,
             active_rules=active_rules,
             max_chars=max_chars,
         )
@@ -1642,6 +1645,7 @@ def build_rule_repair_prompt(
     violations: list[str],
     request: DraftRequest,
     bundle: ContextBundle,
+    trends: list[TrendItem],
     active_rules: dict[str, list[str]] | None = None,
     max_chars: int,
 ) -> str:
@@ -1649,8 +1653,8 @@ def build_rule_repair_prompt(
     length_section = length_prompt_section(request, max_chars)
     anchor = workspace_anchor_name(bundle, active_rules or {})
     natural_voice_section = natural_voice_prompt_section(bundle, anchor=anchor)
-    product_mention_section = product_mention_prompt_section(anchor, request=request, trends=[])
-    structure_section = structure_variation_prompt_section(request, [])
+    product_mention_section = product_mention_prompt_section(anchor, request=request, trends=trends)
+    structure_section = structure_variation_prompt_section(request, trends)
     return f"""Repair this X post so it follows the active Voice and context rules.
 
 Return only the revised post text.

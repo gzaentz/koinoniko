@@ -330,6 +330,7 @@ def revise_queued_post(
             skills=skills,
             strategy_summary=strategy_summary,
             draft_options=options,
+            trends=trends,
             avoid_phrases=avoid_phrases,
             active_rules=active_rules,
             max_chars=max_chars,
