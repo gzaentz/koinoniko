@@ -974,6 +974,7 @@ def build_recent_output_context(
         [
             "Avoid repeating those first-line shapes, final-line moves, and Leadpoet grammar fingerprints.",
             "Treat any Leadpoet grammar fingerprint used 3+ times in this batch as saturated; choose a different product role or omit the name if the point still works.",
+            "Treat any layout fingerprint used 3+ times in this batch as saturated; change paragraph count, line breaks, or where the product name appears.",
             "If Leadpoet appears, change its sentence role, placement, and neighboring words from the recent examples.",
         ]
     )
@@ -1094,7 +1095,20 @@ def recent_output_row(text: str, *, source: str, topic_scope: str = "same_topic"
 
 
 def clean_recent_output_text(text: str) -> str:
-    return "\n".join(line.strip() for line in str(text or "").strip().splitlines() if line.strip())
+    lines: list[str] = []
+    previous_blank = False
+    for raw_line in str(text or "").strip().splitlines():
+        line = raw_line.strip()
+        if not line:
+            if lines and not previous_blank:
+                lines.append("")
+                previous_blank = True
+            continue
+        lines.append(line)
+        previous_blank = False
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\n".join(lines)
 
 
 def last_nonempty_text_line(text: str) -> str:
@@ -2305,6 +2319,7 @@ def recent_output_repetition_violations(
     last = normalize_recent_output_fragment(last_nonempty_text_line(cleaned))
     leadpoet_sentence = normalize_recent_output_fragment(first_sentence_with_word(cleaned, "Leadpoet"))
     leadpoet_grammar = leadpoet_sentence_grammar_fingerprint(first_sentence_with_word(cleaned, "Leadpoet"))
+    layout = recent_output_layout(cleaned)
     violations: list[str] = []
     for row in recent_output_rows or []:
         row_first = normalize_recent_output_fragment(row.get("first_line", ""))
@@ -2323,6 +2338,10 @@ def recent_output_repetition_violations(
         grammar_counts = recent_output_batch_summary.get("leadpoet_grammar_counts", {})
         if isinstance(grammar_counts, dict) and int(grammar_counts.get(leadpoet_grammar, 0) or 0) >= 3:
             violations.append(f"change saturated batch Leadpoet grammar: {leadpoet_grammar}")
+    if layout and recent_output_batch_summary:
+        layout_counts = recent_output_batch_summary.get("layout_counts", {})
+        if isinstance(layout_counts, dict) and int(layout_counts.get(layout, 0) or 0) >= 3:
+            violations.append(f"change saturated batch layout: {layout}")
     return dedupe_preserve_order(violations)
 
 
@@ -2686,6 +2705,7 @@ Rules:
 - If a violation mentions a formulaic Leadpoet modal lead-in, make Leadpoet the object, mechanism, or constraint inside the sentence instead of the sentence subject.
 - If a violation mentions "that is where Leadpoet...", make the point concrete without using that wrapper.
 - If a violation mentions a formulaic Leadpoet closer, move the product name inside a concrete mechanism or remove it.
+- If a violation mentions saturated batch layout, change the post structure: paragraph count, line breaks, opener shape, or product placement.
 - Do not add unsupported claims, anecdotes, proof, metrics, or customer stories.
 - Do not include the exact words "not just".
 - Do not refuse, caveat, or ask for more details. Return a publishable post.

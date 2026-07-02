@@ -850,7 +850,7 @@ layouts, and Leadpoet grammar fingerprints. Newer queue items are prioritized so
 outputs guide the next draft. Final drafts are also repaired if they exactly repeat a
 recent opener or closer, repeat a Leadpoet sentence, or reuse a recent Leadpoet grammar fingerprint.
 During batch audits, the generator also summarizes all prior batch output grammar and
-treats any Leadpoet grammar fingerprint used 3+ times as saturated.
+layout, then treats any Leadpoet grammar or layout fingerprint used 3+ times as saturated.
 The user only reviews the final queued post, not the internal brief.
 
 `Use in Post` on a trend or `Use Pattern` on a pattern opens Create Post with that source preselected. Generated output still enters the review queue; it does not publish automatically.
