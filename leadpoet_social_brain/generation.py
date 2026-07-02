@@ -944,6 +944,7 @@ def build_recent_output_context(
     for row in rows:
         details = [
             f"source={row['source']}",
+            f"scope={row['topic_scope']}",
             f"layout={row['layout']}",
         ]
         if row["first_line"]:
@@ -971,36 +972,53 @@ def recent_output_rows(
 ) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     seen: set[str] = set()
-    for text in reversed((extra_texts or [])[-limit:]):
-        row = recent_output_row(text, source="batch")
+
+    def append_row(text: str, *, source: str, topic_scope: str) -> bool:
+        row = recent_output_row(text, source=source, topic_scope=topic_scope)
         if not row["fingerprint"] or row["fingerprint"] in seen:
-            continue
+            return False
         rows.append(row)
         seen.add(row["fingerprint"])
-        if len(rows) >= limit:
+        return len(rows) >= limit
+
+    for text in reversed((extra_texts or [])[-limit:]):
+        if append_row(text, source="batch", topic_scope="batch"):
             return rows
-    for item in store.list_content_queue(platform=request.platform, limit=50):
-        if request.topic and item.topic and item.topic != request.topic:
-            continue
-        row = recent_output_row(item.text, source=f"queue:{item.status}")
-        if row["fingerprint"] in seen:
-            continue
-        rows.append(row)
-        seen.add(row["fingerprint"])
-        if len(rows) >= limit:
+
+    queue_items = store.list_content_queue(platform=request.platform, limit=80)
+    same_topic_queue = [item for item in queue_items if recent_output_same_topic(request.topic, item.topic)]
+    other_topic_queue = [item for item in queue_items if not recent_output_same_topic(request.topic, item.topic)]
+    for item in [*same_topic_queue, *other_topic_queue]:
+        topic_scope = "same_topic" if recent_output_same_topic(request.topic, item.topic) else "other_topic"
+        if append_row(item.text, source=f"queue:{item.status}", topic_scope=topic_scope):
             return rows
-    for post in store.list_posts(platform=request.platform, topic=request.topic or None, limit=limit * 2):
-        row = recent_output_row(post.text, source="published")
-        if row["fingerprint"] in seen:
-            continue
-        rows.append(row)
-        seen.add(row["fingerprint"])
-        if len(rows) >= limit:
+
+    same_topic_posts = store.list_posts(platform=request.platform, topic=request.topic or None, limit=limit * 2)
+    if request.topic:
+        other_topic_posts = [
+            post for post in store.list_posts(platform=request.platform, limit=limit * 4)
+            if not recent_output_same_topic(request.topic, post.topic)
+        ]
+    else:
+        other_topic_posts = []
+    for post in [*same_topic_posts, *other_topic_posts]:
+        topic_scope = "same_topic" if recent_output_same_topic(request.topic, post.topic) else "other_topic"
+        if append_row(post.text, source="published", topic_scope=topic_scope):
             break
     return rows
 
 
-def recent_output_row(text: str, *, source: str) -> dict[str, str]:
+def recent_output_same_topic(request_topic: str, item_topic: str | None) -> bool:
+    if not request_topic or not item_topic:
+        return True
+    return clean_recent_topic(request_topic) == clean_recent_topic(item_topic)
+
+
+def clean_recent_topic(topic: str) -> str:
+    return " ".join(str(topic or "").lower().split())
+
+
+def recent_output_row(text: str, *, source: str, topic_scope: str = "same_topic") -> dict[str, str]:
     cleaned = clean_recent_output_text(text)
     first = truncate_for_prompt(first_sentence_or_line(cleaned), 110)
     last = truncate_for_prompt(last_nonempty_text_line(cleaned), 110)
@@ -1009,6 +1027,7 @@ def recent_output_row(text: str, *, source: str) -> dict[str, str]:
     fingerprint = "|".join([first.lower(), last.lower(), leadpoet_sentence.lower(), layout])
     return {
         "source": source,
+        "topic_scope": topic_scope,
         "first_line": first,
         "last_line": last,
         "leadpoet_sentence": leadpoet_sentence,

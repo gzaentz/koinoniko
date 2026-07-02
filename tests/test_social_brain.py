@@ -1809,6 +1809,43 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(rows[0]["leadpoet_sentence"], "The useful Leadpoet question is why this account now.")
             store.close()
 
+    def test_generator_includes_cross_topic_recent_output_anti_sameness_context(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            store.save_content_queue_item(
+                ContentQueueItem(
+                    text=(
+                        "Lead generation still mistakes names for timing.\n\n"
+                        "The useful Leadpoet question is why this account now."
+                    ),
+                    topic="lead generation",
+                    post_type="founder_insight",
+                    scheduled_at="2026-07-03T10:00:00+00:00",
+                )
+            )
+            provider = FakeProvider()
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle="account timing beats more generated email",
+                ),
+                variants=1,
+            )[0]
+
+            for prompt in provider.prompts[:3]:
+                self.assertIn("Recent Output Anti-Sameness:", prompt)
+                self.assertIn("scope=other_topic", prompt)
+                self.assertIn("The useful Leadpoet question is why this account now.", prompt)
+            rows = draft.context_snapshot["recent_output_anti_sameness"]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["source"], "queue:needs_review")
+            self.assertEqual(rows[0]["topic_scope"], "other_topic")
+            store.close()
+
     def test_generation_retries_when_writer_options_are_unusable(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
