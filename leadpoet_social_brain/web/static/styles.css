@@ -1953,6 +1953,10 @@ main {
   width: min(980px, 100%);
 }
 
+.queue-more-details-modal-card {
+  width: min(760px, 100%);
+}
+
 .assistant-launcher {
   position: fixed;
   right: 24px;
@@ -2292,6 +2296,15 @@ main {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 10px;
+}
+
+.queue-detail-toolbar {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.queue-more-detail-grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
 
 .schedule-shortcuts {

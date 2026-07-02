@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260629-trend-scroll-date">
+    <link rel="stylesheet" href="/static/styles.css?v=20260701-queue-details">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -463,6 +463,20 @@
       </div>
     </section>
 
+    <section class="modal hidden" id="queueMoreDetailsModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="queueMoreDetailsModal"></div>
+      <div class="modal-card queue-more-details-modal-card">
+        <div class="modal-header">
+          <div>
+            <span class="eyebrow">Queue</span>
+            <h2>More Details</h2>
+          </div>
+          <button class="icon-button" data-close-modal="queueMoreDetailsModal" aria-label="Close">x</button>
+        </div>
+        <div id="queueMoreDetailsBody" class="detail-stack"></div>
+      </div>
+    </section>
+
     <section class="modal hidden" id="trendModal" aria-hidden="true">
       <div class="modal-backdrop" data-close-modal="trendModal"></div>
       <div class="modal-card wide">
@@ -680,6 +694,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260629-trend-scroll-date"></script>
+    <script src="/static/app.js?v=20260701-queue-details"></script>
   </body>
 </html>

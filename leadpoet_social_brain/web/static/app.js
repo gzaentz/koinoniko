@@ -1618,12 +1618,8 @@ function renderQueueModal() {
       <button class="secondary" type="button" onclick='setDetailSchedulePreset(event, "two_hours")'>+2 Hours</button>
       <button class="quiet-button" type="button" onclick="clearDetailSchedule(event)">Clear</button>
     </div>
-    <label>Reviewer notes<textarea id="detailNotes" rows="3">${escapeHtml(item.reviewer_notes || "")}</textarea></label>
-    <div class="detail-grid">
-      ${detail("Quality", qualityLabel(item.quality_mode) || "Unknown")}
-      ${detail("Trend/source", trendSummary(item) || "None")}
-      ${detail("Why suggested", item.angle || item.reviewer_notes || "Suggested from Social Brain context.")}
-      ${detail("Draft", item.draft_id || "No draft link")}
+    <div class="queue-detail-toolbar">
+      <button class="secondary" type="button" onclick="openQueueMoreDetails(event)">More Details</button>
     </div>
     <div class="modal-actions">
       <button onclick="saveQueueDetail(event)">Save changes</button>
@@ -1644,12 +1640,41 @@ function revisionList(versions) {
         <button class="secondary" onclick='acceptRevision(event, ${jsArg(version.queue_id)}, ${jsArg(version.id)})'>Accept revision</button>
       </article>
     `).join("")
-    : `<p class="muted">Revision options will appear here. Accepting one updates the draft but does not approve it.</p>`;
+    : "";
+}
+
+window.openQueueMoreDetails = (event) => {
+  event.preventDefault();
+  renderQueueMoreDetailsModal();
+  openModal("queueMoreDetailsModal");
+};
+
+function currentReviewerNotes(item) {
+  const input = $("queueMoreDetailsNotes");
+  if (input) return input.value;
+  return item?.reviewer_notes || "";
+}
+
+function renderQueueMoreDetailsModal() {
+  const item = state.queueDetail;
+  if (!item) return;
+  $("queueMoreDetailsBody").innerHTML = `
+    <label>Reviewer notes<textarea id="queueMoreDetailsNotes" rows="5">${escapeHtml(currentReviewerNotes(item))}</textarea></label>
+    <div class="detail-grid queue-more-detail-grid">
+      ${detail("Quality", qualityLabel(item.quality_mode) || "Unknown")}
+      ${detail("Trend/source", trendSummary(item) || "None")}
+      ${detail("Why suggested", item.angle || item.reviewer_notes || "Suggested from Social Brain context.")}
+    </div>
+    <div class="modal-actions">
+      <button onclick="saveQueueDetail(event)">Save changes</button>
+    </div>
+  `;
 }
 
 window.saveQueueDetail = (event) => {
   runButton(event.currentTarget, "Saving...", async () => {
     const id = state.queueDetail.id;
+    const moreDetailsOpen = !$("queueMoreDetailsModal").classList.contains("hidden");
     const payload = await api(`/api/queue/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify({
@@ -1657,13 +1682,14 @@ window.saveQueueDetail = (event) => {
         topic: $("detailTopic").value,
         post_type: $("detailPostType").value,
         scheduled_at: $("detailScheduled").value,
-        reviewer_notes: $("detailNotes").value,
+        reviewer_notes: currentReviewerNotes(state.queueDetail),
       }),
     });
     state.queueDetail = payload.item;
     showMessage("Post updated.");
     await refresh();
     renderQueueModal();
+    if (moreDetailsOpen) renderQueueMoreDetailsModal();
   });
 };
 
