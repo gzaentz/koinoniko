@@ -834,10 +834,11 @@ Active Writing Rules also repair obvious violations such as missing Leadpoet pos
 blocked phrases, formulaic `Leadpoet is...` / `For Leadpoet...` / `Leadpoet should...`
 style modal phrasing, `That is where Leadpoet...` wrappers, `That is the Leadpoet...`
 closers, `The Leadpoet ... is...` definitions, repeated `Leadpoet belongs...` style
-fallback lead-ins, or em dashes.
+fallback lead-ins, repeated direct `Leadpoet owns...` / `Leadpoet makes...` style
+subject-verb lead-ins, or em dashes.
 The natural writer also receives a per-option variation map so draft options use different
-structures, layouts, rhythms, product mention lanes, and product placement targets before
-the evaluator chooses the final post.
+structures, layouts, rhythms, product mention lanes, product placement targets, and
+product mention syntax targets before the evaluator chooses the final post.
 The user only reviews the final queued post, not the internal brief.
 
 `Use in Post` on a trend or `Use Pattern` on a pattern opens Create Post with that source preselected. Generated output still enters the review queue; it does not publish automatically.

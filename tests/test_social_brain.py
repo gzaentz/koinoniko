@@ -2209,7 +2209,7 @@ class SocialBrainTest(unittest.TestCase):
                 ),
                 "repair": (
                     "Most sales AI still starts with the email.\n\n"
-                    "Leadpoet starts with whether this account has a reason to care now."
+                    "Inside Leadpoet, the starting point is whether this account has a reason to care now."
                 ),
                 "expected_violations": ["future of", "as X continues", "scale language"],
                 "disallowed": ["as ai continues", "the future of", "at scale", "unlock"],
@@ -2245,7 +2245,7 @@ class SocialBrainTest(unittest.TestCase):
                 "bad_final": "It's not about more outbound. It's about better timing.\n\nLeadpoet makes that possible.",
                 "repair": (
                     "More outbound is the easy part.\n\n"
-                    "Leadpoet makes timing useful when an account has a real reason to listen."
+                    "Timing gets useful inside Leadpoet when an account has a real reason to listen."
                 ),
                 "expected_violations": ["it's not about X"],
                 "disallowed": ["it's not about", "it's about", "leadpoet is"],
@@ -2265,7 +2265,7 @@ class SocialBrainTest(unittest.TestCase):
                 ),
                 "repair": (
                     "The AI SDR debate keeps landing in the same place.\n\n"
-                    "The hard part is knowing why this account should hear from you now. Leadpoet starts there."
+                    "The hard part is knowing why this account should hear from you now. That question gets specific inside Leadpoet."
                 ),
                 "expected_violations": ["unsupported first-person", "thought-leadership"],
                 "disallowed": ["i spent the morning", "the takeaway"],
@@ -2428,6 +2428,47 @@ class SocialBrainTest(unittest.TestCase):
             )
             self.assertNotIn("Leadpoet should", draft.text)
             self.assertIn("avoid formulaic Leadpoet modal lead-in", provider.prompts[-1])
+            self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
+            store.close()
+
+    def test_generation_repairs_formulaic_leadpoet_subject_verb_leadin(self):
+        bad_text = "Static records answer who exists.\n\nLeadpoet owns the account-timing question."
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = SequentialProvider(
+                [
+                    strategy_json(
+                        thesis="Buyer timing needs account context.",
+                        concrete_detail="buyer timing",
+                        source_bridge="Saved context points to buyer timing.",
+                    ),
+                    "Static records answer who exists.\n\nThe account signal should explain why now.",
+                    "The CRM can be correct and still late.\n\nTiming has to choose the account.",
+                    "More names do not fix judgment.\n\nThe useful signal is the reason now.",
+                    evaluation_json(bad_text),
+                    bad_text,
+                    bad_text,
+                ]
+            )
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle="buyer timing beats generic data",
+                )
+            )[0]
+
+            self.assertEqual(
+                draft.text,
+                "Static records answer who exists.\n\n"
+                "The account-timing question gets specific inside Leadpoet.",
+            )
+            self.assertNotIn("Leadpoet owns", draft.text)
+            self.assertFalse(any(leadpoet_bad_phrase_counts(draft.text).values()), draft.text)
+            self.assertIn("avoid formulaic Leadpoet subject-verb lead-in", provider.prompts[-1])
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
             store.close()
 
@@ -2809,8 +2850,8 @@ class SocialBrainTest(unittest.TestCase):
                         "Buyer timing is where the Leadpoet signal starts.\n\nThe email is downstream.",
                         "A rep does not need another prettier list.\n\nThe account-change moment is Leadpoet's lane.\n\nThat is when copy becomes useful.",
                         "- Signal\n- Context\n- A reason now\n\nThe account should be worth action before the sequence starts.",
-                        "Leadpoet focuses near the handoff from signal to sequence.\n\nThe contact record is only the start.",
-                        "What changes when context is real?\n\nCopy comes later.\n\nLeadpoet starts with the account reason, not the first sentence.",
+                        "The handoff from signal to sequence is where Leadpoet enters.\n\nThe contact record is only the start.",
+                        "What changes when context is real?\n\nCopy comes later.\n\nInside Leadpoet, the account reason comes before the first sentence.",
                         "The CRM record can be perfect.\n\nTiming changes the account choice before Leadpoet earns the mention.\n\nStill too late is still too late.",
                     ]
                     return [repairs[(self.repair_count - 1) % len(repairs)]]
@@ -2940,8 +2981,8 @@ class SocialBrainTest(unittest.TestCase):
                         "Buyer timing is where the Leadpoet signal starts.\n\nThe email is downstream.",
                         "A rep does not need another prettier list.\n\nThe account-change moment is Leadpoet's lane.\n\nThat is when copy becomes useful.",
                         "- Signal\n- Context\n- A reason now\n\nThe account should be worth action before the sequence starts.",
-                        "Leadpoet focuses near the handoff from signal to sequence.\n\nThe contact record is only the start.",
-                        "What changes when context is real?\n\nCopy comes later.\n\nLeadpoet starts with the account reason, not the first sentence.",
+                        "The handoff from signal to sequence is where Leadpoet enters.\n\nThe contact record is only the start.",
+                        "What changes when context is real?\n\nCopy comes later.\n\nInside Leadpoet, the account reason comes before the first sentence.",
                         "The CRM record can be perfect.\n\nTiming changes the account choice before Leadpoet earns the mention.\n\nStill too late is still too late.",
                     ]
                     return [repairs[(self.repair_count - 1) % len(repairs)]]
@@ -3164,9 +3205,9 @@ class SocialBrainTest(unittest.TestCase):
                     return [strategy_json()]
                 if "Write 3 X draft options" in prompt:
                     return [
-                        "Static records answer who exists.\n\nThe useful question is why now. Leadpoet owns that part.",
-                        "The CRM can be correct.\n\nThe useful question is why now. Leadpoet owns that part.",
-                        "More names do not fix judgment.\n\nThe useful question is why now. Leadpoet owns that part.",
+                        "Static records answer who exists.\n\nThe useful question stays inside Leadpoet.",
+                        "The CRM can be correct.\n\nThe useful question stays inside Leadpoet.",
+                        "More names do not fix judgment.\n\nThe useful question stays inside Leadpoet.",
                     ][:variants]
                 if "Choose the best X post" in prompt:
                     first_lines = [
@@ -3177,16 +3218,16 @@ class SocialBrainTest(unittest.TestCase):
                         "A sales agent needs timing before copy.",
                     ]
                     endings = [
-                        "Leadpoet owns that part.",
+                        "The useful question stays inside Leadpoet.",
                         "The Leadpoet edge stays there.",
                         "The Leadpoet edge remains there.",
-                        "Leadpoet keeps that constraint visible.",
-                        "Leadpoet makes that constraint visible.",
+                        "That constraint stays visible inside Leadpoet.",
+                        "The timing reason gets specific inside Leadpoet.",
                     ]
                     index = self.final_count % len(first_lines)
                     self.final_count += 1
                     return [evaluation_json(f"{first_lines[index]}\n\nBuyer timing should choose the account. {endings[index]}")]
-                return ["Buyer timing should choose the account. Leadpoet owns that part."]
+                return ["Buyer timing should choose the account. The useful question stays inside Leadpoet."]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -3230,9 +3271,9 @@ class SocialBrainTest(unittest.TestCase):
                     return [strategy_json()]
                 if "Write 3 X draft options" in prompt:
                     return [
-                        "Static records answer who exists. Leadpoet owns the timing question.",
-                        "The CRM can be correct. Leadpoet owns the timing question.",
-                        "More names do not fix judgment. Leadpoet owns the timing question.",
+                        "Static records answer who exists. Leadpoet, in that handoff, belongs near the account reason.",
+                        "The CRM can be correct. Leadpoet, in that handoff, belongs near the account reason.",
+                        "More names do not fix judgment. Leadpoet, in that handoff, belongs near the account reason.",
                     ][:variants]
                 if "Choose the best X post" in prompt:
                     first_lines = [
@@ -3244,8 +3285,8 @@ class SocialBrainTest(unittest.TestCase):
                     ]
                     index = self.final_count % len(first_lines)
                     self.final_count += 1
-                    return [evaluation_json(f"{first_lines[index]} Leadpoet owns the timing question.")]
-                return ["Static records answer who exists. Leadpoet owns the timing question."]
+                    return [evaluation_json(f"{first_lines[index]} Leadpoet, in that handoff, belongs near the account reason.")]
+                return ["Static records answer who exists. Leadpoet, in that handoff, belongs near the account reason."]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -3294,6 +3335,9 @@ class SocialBrainTest(unittest.TestCase):
             "Leadpoet belongs close to account timing.": "leadpoet_belongs",
             "Leadpoet only matters when timing is visible.": "leadpoet_only_matters",
             "Leadpoet must make timing useful.": "leadpoet_must",
+            "The account reason gets specific inside Leadpoet.": "inside_leadpoet",
+            "The handoff is where Leadpoet enters.": "where_leadpoet_enters",
+            "Timing changes before Leadpoet earns the mention.": "before_leadpoet_earns",
         }
 
         for text, expected in cases.items():
@@ -3306,7 +3350,7 @@ class SocialBrainTest(unittest.TestCase):
             "The timing reason gets specific inside Leadpoet before copy starts.": "prepositional_tuck_in",
             "The Leadpoet signal should stay close to the account change.": "product_modifier",
             "Put Leadpoet inside the account-change check.": "product_as_object",
-            "Buyer timing changes before Leadpoet earns the mention.": "prepositional_tuck_in",
+            "Buyer timing changes before Leadpoet earns the mention.": "clause_embedded",
             "The useful Leadpoet question is why this account now.": "product_modifier",
             "Buyer timing should choose the account before copy.": "no_leadpoet",
         }
@@ -3326,6 +3370,7 @@ class SocialBrainTest(unittest.TestCase):
                 "That is the Leadpoet point.",
                 "The Leadpoet signal is buyer timing.",
                 "Leadpoet belongs close to account timing.",
+                "Leadpoet owns the timing question.",
                 "Leadpoet's job is account timing.",
                 "The layer worth building starts before sequence copy.",
             ]
@@ -3341,6 +3386,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(counts["that is the leadpoet closer"], 1)
         self.assertEqual(counts["the leadpoet noun-is definition"], 1)
         self.assertEqual(counts["leadpoet fallback lead-in"], 1)
+        self.assertEqual(counts["leadpoet subject-verb lead-in"], 1)
         self.assertEqual(counts["leadpoet bet/job/role"], 1)
         self.assertEqual(counts["the layer worth building"], 1)
 
@@ -3368,22 +3414,22 @@ class SocialBrainTest(unittest.TestCase):
                     return [strategy_json()]
                 if "Write 3 X draft options" in prompt:
                     return [
-                        "Static records answer who exists.\n\nLeadpoet owns timing.",
-                        "The CRM record can be correct.\n\nLeadpoet owns timing.",
-                        "Account lists can still be late.\n\nLeadpoet owns timing.",
+                        "Static records answer who exists.\n\nThe timing question stays inside Leadpoet.",
+                        "The CRM record can be correct.\n\nThe timing question stays inside Leadpoet.",
+                        "Account lists can still be late.\n\nThe timing question stays inside Leadpoet.",
                     ][:variants]
                 if "Choose the best X post" in prompt:
                     texts = [
-                        "Static records answer who exists.\n\nLeadpoet owns timing.",
-                        "The CRM record can be correct.\n\nLeadpoet owns timing.",
-                        "Account lists can still be late.\n\nLeadpoet owns timing.",
-                        "Generic data ages quickly.\n\nLeadpoet owns timing.",
-                        "Buyer context changes prioritization.\n\nLeadpoet owns timing.",
+                        "Static records answer who exists.\n\nThe timing question stays inside Leadpoet.",
+                        "The CRM record can be correct.\n\nThe timing question stays inside Leadpoet.",
+                        "Account lists can still be late.\n\nThe timing question stays inside Leadpoet.",
+                        "Generic data ages quickly.\n\nThe timing question stays inside Leadpoet.",
+                        "Buyer context changes prioritization.\n\nThe timing question stays inside Leadpoet.",
                     ]
                     text = texts[self.final_count % len(texts)]
                     self.final_count += 1
                     return [evaluation_json(text)]
-                return ["Static records answer who exists.\n\nLeadpoet owns timing."]
+                return ["Static records answer who exists.\n\nThe timing question stays inside Leadpoet."]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -3428,9 +3474,9 @@ class SocialBrainTest(unittest.TestCase):
                     return [strategy_json()]
                 if "Write 3 X draft options" in prompt:
                     return [
-                        "Static records answer who exists.\n\nLeadpoet owns the timing question.",
-                        "The CRM can be correct and still late.\n\nLeadpoet owns the timing question.",
-                        "More names do not fix judgment.\n\nLeadpoet owns the timing question.",
+                        "Static records answer who exists.\n\nThe Leadpoet signal points to timing.",
+                        "The CRM can be correct and still late.\n\nThe Leadpoet signal points to timing.",
+                        "More names do not fix judgment.\n\nThe Leadpoet signal points to timing.",
                     ][:variants]
                 if "Choose the best X post" in prompt:
                     first_lines = [
@@ -3442,8 +3488,8 @@ class SocialBrainTest(unittest.TestCase):
                     ]
                     line = first_lines[self.final_count % len(first_lines)]
                     self.final_count += 1
-                    return [evaluation_json(f"{line}\n\nLeadpoet owns the timing question.")]
-                return ["Leadpoet owns the timing question."]
+                    return [evaluation_json(f"{line}\n\nThe Leadpoet signal points to timing.")]
+                return ["The Leadpoet signal points to timing."]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -3472,7 +3518,7 @@ class SocialBrainTest(unittest.TestCase):
                 save_drafts=False,
             )
 
-            self.assertEqual(payload["leadpoet_mention_pattern_counts"]["leadpoet_owns"], 5)
+            self.assertEqual(payload["leadpoet_mention_pattern_counts"]["leadpoet_signal"], 5)
             self.assertTrue(
                 any("Leadpoet mention phrasing is too concentrated" in warning for warning in payload["warnings"])
             )
@@ -3488,9 +3534,9 @@ class SocialBrainTest(unittest.TestCase):
                     return [strategy_json()]
                 if "Write 3 X draft options" in prompt:
                     return [
-                        "Static records answer who exists.\n\nLeadpoet owns the timing question.",
-                        "The CRM can be correct and still late.\n\nLeadpoet makes the timing visible.",
-                        "More names do not fix judgment.\n\nLeadpoet keeps the account reason close.",
+                        "Static records answer who exists.\n\nThe Leadpoet signal points to timing.",
+                        "The CRM can be correct and still late.\n\nThe useful Leadpoet question is why now.",
+                        "More names do not fix judgment.\n\nThe Leadpoet edge stays there.",
                     ][:variants]
                 if "Choose the best X post" in prompt:
                     first_lines = [
@@ -3500,11 +3546,17 @@ class SocialBrainTest(unittest.TestCase):
                         "Context only matters when it changes action.",
                         "A sales agent needs timing before copy.",
                     ]
-                    verbs = ["owns", "makes", "keeps", "turns", "starts with"]
+                    endings = [
+                        "The Leadpoet signal points to timing.",
+                        "The useful Leadpoet question is why now.",
+                        "The Leadpoet edge stays there.",
+                        "The Leadpoet constraint stays concrete.",
+                        "The Leadpoet side asks why this account now.",
+                    ]
                     index = self.final_count % len(first_lines)
                     self.final_count += 1
-                    return [evaluation_json(f"{first_lines[index]}\n\nLeadpoet {verbs[index]} the account-timing question.")]
-                return ["Leadpoet owns the timing question."]
+                    return [evaluation_json(f"{first_lines[index]}\n\n{endings[index]}")]
+                return ["The Leadpoet signal points to timing."]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -3533,7 +3585,7 @@ class SocialBrainTest(unittest.TestCase):
                 save_drafts=False,
             )
 
-            self.assertEqual(payload["leadpoet_actual_syntax_counts"]["product_subject_verb"], 5)
+            self.assertEqual(payload["leadpoet_actual_syntax_counts"]["product_modifier"], 5)
             self.assertTrue(
                 any("Leadpoet mention syntax" in warning for warning in payload["warnings"])
             )
@@ -3668,7 +3720,7 @@ class SocialBrainTest(unittest.TestCase):
                     evaluation_json(
                         "I spent the morning reading AI SDR posts.\n\n"
                         "The useful ones kept coming back to the same question: why this account, now?\n\n"
-                        "Leadpoet starts there."
+                        "That question gets specific inside Leadpoet."
                     ),
                 ]
             )

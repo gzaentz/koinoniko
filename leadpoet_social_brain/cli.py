@@ -108,6 +108,7 @@ LEADPOET_AUDIT_BAD_PATTERNS = [
     ("that is the leadpoet closer", r"\bthat\s+is\s+the\s+leadpoet\s+(?:job|bar|point|constraint|product belief)\b"),
     ("the leadpoet noun-is definition", r"\bthe\s+leadpoet\s+(?:product belief|signal|point|constraint|job|bar|part)\s+is\b"),
     ("leadpoet fallback lead-in", r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:belongs|only\s+matters|must)\b"),
+    ("leadpoet subject-verb lead-in", r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:owns?|makes?|starts?|keeps?|turns?|focuses)\b"),
     ("leadpoet bet/job/role", r"(?m)(?:^|\n\n)\s*leadpoet(?:'s|’s)?\s+(?:bet|job|role)\b"),
     ("the layer worth building", r"(?m)(?:^|\n\n)\s*the\s+layer\s+worth\s+building\b"),
 ]
@@ -1247,12 +1248,14 @@ def leadpoet_actual_syntax(text: str) -> str:
     lowered = cleaned.lower().replace("’", "'")
     if re.match(r"leadpoet\s+(?:is|owns?|can|makes?|starts?|keeps?|turns?|focuses|needs?|should|has\s+to|belongs|must|only\s+matters)\b", lowered):
         return "product_subject_verb"
+    if re.search(r"\b(?:put|place|keep|carry|bring|move|tuck|embed|mention|name|use)\b[^.!?]{0,80}\bleadpoet\b", lowered):
+        return "product_as_object"
+    if re.search(r"\b(?:before|after)\s+leadpoet\s+\w+\b", lowered):
+        return "clause_embedded"
     if re.search(r"\b(?:inside|in|into|through|within|before|after|around|near|next\s+to)\s+leadpoet\b", lowered):
         return "prepositional_tuck_in"
     if re.search(r"\bleadpoet's\s+\w+|\bleadpoet\s+(?:signal|line|mention|lane|edge|question|constraint|part|work|side|wedge)\b", lowered):
         return "product_modifier"
-    if re.search(r"\b(?:put|place|keep|carry|bring|move|tuck|embed|mention|name|use)\s+leadpoet\b", lowered):
-        return "product_as_object"
     if re.search(r"\bleadpoet\b[^.!?]{0,80}\b(?:before|after|when|where|if|because|as)\b", lowered):
         return "clause_embedded"
     if re.match(r"(?:the|a|that|this)\b.*\bleadpoet\b", lowered):
@@ -1361,6 +1364,12 @@ def leadpoet_mention_pattern(text: str) -> str:
         return "leadpoet_can"
     if re.search(r"\bleadpoet\s+focuses\b", text, flags=re.I):
         return "leadpoet_focuses"
+    if re.search(r"\binside\s+leadpoet\b", text, flags=re.I):
+        return "inside_leadpoet"
+    if re.search(r"\bwhere\s+leadpoet\s+enters\b", text, flags=re.I):
+        return "where_leadpoet_enters"
+    if re.search(r"\bbefore\s+leadpoet\s+earns\b", text, flags=re.I):
+        return "before_leadpoet_earns"
     if re.search(r"(?m)^\s*leadpoet\b", text, flags=re.I):
         return "leadpoet_starts_line"
     if re.search(r"\bleadpoet(?:'s|’s)\s+\w+", text, flags=re.I):

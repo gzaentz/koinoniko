@@ -82,6 +82,7 @@ LEADPOET_DEFINITION_PATTERNS = [
     (r"\bthat\s+is\s+the\s+leadpoet\s+(?:job|bar|point|constraint|product belief)\b", "avoid formulaic 'That is the Leadpoet...' closer"),
     (r"\bthe\s+leadpoet\s+(?:product belief|signal|point|constraint|job|bar|part)\s+is\b", "avoid formulaic 'The Leadpoet ... is...' product definition"),
     (r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:belongs|only\s+matters|must)\b", "avoid formulaic Leadpoet fallback lead-in"),
+    (r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:owns?|makes?|starts?|keeps?|turns?|focuses)\b", "avoid formulaic Leadpoet subject-verb lead-in"),
     (r"(?m)(?:^|\n\n)\s*leadpoet(?:'s|’s)?\s+(?:bet|job|role)\b", "avoid formulaic Leadpoet closer"),
     (r"(?m)(?:^|\n\n)\s*the layer worth building\b", "avoid generic 'layer worth building' closer"),
 ]
@@ -1727,6 +1728,12 @@ def deterministic_leadpoet_definition_repair(
         flags=re.I,
     )
     repaired = re.sub(
+        r"(?m)(^|(?<=[.!?])\s+|\n\n)(\s*)Leadpoet\s+(owns?|makes?|starts?|keeps?|turns?|focuses)\s+([^.!?\n]*(?:[.!?]|$))",
+        lambda match: leadpoet_subject_verb_replacement(match, product_lane=product_lane),
+        repaired,
+        flags=re.I,
+    )
+    repaired = re.sub(
         r"(?m)(^|(?<=[.!?])\s+|\n\n)(\s*)(?:That|This)\s+is\s+where\s+Leadpoet\s+([^.!?\n]*(?:[.!?]|$))",
         lambda match: leadpoet_where_leadin_replacement(match, product_lane=product_lane),
         repaired,
@@ -1834,6 +1841,54 @@ def leadpoet_modal_leadin_replacement(match: re.Match[str], *, product_lane: str
         "implicit product belief": "Inside Leadpoet, keep the belief concrete: {body}.",
     }
     replacement = templates.get(product_lane, templates["quiet embedded name"]).format(body=body)
+    if ending != "." and replacement.endswith("."):
+        replacement = f"{replacement[:-1]}{ending}"
+    return f"{prefix}{indent}{replacement}"
+
+
+def leadpoet_subject_verb_replacement(match: re.Match[str], *, product_lane: str) -> str:
+    prefix = match.group(1) or ""
+    indent = match.group(2) or ""
+    verb = (match.group(3) or "").lower()
+    body = " ".join((match.group(4) or "").strip().split())
+    ending = "."
+    if body and body[-1] in ".!?":
+        ending = body[-1]
+        body = body[:-1].strip()
+    body = body or "buyer timing visible"
+    lowered_body = body.lower()
+    if product_lane == "no-name wedge":
+        replacement = f"The useful wedge is buyer timing: {body[0].lower() + body[1:]}{ending}"
+    elif verb.startswith("own"):
+        if "timing" in lowered_body or "account" in lowered_body:
+            replacement = "The account-timing question gets specific inside Leadpoet."
+        else:
+            replacement = f"Keep that part concrete inside Leadpoet: {body[0].lower() + body[1:]}{ending}"
+    elif verb.startswith("make"):
+        replacement = f"Inside Leadpoet, the useful test is whether it can make {body[0].lower() + body[1:]}{ending}"
+    elif verb.startswith("start"):
+        tail = body[5:].strip() if lowered_body.startswith("with ") else body
+        tail = tail or "buyer timing"
+        replacement = f"Inside Leadpoet, the starting point is {tail[0].lower() + tail[1:]}{ending}"
+    elif verb.startswith("keep"):
+        replacement = f"Inside Leadpoet, keep {body[0].lower() + body[1:]}{ending}"
+    elif verb.startswith("turn"):
+        if " into " in lowered_body:
+            left, right = re.split(r"\s+into\s+", body, maxsplit=1, flags=re.I)
+            replacement = f"Inside Leadpoet, {left[0].lower() + left[1:]} becomes {right}{ending}"
+        else:
+            replacement = f"Inside Leadpoet, that turn has to make {body[0].lower() + body[1:]}{ending}"
+    elif verb.startswith("focus"):
+        if lowered_body.startswith("on "):
+            tail = body[3:].strip()
+            replacement = f"{tail[0].upper() + tail[1:] if tail else 'Buyer timing'} is the part to keep specific inside Leadpoet."
+        elif lowered_body.startswith("near "):
+            tail = body[5:].strip()
+            replacement = f"Keep the Leadpoet mention near {tail}{ending}"
+        else:
+            replacement = f"Inside Leadpoet, keep the focus on {body[0].lower() + body[1:]}{ending}"
+    else:
+        replacement = f"Inside Leadpoet, keep the mechanism concrete: {body[0].lower() + body[1:]}{ending}"
     if ending != "." and replacement.endswith("."):
         replacement = f"{replacement[:-1]}{ending}"
     return f"{prefix}{indent}{replacement}"
