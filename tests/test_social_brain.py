@@ -26,6 +26,7 @@ from leadpoet_social_brain.content_queue import create_post_x, plan_week_x, post
 from leadpoet_social_brain.cli import (
     build_naturalness_audit,
     build_parser as build_cli_parser,
+    leadpoet_actual_syntax,
     leadpoet_bad_phrase_counts,
     leadpoet_mention_pattern,
     leadpoet_sentence_position,
@@ -45,12 +46,14 @@ from leadpoet_social_brain.generation import (
     primary_layout_target,
     primary_product_mention_lane,
     primary_product_mention_placement_target,
+    primary_product_mention_syntax_target,
     primary_structure_shape,
     selected_closing_targets,
     selected_human_rhythm_targets,
     selected_layout_targets,
     selected_product_mention_lanes,
     selected_product_mention_placement_targets,
+    selected_product_mention_syntax_targets,
     selected_structure_shapes,
     workspace_anchor_candidates,
 )
@@ -1502,6 +1505,36 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(primary_product_mention_placement_target(request_a, [trend_a])[0], placements_a[0])
         self.assertEqual(primary_product_mention_placement_target(request_b, [trend_b])[0], placements_b[0])
 
+    def test_product_mention_syntax_targets_rotate_across_trends(self):
+        primary_syntaxes = set()
+        for index in range(12):
+            trend = TrendItem(
+                id=f"syntax_trend_{index}",
+                title=f"Syntax trend {index}",
+                source_type="web",
+                topic="sales AI",
+                summary="Context layer",
+                why_it_matters="It proves context matters.",
+                leadpoet_angle="Buyer timing beats generic data.",
+                date=utc_now(),
+            )
+            request = DraftRequest(
+                platform="x",
+                topic="sales AI",
+                post_type="founder_insight",
+                angle="buyer timing beats generic data",
+                trend_ids=[trend.id],
+            )
+
+            syntaxes = [name for name, _ in selected_product_mention_syntax_targets(request, [trend], count=4)]
+
+            self.assertEqual(len(syntaxes), 4)
+            self.assertEqual(len(set(syntaxes)), 4)
+            self.assertEqual(primary_product_mention_syntax_target(request, [trend])[0], syntaxes[0])
+            primary_syntaxes.add(syntaxes[0])
+
+        self.assertGreaterEqual(len(primary_syntaxes), 4)
+
     def test_workspace_anchor_candidates_respect_product_placement(self):
         text = "Buyer timing should choose the account.\n\nCopy comes later."
         anchor = "The account-timing question comes before louder outbound. Leadpoet owns that part."
@@ -1648,12 +1681,14 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("primary_structure_option", saved_draft.context_snapshot)
             self.assertIn("primary_product_mention_lane", saved_draft.context_snapshot)
             self.assertIn("primary_product_mention_placement_target", saved_draft.context_snapshot)
+            self.assertIn("primary_product_mention_syntax_target", saved_draft.context_snapshot)
             self.assertIn("primary_layout_target", saved_draft.context_snapshot)
             self.assertIn("primary_closing_target", saved_draft.context_snapshot)
             self.assertIn("primary_human_rhythm_target", saved_draft.context_snapshot)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["structure_variation_options"]), 1)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["product_mention_options"]), 1)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["product_mention_placement_options"]), 1)
+            self.assertGreaterEqual(len(saved_draft.context_snapshot["product_mention_syntax_options"]), 1)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["layout_target_options"]), 1)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["closing_target_options"]), 1)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["human_rhythm_options"]), 1)
@@ -1668,6 +1703,10 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(
                 saved_draft.context_snapshot["primary_product_mention_placement_target"]["name"],
                 saved_draft.context_snapshot["product_mention_placement_options"][0]["name"],
+            )
+            self.assertEqual(
+                saved_draft.context_snapshot["primary_product_mention_syntax_target"]["name"],
+                saved_draft.context_snapshot["product_mention_syntax_options"][0]["name"],
             )
             self.assertEqual(
                 saved_draft.context_snapshot["primary_layout_target"]["name"],
@@ -1705,6 +1744,10 @@ class SocialBrainTest(unittest.TestCase):
             )
             self.assertIn(
                 f"product placement={saved_draft.context_snapshot['product_mention_placement_options'][0]['name']}",
+                option_lines[0],
+            )
+            self.assertIn(
+                f"product syntax={saved_draft.context_snapshot['product_mention_syntax_options'][0]['name']}",
                 option_lines[0],
             )
             self.assertIn("skills", saved_draft.context_snapshot)
@@ -2521,6 +2564,7 @@ class SocialBrainTest(unittest.TestCase):
                 "Primary human rhythm target for this request:",
                 "Primary product mention lane for this request:",
                 "Primary product mention placement target for this request:",
+                "Primary product mention syntax target for this request:",
             ]:
                 self.assertEqual(primary_line(writer_prompt, prefix), primary_line(evaluator_prompt, prefix))
                 self.assertEqual(primary_line(writer_prompt, prefix), primary_line(repair_prompt, prefix))
@@ -2761,12 +2805,12 @@ class SocialBrainTest(unittest.TestCase):
                 if "Repair this X post" in prompt:
                     self.repair_count += 1
                     repairs = [
-                        "Static records answer who exists. The Leadpoet signal can explain why this account is worth action now.",
+                        "Static records answer who exists. The why-now signal has to become usable inside Leadpoet.",
                         "Buyer timing is where the Leadpoet signal starts.\n\nThe email is downstream.",
                         "A rep does not need another prettier list.\n\nThe account-change moment is Leadpoet's lane.\n\nThat is when copy becomes useful.",
                         "- Signal\n- Context\n- A reason now\n\nThe account should be worth action before the sequence starts.",
-                        "Before sequence volume, Leadpoet owns the account-timing question.\n\nThe contact record is only the start.",
-                        "What changes when context is real?\n\nCopy comes later.\n\nThe answer is what Leadpoet has to make choose the account.",
+                        "Leadpoet focuses near the handoff from signal to sequence.\n\nThe contact record is only the start.",
+                        "What changes when context is real?\n\nCopy comes later.\n\nLeadpoet starts with the account reason, not the first sentence.",
                         "The CRM record can be perfect.\n\nTiming changes the account choice before Leadpoet earns the mention.\n\nStill too late is still too late.",
                     ]
                     return [repairs[(self.repair_count - 1) % len(repairs)]]
@@ -2852,6 +2896,10 @@ class SocialBrainTest(unittest.TestCase):
                 4,
             )
             self.assertGreaterEqual(
+                len({draft.context_snapshot["product_mention_syntax_options"][0]["name"] for draft in drafts}),
+                4,
+            )
+            self.assertGreaterEqual(
                 len({draft.context_snapshot["human_rhythm_options"][0]["name"] for draft in drafts}),
                 4,
             )
@@ -2888,12 +2936,12 @@ class SocialBrainTest(unittest.TestCase):
                 if "Repair this X post" in prompt:
                     self.repair_count += 1
                     repairs = [
-                        "Static records answer who exists. The Leadpoet signal can explain why this account is worth action now.",
+                        "Static records answer who exists. The why-now signal has to become usable inside Leadpoet.",
                         "Buyer timing is where the Leadpoet signal starts.\n\nThe email is downstream.",
                         "A rep does not need another prettier list.\n\nThe account-change moment is Leadpoet's lane.\n\nThat is when copy becomes useful.",
                         "- Signal\n- Context\n- A reason now\n\nThe account should be worth action before the sequence starts.",
-                        "Before sequence volume, Leadpoet owns the account-timing question.\n\nThe contact record is only the start.",
-                        "What changes when context is real?\n\nCopy comes later.\n\nThe answer is what Leadpoet has to make choose the account.",
+                        "Leadpoet focuses near the handoff from signal to sequence.\n\nThe contact record is only the start.",
+                        "What changes when context is real?\n\nCopy comes later.\n\nLeadpoet starts with the account reason, not the first sentence.",
                         "The CRM record can be perfect.\n\nTiming changes the account choice before Leadpoet earns the mention.\n\nStill too late is still too late.",
                     ]
                     return [repairs[(self.repair_count - 1) % len(repairs)]]
@@ -2960,12 +3008,14 @@ class SocialBrainTest(unittest.TestCase):
             self.assertGreaterEqual(len(payload["primary_structure_option_counts"]), 5)
             self.assertGreaterEqual(len(payload["primary_product_mention_lane_counts"]), 5)
             self.assertGreaterEqual(len(payload["primary_product_mention_placement_target_counts"]), 4)
+            self.assertGreaterEqual(len(payload["primary_product_mention_syntax_target_counts"]), 4)
             self.assertGreaterEqual(len(payload["primary_layout_target_counts"]), 4)
             self.assertGreaterEqual(len(payload["primary_closing_target_counts"]), 4)
             self.assertGreaterEqual(len(payload["primary_human_rhythm_target_counts"]), 4)
             self.assertGreaterEqual(len(payload["first_structure_option_counts"]), 5)
             self.assertGreaterEqual(len(payload["first_product_mention_lane_counts"]), 5)
             self.assertGreaterEqual(len(payload["leadpoet_mention_pattern_counts"]), 5)
+            self.assertGreaterEqual(len(payload["leadpoet_actual_syntax_counts"]), 3)
             self.assertGreaterEqual(len(payload["leadpoet_paragraph_position_counts"]), 3)
             self.assertGreaterEqual(len(payload["leadpoet_sentence_position_counts"]), 3)
             self.assertLess(payload["leadpoet_final_line_mentions"], 10)
@@ -3250,6 +3300,21 @@ class SocialBrainTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(leadpoet_mention_pattern(text), expected)
 
+    def test_leadpoet_actual_syntax_classifies_product_grammar(self):
+        cases = {
+            "Leadpoet owns the account-timing question.": "product_subject_verb",
+            "The timing reason gets specific inside Leadpoet before copy starts.": "prepositional_tuck_in",
+            "The Leadpoet signal should stay close to the account change.": "product_modifier",
+            "Put Leadpoet inside the account-change check.": "product_as_object",
+            "Buyer timing changes before Leadpoet earns the mention.": "prepositional_tuck_in",
+            "The useful Leadpoet question is why this account now.": "product_modifier",
+            "Buyer timing should choose the account before copy.": "no_leadpoet",
+        }
+
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(leadpoet_actual_syntax(text), expected)
+
     def test_leadpoet_bad_phrase_counts_include_active_formulaic_rules(self):
         text = "\n\n".join(
             [
@@ -3410,6 +3475,67 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["leadpoet_mention_pattern_counts"]["leadpoet_owns"], 5)
             self.assertTrue(
                 any("Leadpoet mention phrasing is too concentrated" in warning for warning in payload["warnings"])
+            )
+            store.close()
+
+    def test_audit_naturalness_x_warns_on_repeated_leadpoet_actual_syntax(self):
+        class RepetitiveSyntaxProvider:
+            def __init__(self):
+                self.final_count = 0
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "Static records answer who exists.\n\nLeadpoet owns the timing question.",
+                        "The CRM can be correct and still late.\n\nLeadpoet makes the timing visible.",
+                        "More names do not fix judgment.\n\nLeadpoet keeps the account reason close.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    first_lines = [
+                        "Static records answer who exists.",
+                        "The CRM can be correct and still late.",
+                        "More names do not fix judgment.",
+                        "Context only matters when it changes action.",
+                        "A sales agent needs timing before copy.",
+                    ]
+                    verbs = ["owns", "makes", "keeps", "turns", "starts with"]
+                    index = self.final_count % len(first_lines)
+                    self.final_count += 1
+                    return [evaluation_json(f"{first_lines[index]}\n\nLeadpoet {verbs[index]} the account-timing question.")]
+                return ["Leadpoet owns the timing question."]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            for index in range(5):
+                store.save_trend_item(
+                    TrendItem(
+                        title=f"Trend {index}",
+                        source_type="web",
+                        topic="sales AI",
+                        summary="A trend about GTM context.",
+                        why_it_matters="It shows timing matters.",
+                        leadpoet_angle="Buyer timing needs proprietary account context.",
+                        date=utc_now(),
+                    )
+                )
+
+            payload = build_naturalness_audit(
+                store,
+                SocialBrainGenerator(store, provider=RepetitiveSyntaxProvider()),
+                count=5,
+                trend_limit=5,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+                save_drafts=False,
+            )
+
+            self.assertEqual(payload["leadpoet_actual_syntax_counts"]["product_subject_verb"], 5)
+            self.assertTrue(
+                any("Leadpoet mention syntax" in warning for warning in payload["warnings"])
             )
             store.close()
 

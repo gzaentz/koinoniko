@@ -873,6 +873,9 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
     print("Primary product mention placement target counts:")
     for key, value in sorted(payload["primary_product_mention_placement_target_counts"].items()):
         print(f"- {key}: {value}")
+    print("Primary product mention syntax target counts:")
+    for key, value in sorted(payload["primary_product_mention_syntax_target_counts"].items()):
+        print(f"- {key}: {value}")
     print("Primary layout target counts:")
     for key, value in sorted(payload["primary_layout_target_counts"].items()):
         print(f"- {key}: {value}")
@@ -884,6 +887,9 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
         print(f"- {key}: {value}")
     print("Leadpoet mention pattern counts:")
     for key, value in sorted(payload["leadpoet_mention_pattern_counts"].items()):
+        print(f"- {key}: {value}")
+    print("Leadpoet actual syntax counts:")
+    for key, value in sorted(payload["leadpoet_actual_syntax_counts"].items()):
         print(f"- {key}: {value}")
     print("Leadpoet paragraph position counts:")
     for key, value in sorted(payload["leadpoet_paragraph_position_counts"].items()):
@@ -978,6 +984,14 @@ def build_naturalness_audit(
         )
         if isinstance(product_placement_option, dict):
             primary_product_placement = str(product_placement_option.get("name") or "")
+        primary_product_syntax = ""
+        product_syntax_option = (
+            draft.context_snapshot.get("primary_product_mention_syntax_target")
+            if isinstance(draft.context_snapshot, dict)
+            else None
+        )
+        if isinstance(product_syntax_option, dict):
+            primary_product_syntax = str(product_syntax_option.get("name") or "")
         primary_layout_target = ""
         layout_option = (
             draft.context_snapshot.get("primary_layout_target")
@@ -1011,6 +1025,7 @@ def build_naturalness_audit(
                 "chars": len(draft.text),
                 "leadpoet_shape": leadpoet_mention_shape(draft.text),
                 "leadpoet_mention_pattern": leadpoet_mention_pattern(draft.text),
+                "leadpoet_actual_syntax": leadpoet_actual_syntax(draft.text),
                 "leadpoet_paragraph_position": leadpoet_text_position(draft.text),
                 "leadpoet_in_final_line": bool(re.search(r"\bleadpoet\b", last_nonempty_line(draft.text), flags=re.I)),
                 "leadpoet_sentence_position": leadpoet_sentence_position(draft.text),
@@ -1023,6 +1038,7 @@ def build_naturalness_audit(
                 "primary_product_mention_lane": primary_product_lane,
                 "first_product_mention_lane": first_product_lane,
                 "primary_product_mention_placement_target": primary_product_placement,
+                "primary_product_mention_syntax_target": primary_product_syntax,
                 "primary_layout_target": primary_layout_target,
                 "primary_closing_target": primary_closing_target,
                 "primary_human_rhythm_target": primary_human_rhythm_target,
@@ -1056,6 +1072,13 @@ def build_naturalness_audit(
     )
     if len(primary_product_placement_counts) < min(4, len(trends), count):
         warnings.append("Product mention placement guidance did not vary enough across trends.")
+    primary_product_syntax_counts = Counter(
+        str(row["primary_product_mention_syntax_target"])
+        for row in rows
+        if row["primary_product_mention_syntax_target"]
+    )
+    if len(primary_product_syntax_counts) < min(4, len(trends), count):
+        warnings.append("Product mention syntax guidance did not vary enough across trends.")
     primary_layout_target_counts = Counter(str(row["primary_layout_target"]) for row in rows if row["primary_layout_target"])
     if len(primary_layout_target_counts) < min(4, len(trends), count):
         warnings.append("Layout target guidance did not vary enough across trends.")
@@ -1081,6 +1104,16 @@ def build_naturalness_audit(
     if mention_pattern_counts and mention_pattern_counts.most_common(1)[0][1] >= max(3, (len(rows) + 1) // 2):
         pattern, pattern_count = mention_pattern_counts.most_common(1)[0]
         warnings.append(f"Leadpoet mention phrasing is too concentrated: {pattern} appears {pattern_count}/{len(rows)} times.")
+    actual_syntax_counts = Counter(
+        str(row["leadpoet_actual_syntax"])
+        for row in rows
+        if row["leadpoet_actual_syntax"] and row["leadpoet_actual_syntax"] != "no_leadpoet"
+    )
+    if actual_syntax_counts and len(actual_syntax_counts) < min(3, sum(actual_syntax_counts.values())):
+        warnings.append("Leadpoet mention syntax is not varied enough.")
+    elif actual_syntax_counts and actual_syntax_counts.most_common(1)[0][1] >= max(3, (sum(actual_syntax_counts.values()) + 1) // 2):
+        syntax, syntax_count = actual_syntax_counts.most_common(1)[0]
+        warnings.append(f"Leadpoet mention syntax is too concentrated: {syntax} appears {syntax_count}/{sum(actual_syntax_counts.values())} times.")
     leadpoet_position_counts = Counter(
         str(row["leadpoet_paragraph_position"])
         for row in rows
@@ -1143,12 +1176,14 @@ def build_naturalness_audit(
         "primary_structure_option_counts": dict(primary_structure_counts),
         "primary_product_mention_lane_counts": dict(primary_product_lane_counts),
         "primary_product_mention_placement_target_counts": dict(primary_product_placement_counts),
+        "primary_product_mention_syntax_target_counts": dict(primary_product_syntax_counts),
         "primary_layout_target_counts": dict(primary_layout_target_counts),
         "primary_closing_target_counts": dict(primary_closing_target_counts),
         "primary_human_rhythm_target_counts": dict(primary_human_rhythm_target_counts),
         "first_structure_option_counts": dict(first_structure_counts or primary_structure_counts),
         "first_product_mention_lane_counts": dict(first_product_lane_counts or primary_product_lane_counts),
         "leadpoet_mention_pattern_counts": dict(mention_pattern_counts),
+        "leadpoet_actual_syntax_counts": dict(actual_syntax_counts),
         "leadpoet_paragraph_position_counts": dict(leadpoet_position_counts),
         "leadpoet_sentence_position_counts": dict(leadpoet_sentence_position_counts),
         "leadpoet_final_line_mentions": leadpoet_final_line_mentions,
@@ -1198,6 +1233,33 @@ def leadpoet_starts_sentence(text: str) -> bool:
         if re.match(r"leadpoet\b", cleaned, flags=re.I):
             return True
     return False
+
+
+def leadpoet_actual_syntax(text: str) -> str:
+    if not re.search(r"\bleadpoet\b", text, flags=re.I):
+        return "no_leadpoet"
+    sentences = text_sentences(text)
+    leadpoet_sentence = next(
+        (sentence for sentence in sentences if re.search(r"\bleadpoet\b", sentence, flags=re.I)),
+        text,
+    )
+    cleaned = re.sub(r"^(?:[-*•]\s+|\d+[.)]\s+)", "", leadpoet_sentence.strip())
+    lowered = cleaned.lower().replace("’", "'")
+    if re.match(r"leadpoet\s+(?:is|owns?|can|makes?|starts?|keeps?|turns?|focuses|needs?|should|has\s+to|belongs|must|only\s+matters)\b", lowered):
+        return "product_subject_verb"
+    if re.search(r"\b(?:inside|in|into|through|within|before|after|around|near|next\s+to)\s+leadpoet\b", lowered):
+        return "prepositional_tuck_in"
+    if re.search(r"\bleadpoet's\s+\w+|\bleadpoet\s+(?:signal|line|mention|lane|edge|question|constraint|part|work|side|wedge)\b", lowered):
+        return "product_modifier"
+    if re.search(r"\b(?:put|place|keep|carry|bring|move|tuck|embed|mention|name|use)\s+leadpoet\b", lowered):
+        return "product_as_object"
+    if re.search(r"\bleadpoet\b[^.!?]{0,80}\b(?:before|after|when|where|if|because|as)\b", lowered):
+        return "clause_embedded"
+    if re.match(r"(?:the|a|that|this)\b.*\bleadpoet\b", lowered):
+        return "contextual_noun_phrase"
+    if re.search(r"(?m)^\s*leadpoet\b", cleaned, flags=re.I):
+        return "product_line_start"
+    return "contextual"
 
 
 def text_sentences(text: str) -> list[str]:
