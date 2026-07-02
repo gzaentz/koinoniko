@@ -1058,23 +1058,29 @@ def build_recent_output_context(
         "These recent or queued posts are not examples to copy. Use them to avoid repeated openings, closings, layouts, and Leadpoet grammar.",
     ]
     for row in rows:
+        leadpoet_fragment_is_redacted = recent_output_fragment_should_redact(row["leadpoet_sentence"])
         details = [
             f"source={row['source']}",
             f"scope={row['topic_scope']}",
             f"layout={row['layout']}",
         ]
         if row["first_line"]:
-            details.append(f"first={row['first_line']}")
+            details.append(f"first={recent_output_fragment_for_prompt(row['first_line'])}")
         if row["last_line"] and row["last_line"] != row["first_line"]:
-            details.append(f"last={row['last_line']}")
+            details.append(f"last={recent_output_fragment_for_prompt(row['last_line'])}")
         if row["leadpoet_sentence"]:
-            details.append(f"leadpoet={row['leadpoet_sentence']}")
+            details.append(f"leadpoet={recent_output_fragment_for_prompt(row['leadpoet_sentence'])}")
         if row["leadpoet_grammar"]:
             details.append(f"leadpoet_grammar={row['leadpoet_grammar']}")
         if row["leadpoet_phrase_pattern"]:
             details.append(f"leadpoet_pattern={row['leadpoet_phrase_pattern']}")
         if row["leadpoet_sentence_template"]:
-            details.append(f"leadpoet_template={row['leadpoet_sentence_template']}")
+            template = (
+                "redacted_formulaic_leadpoet_template"
+                if leadpoet_fragment_is_redacted
+                else row["leadpoet_sentence_template"]
+            )
+            details.append(f"leadpoet_template={template}")
         lines.append(f"- {'; '.join(details)}")
     if batch_summary["post_count"]:
         grammar_counts = batch_summary.get("leadpoet_grammar_counts", {})
@@ -1134,6 +1140,24 @@ def recent_output_count_summary(counts: dict[str, object]) -> str:
         key=lambda item: (-item[1], item[0]),
     )
     return ", ".join(f"{key}={value}" for key, value in items)
+
+
+def recent_output_fragment_for_prompt(fragment: str) -> str:
+    if recent_output_fragment_should_redact(fragment):
+        return "[formulaic Leadpoet sentence withheld]"
+    return fragment
+
+
+def recent_output_fragment_should_redact(fragment: str) -> bool:
+    text = " ".join(str(fragment or "").split())
+    if not text or not re.search(r"\bleadpoet\b", text, flags=re.I):
+        return False
+    lowered = text.lower().replace("’", "'")
+    if any(re.search(pattern, text, flags=re.I) for pattern, _label in LEADPOET_DEFINITION_PATTERNS):
+        return True
+    if leadpoet_phrase_pattern_fingerprint(text) in {"leadpoet_is_building", "leadpoet_is"}:
+        return True
+    return bool(re.search(r"\bleadpoet(?:'s)?\s+\w+\s+is\s+built\b", lowered))
 
 
 def recent_output_rows(

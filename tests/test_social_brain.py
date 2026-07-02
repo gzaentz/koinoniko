@@ -2060,6 +2060,47 @@ class SocialBrainTest(unittest.TestCase):
             )
             store.close()
 
+    def test_recent_output_anti_sameness_redacts_formulaic_leadpoet_seed_text(self):
+        risky_sentence = "Leadpoet's Lab is built on the same principle."
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            store.save_content_queue_item(
+                ContentQueueItem(
+                    text=(
+                        f"{risky_sentence}\n\n"
+                        "LLMs are no longer just the interface."
+                    ),
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-07-03T10:00:00+00:00",
+                )
+            )
+            provider = FakeProvider()
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="context beats generic automation",
+                ),
+                variants=1,
+            )[0]
+
+            for prompt in provider.prompts[:3]:
+                self.assertIn("Recent Output Anti-Sameness:", prompt)
+                self.assertIn("first=[formulaic Leadpoet sentence withheld]", prompt)
+                self.assertIn("leadpoet=[formulaic Leadpoet sentence withheld]", prompt)
+                self.assertIn("leadpoet_grammar=product_modifier", prompt)
+                self.assertIn("leadpoet_template=redacted_formulaic_leadpoet_template", prompt)
+                self.assertNotIn(risky_sentence, prompt)
+                self.assertNotIn("leadpoet_template={product} lab is built on the same principle", prompt)
+            rows = draft.context_snapshot["recent_output_anti_sameness"]
+            self.assertEqual(rows[0]["leadpoet_sentence"], risky_sentence)
+            self.assertEqual(rows[0]["leadpoet_sentence_template"], "{product} lab is built on the same principle")
+            store.close()
+
     def test_generation_repairs_saturated_batch_leadpoet_grammar_outside_recent_rows(self):
         class SaturatedBatchGrammarProvider:
             def __init__(self):
