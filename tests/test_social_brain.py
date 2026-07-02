@@ -3565,6 +3565,82 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
             store.close()
 
+    def test_saturated_batch_name_usage_repairs_to_product_free_when_lane_allows(self):
+        class SaturatedNameProvider:
+            def __init__(self):
+                self.repair_count = 0
+                self.repair_prompts: list[str] = []
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [
+                        strategy_json(
+                            thesis="Buyer timing should choose the account before copy.",
+                            concrete_detail="buyer timing",
+                            source_bridge="The trend points to buyer timing.",
+                        )
+                    ]
+                if "Write 3 X draft options" in prompt:
+                    return ["Leadpoet turns timing into the reason this account deserves action now."][:variants]
+                if "Choose the best X post" in prompt:
+                    return [evaluation_json("Leadpoet turns timing into the reason this account deserves action now.")]
+                if "Repair this X post" in prompt:
+                    self.repair_count += 1
+                    self.repair_prompts.append(prompt)
+                    return []
+                return ["Leadpoet turns timing into the reason this account deserves action now."]
+
+        batch_outputs = [
+            "Static records answer who exists.\n\nThe useful Leadpoet question is why this account now.",
+            "The CRM can be correct and still late.\n\nTiming has to explain why now before the account reaches Leadpoet.",
+            "More names do not fix judgment.\n\nInside Leadpoet, the account reason gets specific.",
+            "A rep needs the reason first.\n\nPut Leadpoet behind the account-change check.",
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            trend = store.save_trend_item(
+                TrendItem(
+                    id="no_name_trend_2",
+                    title="Buyer timing becomes the account selection layer",
+                    source_type="web",
+                    topic="sales AI",
+                    summary="Context matters before generated copy.",
+                    why_it_matters="It proves account timing matters.",
+                    leadpoet_angle="Buyer timing beats generic data.",
+                    date=utc_now(),
+                )
+            )
+            request = DraftRequest(
+                platform="x",
+                topic="sales AI",
+                post_type="founder_insight",
+                angle="buyer timing beats generic data",
+                use_trends=True,
+                trend_ids=[trend.id],
+            )
+            self.assertEqual(primary_product_mention_lane(request, [trend])[0], "no-name wedge")
+            provider = SaturatedNameProvider()
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                request,
+                save=False,
+                recent_output_texts=batch_outputs,
+            )[0]
+
+            self.assertEqual(provider.repair_count, 1)
+            self.assertIn("Batch Leadpoet name usage: mentioned=4", provider.repair_prompts[0])
+            self.assertIn("change saturated batch Leadpoet name usage", provider.repair_prompts[0])
+            self.assertNotIn("Leadpoet", draft.text)
+            self.assertIn("timing", draft.text.lower())
+            self.assertEqual(
+                draft.context_snapshot["recent_output_batch_summary"]["leadpoet_name_usage_counts"]["mentioned"],
+                4,
+            )
+            self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
+            store.close()
+
     def test_name_omitted_product_syntax_can_omit_leadpoet_anchor(self):
         class NoNameProvider:
             def generate(self, prompt: str, *, variants: int) -> list[str]:

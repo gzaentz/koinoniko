@@ -1040,7 +1040,10 @@ def build_recent_output_context(
         phrase_counts = batch_summary.get("leadpoet_phrase_pattern_counts", {})
         template_counts = batch_summary.get("leadpoet_sentence_template_counts", {})
         layout_counts = batch_summary.get("layout_counts", {})
+        name_usage_counts = batch_summary.get("leadpoet_name_usage_counts", {})
         lines.append(f"Batch outputs so far: {batch_summary['post_count']}")
+        if isinstance(name_usage_counts, dict) and name_usage_counts:
+            lines.append(f"Batch Leadpoet name usage: {recent_output_count_summary(name_usage_counts)}")
         if isinstance(grammar_counts, dict) and grammar_counts:
             lines.append(f"Batch Leadpoet grammar counts: {recent_output_count_summary(grammar_counts)}")
         if isinstance(phrase_counts, dict) and phrase_counts:
@@ -1055,6 +1058,7 @@ def build_recent_output_context(
             "Treat any Leadpoet grammar fingerprint used 3+ times in this batch as saturated; choose a different product role or omit the name if the point still works.",
             "Treat any Leadpoet phrase pattern used 3+ times in this batch as saturated; choose a different way the name enters the sentence.",
             "Treat any Leadpoet sentence template used 3+ times in this batch as saturated; change the sentence skeleton, not just the noun beside the product name.",
+            "Treat Leadpoet name usage as saturated when the batch has used the name in nearly every post; if the current product lane allows omission, let the saved-context mechanism carry the point without the name.",
             "Treat any layout fingerprint used 3+ times in this batch as saturated; change paragraph count, line breaks, or where the product name appears.",
             "If Leadpoet appears, change its sentence role, placement, and neighboring words from the recent examples.",
         ]
@@ -1072,8 +1076,10 @@ def batch_recent_output_summary(texts: list[str]) -> dict[str, object]:
     phrase_counts = Counter(row["leadpoet_phrase_pattern"] for row in rows if row["leadpoet_phrase_pattern"])
     template_counts = Counter(row["leadpoet_sentence_template"] for row in rows if row["leadpoet_sentence_template"])
     layout_counts = Counter(row["layout"] for row in rows if row["layout"])
+    name_usage_counts = Counter("mentioned" if row["leadpoet_sentence"] else "omitted" for row in rows)
     return {
         "post_count": len(rows),
+        "leadpoet_name_usage_counts": dict(name_usage_counts),
         "leadpoet_grammar_counts": dict(grammar_counts),
         "leadpoet_phrase_pattern_counts": dict(phrase_counts),
         "leadpoet_sentence_template_counts": dict(template_counts),
@@ -2148,6 +2154,8 @@ def apply_deterministic_rule_repair(
         )
     ):
         candidates.extend(deterministic_leadpoet_grammar_saturation_repair_candidates(text, max_chars=max_chars))
+    if any("saturated batch leadpoet name usage" in violation.lower() for violation in previous_violations):
+        candidates.extend(deterministic_leadpoet_name_omission_repair_candidates(text, max_chars=max_chars))
     if any("saturated batch layout" in violation.lower() for violation in previous_violations):
         layout_bases = [text, *candidates]
         for base in layout_bases:
@@ -2216,6 +2224,50 @@ def deterministic_leadpoet_grammar_saturation_repair_candidates(text: str, *, ma
         candidate
         for candidate in (clean_generated_text(candidate, max_chars=max_chars) for candidate in candidates)
         if candidate and candidate != cleaned and len(candidate) <= max_chars
+    ]
+
+
+def deterministic_leadpoet_name_omission_repair_candidates(text: str, *, max_chars: int) -> list[str]:
+    cleaned = clean_generated_text(text, max_chars=max_chars)
+    if not cleaned or not re.search(r"\bleadpoet\b", cleaned, flags=re.I):
+        return []
+    leadpoet_sentence = first_sentence_with_word(cleaned, "Leadpoet")
+    replacements = leadpoet_name_omission_replacements(leadpoet_sentence)
+    candidates = [
+        replace_first_sentence_with_word(cleaned, "Leadpoet", replacement)
+        for replacement in replacements
+    ]
+    return [
+        candidate
+        for candidate in (clean_generated_text(candidate, max_chars=max_chars) for candidate in candidates)
+        if candidate and candidate != cleaned and "leadpoet" not in candidate.lower() and len(candidate) <= max_chars
+    ]
+
+
+def leadpoet_name_omission_replacements(sentence: str) -> list[str]:
+    lowered = " ".join(sentence.lower().replace("’", "'").split())
+    if "explain why now" in lowered:
+        return [
+            "Timing has to explain why now before copy writes the email.",
+            "The account-change check has to happen before the sequence.",
+            "The useful signal is the reason this account deserves action now.",
+        ]
+    if "account reason" in lowered:
+        return [
+            "The account reason should be clear before copy starts.",
+            "The useful wedge is the account change, not another volume claim.",
+            "The timing signal only matters when it changes the next account choice.",
+        ]
+    if "timing" in lowered:
+        return [
+            "Timing should change the account choice before the sequence gets louder.",
+            "The useful wedge is buyer timing: why this account deserves action now.",
+            "The timing signal has to move before generated copy starts.",
+        ]
+    return [
+        "The useful wedge is buyer timing: why this account deserves action now.",
+        "The account-change check should happen before generated copy starts.",
+        "The specific signal has to carry the point without turning into a tagline.",
     ]
 
 
@@ -2616,9 +2668,17 @@ def draft_rule_violations(
         violations.append("remove em dash")
     if re.search(r"\b(cannot proceed|no product update supplied|provide:|provide more details|need more details|to write this post)\b", lowered):
         violations.append("return a publishable post, not a refusal, caveat, or request for more details")
+    anchor = workspace_anchor_name(bundle, active_rules)
     violations.extend(natural_voice_violations(text, request))
     violations.extend(recent_output_repetition_violations(text, recent_output_rows, recent_output_batch_summary))
-    anchor = workspace_anchor_name(bundle, active_rules)
+    if (
+        anchor
+        and anchor.lower() == "leadpoet"
+        and anchor.lower() in lowered
+        and product_lane_allows_omitting_anchor(request, trends, anchor=anchor)
+        and leadpoet_name_usage_is_saturated(recent_output_batch_summary)
+    ):
+        violations.append("change saturated batch Leadpoet name usage; omit Leadpoet if the saved-context mechanism stays clear")
     if anchor and re.search(rf"\b(i do not|i don't) know enough about {re.escape(anchor.lower())}\b", lowered):
         violations.append(f"remove model uncertainty about {anchor}; use saved context or make a narrower claim")
     if (
@@ -2629,6 +2689,23 @@ def draft_rule_violations(
     ):
         violations.append(f"anchor the point to {anchor} as the source of the core wedge")
     return dedupe_preserve_order(violations)
+
+
+def leadpoet_name_usage_is_saturated(recent_output_batch_summary: dict[str, object] | None) -> bool:
+    if not recent_output_batch_summary:
+        return False
+    try:
+        post_count = int(recent_output_batch_summary.get("post_count", 0) or 0)
+    except (TypeError, ValueError):
+        return False
+    counts = recent_output_batch_summary.get("leadpoet_name_usage_counts", {})
+    if not isinstance(counts, dict):
+        return False
+    try:
+        mentioned = int(counts.get("mentioned", 0) or 0)
+    except (TypeError, ValueError):
+        return False
+    return post_count >= 4 and mentioned >= max(4, (post_count * 3 + 3) // 4)
 
 
 def recent_output_repetition_violations(
