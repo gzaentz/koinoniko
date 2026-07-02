@@ -23,7 +23,7 @@ from leadpoet_social_brain.assistant_context import (
 )
 from leadpoet_social_brain.categorization import XPostLLMCategorizer, parse_x_category_response
 from leadpoet_social_brain.content_queue import create_post_x, plan_week_x, post_queue_item_x
-from leadpoet_social_brain.cli import build_parser as build_cli_parser, main as cli_main
+from leadpoet_social_brain.cli import build_naturalness_audit, build_parser as build_cli_parser, main as cli_main
 from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.core.models import ContentQueueItem, ContextSection, DraftRequest, EngagementMetrics, Pattern, PostNote, SocialPost, SyncMetadata, TrendItem, utc_now
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator, clean_generated_text, selected_structure_shapes
@@ -1957,7 +1957,7 @@ class SocialBrainTest(unittest.TestCase):
                         "A rep does not need another prettier list.\n\nThey need the account where something changed. That is the Leadpoet lane.",
                         "Context only matters when it changes action.\n\nFor Leadpoet, that means timing a rep can actually use.",
                         "Buyer timing beats another warmed-up account score.\n\nFor Leadpoet, the signal has to explain why now.",
-                        "A contact record can be correct and still useless today.\n\nThe useful work is turning context into a reason to act.",
+                        "A contact record can be correct and still useless today.\n\nThat is where Leadpoet focuses: buyer context with a reason to act.",
                     ]
                     return [repairs[(self.repair_count - 1) % len(repairs)]]
                 return ["Buyer timing beats static lists."]
@@ -2028,11 +2028,112 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotIn("leadpoet is building", lowered_text)
             self.assertNotIn("leadpoet is the", lowered_text)
             self.assertNotIn("leadpoet's bet", lowered_text)
-            self.assertGreaterEqual(len({text.split("\n\n", 1)[0] for text in texts}), 4)
+            self.assertGreaterEqual(len({text.split("\n\n", 1)[0] for text in texts}), 5)
             self.assertGreaterEqual(
                 len({draft.context_snapshot["structure_variation_options"][0]["name"] for draft in drafts}),
                 5,
             )
+            store.close()
+
+    def test_audit_naturalness_x_generates_twenty_trend_posts_with_varied_shapes(self):
+        class CookieCutterTrendProvider:
+            def __init__(self):
+                self.repair_count = 0
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [
+                        strategy_json(
+                            thesis="Sales AI needs buyer timing, not static records.",
+                            concrete_detail="buyer timing",
+                            source_bridge="The source proves context matters; saved context turns that into buyer timing.",
+                            success_criteria="Avoid cookie-cutter product definitions.",
+                        )
+                    ]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "The market keeps moving from records to context.\n\nLeadpoet is building the intent layer for buyer timing.",
+                        "Verified data tells a rep who exists.\n\nLeadpoet is the layer for who is worth action now.",
+                        "The category wants context.\n\nLeadpoet's bet is proprietary buyer timing.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    return [
+                        evaluation_json(
+                            "The market keeps moving from records to context.\n\n"
+                            "Leadpoet is building the intent layer for buyer timing and account qualification."
+                        )
+                    ]
+                if "Repair this X post" in prompt:
+                    self.repair_count += 1
+                    repairs = [
+                        "Static records answer who exists.\n\nFor Leadpoet, the harder question is why this account is worth action now.",
+                        "A rep does not need another prettier list.\n\nThey need the account where something changed. That is the Leadpoet lane.",
+                        "Context only matters when it changes action.\n\nFor Leadpoet, that means timing a rep can actually use.",
+                        "Buyer timing beats another warmed-up account score.\n\nFor Leadpoet, the signal has to explain why now.",
+                        "A contact record can be correct and still useless today.\n\nThat is where Leadpoet focuses: buyer context with a reason to act.",
+                    ]
+                    return [repairs[(self.repair_count - 1) % len(repairs)]]
+                return ["Buyer timing beats static lists."]
+
+        trend_titles = [
+            "Stop Losing Pipeline to Slow Follow-Up: Meet Qualified",
+            "Salesforce Agentforce Prospecting Agent Now Powered by ZoomInfo's GTM.AI for AI Sales Prospecting",
+            "The Global Associates Closes the Process Gap in B2B Lead Generation with ISO Certification and AI",
+            "Aircall Acquires Piper AI to Expand Revenue Intelligence and Sales Automation Capabilities",
+            "Close Launches Chloe, an AI Sales Agent Built Directly Into the CRM",
+            "Right Now, We Run 4+ AI SDR Agents. Here's Why.",
+            "Salesforce Puts an AI Marketing Team in Every Marketer's Hands",
+            "Salesforce Acquires Contentful, Rolls Out New AI Agents for Marketers",
+            "Bombora: Interview CEO Mark Connon About The B2B Intent Data Company",
+            "From Lead Gen to Revenue Marketing",
+            "The Revenue Handoff Problem: Why CX Signals Still Don't Flow Cleanly Into RevTech Stacks",
+            "ZoomInfo, Recognized as One to Watch in Snowflake's Modern Marketing Data Stack Report",
+            "One Stalled Deal, One Automation, 10 New Prospects: Lightfield CEO Keith Peiris Demos the AI-Native GTM Loop Live",
+            "AI in CRM: Benefits, Use Cases, and Tools",
+            "Salesforce Makes Agentforce Commerce Generally Available Ahead of Peak Season",
+            "As AI Agents Transform Commerce, Salesforce Unleashes Its Biggest Agentforce Commerce Release Yet",
+            "Why LinkedIn engagement is becoming one of the most valuable sales signals",
+            "The four layers of winning GTM infrastructure",
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = CookieCutterTrendProvider()
+            for title in trend_titles:
+                store.save_trend_item(
+                    TrendItem(
+                        title=title,
+                        source_type="web",
+                        topic="sales AI",
+                        summary="Current GTM trend fixture for generation audit.",
+                        why_it_matters="It shows the market moving toward context and timing.",
+                        leadpoet_angle="Buyer timing needs proprietary account context.",
+                        date=utc_now(),
+                    )
+                )
+
+            payload = build_naturalness_audit(
+                store,
+                SocialBrainGenerator(store, provider=provider),
+                count=20,
+                trend_limit=20,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+                save_drafts=False,
+            )
+
+            self.assertEqual(payload["post_count"], 20)
+            self.assertEqual(payload["trend_count"], len(trend_titles))
+            self.assertGreaterEqual(provider.repair_count, 20)
+            self.assertTrue(all(count == 0 for count in payload["bad_phrase_counts"].values()))
+            self.assertEqual(payload["warnings"], [])
+            self.assertGreaterEqual(payload["unique_first_lines"], 5)
+            self.assertGreaterEqual(len(payload["first_structure_option_counts"]), 5)
+            self.assertNotIn("leadpoet_is_building", payload["leadpoet_shapes"])
+            self.assertNotIn("leadpoet_is_built", payload["leadpoet_shapes"])
+            self.assertNotIn("leadpoet_is", payload["leadpoet_shapes"])
             store.close()
 
     def test_generation_allows_supported_first_person_context(self):
@@ -5146,6 +5247,18 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(monthly_args.window, "monthly")
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             parser.parse_args(["refresh-patterns", "--window", "daily"])
+
+    def test_audit_naturalness_x_cli_defaults_to_twenty_unused_trends(self):
+        parser = build_cli_parser()
+
+        args = parser.parse_args(["audit-naturalness-x"])
+
+        self.assertEqual(args.count, 20)
+        self.assertEqual(args.trend_limit, 20)
+        self.assertEqual(args.trend_status, "unused")
+        self.assertEqual(args.post_type, "founder_insight")
+        self.assertEqual(args.length, "standard")
+        self.assertFalse(args.save_drafts)
 
     def test_weekly_pattern_refresh_task_updates_weekly_and_monthly_windows(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
+import re
+from collections import Counter
 
 from leadpoet_social_brain.analytics import build_analytics_summary
 from leadpoet_social_brain.content_queue import (
@@ -213,6 +216,16 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--use-patterns", action="store_true")
     generate.add_argument("--pattern-id", action="append", dest="pattern_ids", default=[])
     generate.set_defaults(func=cmd_generate_x)
+
+    audit_naturalness = subparsers.add_parser("audit-naturalness-x", help="Generate trend posts and report naturalness/structure metrics.")
+    audit_naturalness.add_argument("--count", type=int, default=20)
+    audit_naturalness.add_argument("--trend-limit", type=int, default=20)
+    audit_naturalness.add_argument("--trend-status", default="unused")
+    audit_naturalness.add_argument("--post-type", default="founder_insight")
+    audit_naturalness.add_argument("--length", choices=["short", "standard", "long"], default="standard")
+    audit_naturalness.add_argument("--save-drafts", action="store_true")
+    audit_naturalness.add_argument("--json", action="store_true", dest="json_output")
+    audit_naturalness.set_defaults(func=cmd_audit_naturalness_x)
 
     plan_week = subparsers.add_parser("plan-week-x", help="Generate a one-week X content queue.")
     plan_week.add_argument("--week-start", required=True)
@@ -759,6 +772,146 @@ def cmd_generate_x(store: SQLiteStore, args: argparse.Namespace) -> int:
         print(draft.text)
         print(f"Explanation: {draft.explanation}")
     return 0
+
+
+def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int:
+    provider = load_configured_provider(store)
+    if not provider:
+        raise SystemExit(MISSING_PROVIDER_MESSAGE)
+    generator = SocialBrainGenerator(store, provider=provider)
+    payload = build_naturalness_audit(
+        store,
+        generator,
+        count=args.count,
+        trend_limit=args.trend_limit,
+        trend_status=args.trend_status,
+        post_type=args.post_type,
+        length_mode=args.length,
+        save_drafts=args.save_drafts,
+    )
+    if args.json_output:
+        print(json.dumps(payload, indent=2))
+        return 0
+    print(f"Generated: {payload['post_count']} post(s) across {payload['trend_count']} trend(s)")
+    print(f"Saved drafts: {'yes' if args.save_drafts else 'no'}")
+    print("Leadpoet mention shapes:")
+    for key, value in sorted(payload["leadpoet_shapes"].items()):
+        print(f"- {key}: {value}")
+    print("Bad phrase counts:")
+    for key, value in sorted(payload["bad_phrase_counts"].items()):
+        print(f"- {key}: {value}")
+    print(f"Unique first lines: {payload['unique_first_lines']}")
+    print("First structure option counts:")
+    for key, value in sorted(payload["first_structure_option_counts"].items()):
+        print(f"- {key}: {value}")
+    if payload["warnings"]:
+        print("Warnings:")
+        for warning in payload["warnings"]:
+            print(f"- {warning}")
+    return 0
+
+
+def build_naturalness_audit(
+    store: SQLiteStore,
+    generator: SocialBrainGenerator,
+    *,
+    count: int,
+    trend_limit: int,
+    trend_status: str | None,
+    post_type: str,
+    length_mode: str,
+    save_drafts: bool,
+) -> dict[str, object]:
+    if count <= 0:
+        raise SystemExit("--count must be greater than 0.")
+    trends = store.list_trends(status=trend_status or None, limit=trend_limit)
+    if not trends:
+        raise SystemExit("No trends found for naturalness audit.")
+    rows: list[dict[str, object]] = []
+    for index in range(count):
+        trend = trends[index % len(trends)]
+        draft = generator.generate(
+            DraftRequest(
+                platform="x",
+                topic=trend.topic or "sales AI",
+                post_type=post_type,
+                angle=trend.leadpoet_angle or trend.title,
+                extra_context=(
+                    "Naturalness audit: use this trend, vary the post structure, and avoid a formulaic product definition."
+                ),
+                use_trends=True,
+                trend_ids=[trend.id],
+                length_mode=length_mode,
+            ),
+            variants=1,
+            save=save_drafts,
+        )[0]
+        first_structure = ""
+        options = draft.context_snapshot.get("structure_variation_options") if isinstance(draft.context_snapshot, dict) else None
+        if isinstance(options, list) and options and isinstance(options[0], dict):
+            first_structure = str(options[0].get("name") or "")
+        rows.append(
+            {
+                "index": index + 1,
+                "trend_id": trend.id,
+                "trend_title": trend.title,
+                "text": draft.text,
+                "chars": len(draft.text),
+                "leadpoet_shape": leadpoet_mention_shape(draft.text),
+                "first_line": first_nonempty_line(draft.text),
+                "first_structure_option": first_structure,
+            }
+        )
+    text_blob = "\n\n".join(str(row["text"]) for row in rows).lower()
+    warnings: list[str] = []
+    bad_phrase_counts = {
+        "leadpoet is building": text_blob.count("leadpoet is building"),
+        "leadpoet is built": text_blob.count("leadpoet is built"),
+        "leadpoet is": text_blob.count("leadpoet is"),
+        "leadpoet's bet": text_blob.count("leadpoet's bet"),
+        "leadpoet’s bet": text_blob.count("leadpoet’s bet"),
+    }
+    if any(bad_phrase_counts.values()):
+        warnings.append("Cookie-cutter Leadpoet product-definition phrase still appeared.")
+    unique_first_lines = len({str(row["first_line"]).lower() for row in rows if row["first_line"]})
+    if unique_first_lines < min(5, len(rows)):
+        warnings.append("First lines are not varied enough.")
+    first_structure_counts = Counter(str(row["first_structure_option"]) for row in rows if row["first_structure_option"])
+    if len(first_structure_counts) < min(5, len(trends), count):
+        warnings.append("Structure guidance did not vary enough across trends.")
+    return {
+        "trend_count": len(trends),
+        "post_count": len(rows),
+        "leadpoet_shapes": dict(Counter(str(row["leadpoet_shape"]) for row in rows)),
+        "bad_phrase_counts": bad_phrase_counts,
+        "unique_first_lines": unique_first_lines,
+        "first_structure_option_counts": dict(first_structure_counts),
+        "warnings": warnings,
+        "rows": rows,
+    }
+
+
+def leadpoet_mention_shape(text: str) -> str:
+    lowered = text.lower()
+    if "leadpoet is building" in lowered:
+        return "leadpoet_is_building"
+    if "leadpoet is built" in lowered:
+        return "leadpoet_is_built"
+    if "leadpoet is" in lowered:
+        return "leadpoet_is"
+    if "leadpoet" not in lowered:
+        return "no_leadpoet"
+    if re.search(r"(?m)^\s*leadpoet\b", text, flags=re.I):
+        return "leadpoet_paragraph_start"
+    return "leadpoet_embedded"
+
+
+def first_nonempty_line(text: str) -> str:
+    for line in text.splitlines():
+        cleaned = line.strip()
+        if cleaned:
+            return cleaned
+    return ""
 
 
 def cmd_plan_week_x(store: SQLiteStore, args: argparse.Namespace) -> int:
