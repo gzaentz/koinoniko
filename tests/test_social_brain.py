@@ -2200,6 +2200,70 @@ class SocialBrainTest(unittest.TestCase):
             )
             store.close()
 
+    def test_audit_naturalness_x_can_fail_on_warning(self):
+        class RepetitiveMentionProvider:
+            def __init__(self):
+                self.final_count = 0
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "Static records answer who exists.\n\nFor Leadpoet, timing is the useful question.",
+                        "The CRM can be correct and still late.\n\nFor Leadpoet, context has to change action.",
+                        "More names do not fix judgment.\n\nFor Leadpoet, the signal has to explain why now.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    first_lines = [
+                        "Static records answer who exists.",
+                        "The CRM can be correct and still late.",
+                        "More names do not fix judgment.",
+                        "Context only matters when it changes action.",
+                        "A sales agent needs timing before copy.",
+                    ]
+                    line = first_lines[self.final_count % len(first_lines)]
+                    self.final_count += 1
+                    return [evaluation_json(f"{line}\n\nFor Leadpoet, buyer timing is the useful question.")]
+                return ["For Leadpoet, buyer timing is the useful question."]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.seed_defaults()
+            for index in range(5):
+                store.save_trend_item(
+                    TrendItem(
+                        title=f"Trend {index}",
+                        source_type="web",
+                        topic="sales AI",
+                        summary="A trend about GTM context.",
+                        why_it_matters="It shows timing matters.",
+                        leadpoet_angle="Buyer timing needs proprietary account context.",
+                        date=utc_now(),
+                    )
+                )
+            store.close()
+
+            with patch("leadpoet_social_brain.cli.load_configured_provider", return_value=RepetitiveMentionProvider()):
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    exit_code = cli_main(
+                        [
+                            "--db",
+                            str(db_path),
+                            "audit-naturalness-x",
+                            "--count",
+                            "5",
+                            "--trend-limit",
+                            "5",
+                            "--fail-on-warning",
+                        ]
+                    )
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("Leadpoet mention phrasing is too concentrated", output.getvalue())
+
     def test_audit_naturalness_x_warns_when_not_all_loaded_trends_are_covered(self):
         class CoverageProvider:
             def generate(self, prompt: str, *, variants: int) -> list[str]:
@@ -5388,6 +5452,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(args.post_type, "founder_insight")
         self.assertEqual(args.length, "standard")
         self.assertFalse(args.save_drafts)
+        self.assertFalse(args.fail_on_warning)
+        self.assertTrue(parser.parse_args(["audit-naturalness-x", "--fail-on-warning"]).fail_on_warning)
 
     def test_weekly_pattern_refresh_task_updates_weekly_and_monthly_windows(self):
         with tempfile.TemporaryDirectory() as tmpdir:

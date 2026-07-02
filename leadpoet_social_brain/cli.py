@@ -225,6 +225,7 @@ def build_parser() -> argparse.ArgumentParser:
     audit_naturalness.add_argument("--length", choices=["short", "standard", "long"], default="standard")
     audit_naturalness.add_argument("--save-drafts", action="store_true")
     audit_naturalness.add_argument("--json", action="store_true", dest="json_output")
+    audit_naturalness.add_argument("--fail-on-warning", action="store_true")
     audit_naturalness.set_defaults(func=cmd_audit_naturalness_x)
 
     plan_week = subparsers.add_parser("plan-week-x", help="Generate a one-week X content queue.")
@@ -791,7 +792,7 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
     )
     if args.json_output:
         print(json.dumps(payload, indent=2))
-        return 0
+        return 1 if args.fail_on_warning and payload["warnings"] else 0
     print(f"Generated: {payload['post_count']} post(s) across {payload['trend_count']} trend(s)")
     print(f"Trend coverage: {payload['covered_trend_count']} covered, {payload['uncovered_trend_count']} uncovered")
     print(f"Saved drafts: {'yes' if args.save_drafts else 'no'}")
@@ -812,7 +813,7 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
         print("Warnings:")
         for warning in payload["warnings"]:
             print(f"- {warning}")
-    return 0
+    return 1 if args.fail_on_warning and payload["warnings"] else 0
 
 
 def build_naturalness_audit(
