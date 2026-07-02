@@ -1561,15 +1561,15 @@ def leadpoet_definition_replacement(match: re.Match[str], *, product_lane: str) 
     original = " ".join(match.group(0).strip().split())
     lowered = original.lower()
     lane_replacements = {
-        "mechanism-first": "The Leadpoet mechanism has to turn context into the next account worth working.",
-        "consequence-first": "Leadpoet should make the next account choice feel earned, not guessed.",
+        "mechanism-first": "The hard part is turning context into the next account worth working; Leadpoet belongs there.",
+        "consequence-first": "The next account choice has to feel earned before copy starts. That is the Leadpoet job.",
         "quiet embedded name": "A useful Leadpoet post makes the account reason obvious before the copy starts.",
         "no-name wedge": "The useful wedge is buyer timing: why this account deserves action now.",
         "operator scene": "A rep should see what changed at the account before a sequence asks for copy.",
         "boundary line": "Verified data can say who exists; the sharper signal says who is worth action now.",
-        "signal language": "The Leadpoet signal should explain why now, not only who fits.",
-        "ownership without definition": "Leadpoet owns the account-timing question before outbound gets louder.",
-        "implicit product belief": "Leadpoet's product belief is simple: timing should choose the account before copy writes the email.",
+        "signal language": "The signal has to explain why now, not only who fits. That is the Leadpoet constraint.",
+        "ownership without definition": "The account-timing question comes before louder outbound. Leadpoet owns that part.",
+        "implicit product belief": "Timing should choose the account before copy writes the email. That is the Leadpoet product belief.",
     }
     if product_lane in lane_replacements:
         return lane_replacements[product_lane]
@@ -1609,14 +1609,14 @@ def leadpoet_formulaic_intro_replacement(match: re.Match[str], *, product_lane: 
         body = body[0].lower() + body[1:]
     body = f"{body}{ending}" if body else ""
     lane_templates = {
-        "mechanism-first": "The Leadpoet mechanism starts where {body}",
-        "consequence-first": "Leadpoet earns the mention only if {body}",
+        "mechanism-first": "Start with the mechanism: {body} Leadpoet only matters if that becomes usable.",
+        "consequence-first": "That only matters if Leadpoet makes it actionable: {body}",
         "quiet embedded name": "The useful Leadpoet sentence is the one where {body}",
-        "operator scene": "A rep should feel the Leadpoet signal when {body}",
-        "boundary line": "Leadpoet belongs on the sharper side of this boundary: {body}",
-        "signal language": "The Leadpoet signal has to make this plain: {body}",
-        "ownership without definition": "Leadpoet can own the account-timing question without a product-definition line: {body}",
-        "implicit product belief": "Leadpoet's product belief is simple: {body}",
+        "operator scene": "A rep should feel the account signal before copy starts: {body}",
+        "boundary line": "That is the sharper side of the boundary for Leadpoet: {body}",
+        "signal language": "The signal has to make this plain before Leadpoet earns the mention: {body}",
+        "ownership without definition": "The account-timing question can carry the Leadpoet point without a definition line: {body}",
+        "implicit product belief": "The Leadpoet product belief is simple: {body}",
     }
     if product_lane == "no-name wedge":
         template = "The useful wedge is buyer timing: {body}"

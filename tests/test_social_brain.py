@@ -35,6 +35,7 @@ from leadpoet_social_brain.generation import (
     MISSING_PROVIDER_MESSAGE,
     SocialBrainGenerator,
     clean_generated_text,
+    deterministic_leadpoet_definition_repair,
     primary_closing_target,
     primary_human_rhythm_target,
     primary_layout_target,
@@ -1617,7 +1618,7 @@ class SocialBrainTest(unittest.TestCase):
 
             self.assertEqual(
                 drafts[0].text,
-                "Leadpoet earns the mention only if useful sales AI starts with knowing which account is moving now.",
+                "That only matters if Leadpoet makes it actionable: useful sales AI starts with knowing which account is moving now.",
             )
             self.assertNotIn("For Leadpoet", drafts[0].text)
             self.assertEqual(len(provider.prompts), 6)
@@ -2317,12 +2318,52 @@ class SocialBrainTest(unittest.TestCase):
 
             self.assertIn("Verified data tells an agent who exists.", draft.text)
             self.assertIn("Leadpoet", draft.text)
-            self.assertIn("timing should choose the account", draft.text)
+            self.assertIn("timing should choose the account", draft.text.lower())
             self.assertNotIn("Leadpoet is", draft.text)
             self.assertNotIn("Leadpoet is building", draft.text)
             self.assertNotIn("For Leadpoet", draft.text)
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
             store.close()
+
+    def test_deterministic_leadpoet_definition_replacements_vary_by_lane(self):
+        outputs_by_lane = {}
+        for index in range(60):
+            trend = TrendItem(
+                id=f"trend_{index}",
+                title=f"Trend {index}",
+                source_type="web",
+                topic="sales AI",
+                summary="Context layer",
+                why_it_matters="It proves context matters.",
+                leadpoet_angle="Buyer timing beats generic data.",
+                date=utc_now(),
+            )
+            request = DraftRequest(
+                platform="x",
+                topic="sales AI",
+                post_type="founder_insight",
+                angle="buyer timing beats generic data",
+                trend_ids=[trend.id],
+            )
+            lane = primary_product_mention_lane(request, [trend])[0]
+            outputs_by_lane.setdefault(
+                lane,
+                deterministic_leadpoet_definition_repair(
+                    "Leadpoet is building the intent layer for buyer timing.",
+                    request=request,
+                    trends=[trend],
+                    max_chars=280,
+                ),
+            )
+
+        self.assertEqual(len(outputs_by_lane), 9)
+        self.assertGreaterEqual(len(set(outputs_by_lane.values())), 9)
+        combined = "\n".join(outputs_by_lane.values())
+        for banned in ["Leadpoet is", "Leadpoet is building", "For Leadpoet", "Leadpoet should"]:
+            self.assertNotIn(banned.lower(), combined.lower())
+        self.assertIn("Leadpoet belongs there", combined)
+        self.assertIn("That is the Leadpoet job", combined)
+        self.assertIn("That is the Leadpoet product belief", combined)
 
     def test_missing_anchor_fallback_varies_leadpoet_line_by_trend(self):
         class NoAnchorProvider:
