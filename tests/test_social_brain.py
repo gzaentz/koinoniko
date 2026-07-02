@@ -3104,7 +3104,26 @@ class SocialBrainTest(unittest.TestCase):
             store.close()
 
     def test_generation_repairs_formulaic_leadpoet_helper_verb_leadin(self):
-        bad_text = "Static records answer who exists.\n\nLeadpoet helps teams unlock buyer timing."
+        cases = [
+            ("Leadpoet helps teams unlock buyer timing.", "Leadpoet helps", "unlock"),
+            ("Leadpoet enables teams to act on buyer timing.", "Leadpoet enables", "enables"),
+        ]
+        for bad_sentence, banned_phrase, banned_extra in cases:
+            with self.subTest(bad_sentence=bad_sentence):
+                self.assert_generation_repairs_formulaic_leadpoet_helper_verb_leadin(
+                    bad_sentence,
+                    banned_phrase=banned_phrase,
+                    banned_extra=banned_extra,
+                )
+
+    def assert_generation_repairs_formulaic_leadpoet_helper_verb_leadin(
+        self,
+        bad_sentence: str,
+        *,
+        banned_phrase: str,
+        banned_extra: str,
+    ):
+        bad_text = f"Static records answer who exists.\n\n{bad_sentence}"
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
             store.seed_defaults()
@@ -3133,8 +3152,8 @@ class SocialBrainTest(unittest.TestCase):
                 )
             )[0]
 
-            self.assertNotIn("Leadpoet helps", draft.text)
-            self.assertNotIn("unlock", draft.text.lower())
+            self.assertNotIn(banned_phrase, draft.text)
+            self.assertNotIn(banned_extra, draft.text.lower())
             self.assertFalse(any(leadpoet_bad_phrase_counts(draft.text).values()), draft.text)
             self.assertIn("avoid formulaic Leadpoet subject-verb lead-in", provider.prompts[-1])
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
@@ -4503,6 +4522,14 @@ class SocialBrainTest(unittest.TestCase):
             "Leadpoet shows buyer timing.": "leadpoet_shows",
             "Leadpoet lets reps choose accounts.": "leadpoet_lets",
             "Leadpoet finds account timing.": "leadpoet_finds",
+            "Leadpoet enables teams to act on buyer timing.": "leadpoet_enables",
+            "Leadpoet provides reps buyer timing.": "leadpoet_provides",
+            "Leadpoet delivers account context.": "leadpoet_delivers",
+            "Leadpoet powers teams to act on buyer timing.": "leadpoet_powers",
+            "Leadpoet unlocks buyer timing.": "leadpoet_unlocks",
+            "Leadpoet brings buyer context into prioritization.": "leadpoet_brings",
+            "Leadpoet drives account prioritization.": "leadpoet_drives",
+            "Leadpoet creates buyer timing.": "leadpoet_creates",
             "This is where Leadpoet focuses: timing before copy.": "that_is_where_leadpoet",
             "That’s where Leadpoet focuses: timing before copy.": "that_is_where_leadpoet",
             "That is the Leadpoet point.": "that_is_the_leadpoet_closer",
@@ -4523,6 +4550,7 @@ class SocialBrainTest(unittest.TestCase):
         cases = {
             "Leadpoet owns the account-timing question.": "product_subject_verb",
             "Leadpoet helps teams act on buyer timing.": "product_subject_verb",
+            "Leadpoet enables teams to act on buyer timing.": "product_subject_verb",
             "The timing reason gets specific inside Leadpoet before copy starts.": "prepositional_tuck_in",
             "The Leadpoet signal should stay close to the account change.": "product_modifier",
             "Put Leadpoet inside the account-change check.": "product_as_object",
@@ -4575,6 +4603,14 @@ class SocialBrainTest(unittest.TestCase):
                 "Leadpoet shows buyer timing.",
                 "Leadpoet lets reps choose accounts.",
                 "Leadpoet finds account timing.",
+                "Leadpoet enables teams to act on buyer timing.",
+                "Leadpoet provides reps buyer timing.",
+                "Leadpoet delivers account context.",
+                "Leadpoet powers teams to act on buyer timing.",
+                "Leadpoet unlocks buyer timing.",
+                "Leadpoet brings buyer context into prioritization.",
+                "Leadpoet drives account prioritization.",
+                "Leadpoet creates buyer timing.",
                 "Leadpoet's job is account timing.",
                 "The layer worth building starts before sequence copy.",
             ]
@@ -4590,7 +4626,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(counts["that is the leadpoet closer"], 1)
         self.assertEqual(counts["the leadpoet noun-is definition"], 1)
         self.assertEqual(counts["leadpoet fallback lead-in"], 1)
-        self.assertEqual(counts["leadpoet subject-verb lead-in"], 7)
+        self.assertEqual(counts["leadpoet subject-verb lead-in"], 15)
         self.assertEqual(counts["leadpoet bet/job/role"], 1)
         self.assertEqual(counts["the layer worth building"], 1)
 

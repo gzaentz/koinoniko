@@ -121,7 +121,7 @@ LEADPOET_AUDIT_BAD_PATTERNS = [
     ("that is the leadpoet closer", r"\bthat\s+is\s+the\s+leadpoet\s+(?:job|bar|point|constraint|product belief)\b"),
     ("the leadpoet noun-is definition", r"\bthe\s+leadpoet\s+(?:product belief|signal|point|constraint|job|bar|part)\s+is\b"),
     ("leadpoet fallback lead-in", r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:belongs|only\s+matters|must)\b"),
-    ("leadpoet subject-verb lead-in", r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:owns?|makes?|starts?|keeps?|turns?|focuses|helps?|gives?|answers?|shows?|lets?|finds?)\b"),
+    ("leadpoet subject-verb lead-in", r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:owns?|makes?|starts?|keeps?|turns?|focuses|helps?|gives?|answers?|shows?|lets?|finds?|enables?|provides?|delivers?|powers?|unlocks?|brings?|drives?|creates?)\b"),
     ("leadpoet bet/job/role", r"(?m)(?:^|\n\n)\s*leadpoet(?:'s|’s)?\s+(?:bet|job|role)\b"),
     ("the layer worth building", r"(?m)(?:^|\n\n)\s*the\s+layer\s+worth\s+building\b"),
 ]
@@ -1500,7 +1500,7 @@ def leadpoet_actual_syntax(text: str) -> str:
     )
     cleaned = re.sub(r"^(?:[-*•]\s+|\d+[.)]\s+)", "", leadpoet_sentence.strip())
     lowered = cleaned.lower().replace("’", "'")
-    if re.match(r"leadpoet\s+(?:is|owns?|can|makes?|starts?|keeps?|turns?|focuses|helps?|gives?|answers?|shows?|lets?|finds?|needs?|should|has\s+to|belongs|must|only\s+matters)\b", lowered):
+    if re.match(r"leadpoet\s+(?:is|owns?|can|makes?|starts?|keeps?|turns?|focuses|helps?|gives?|answers?|shows?|lets?|finds?|enables?|provides?|delivers?|powers?|unlocks?|brings?|drives?|creates?|needs?|should|has\s+to|belongs|must|only\s+matters)\b", lowered):
         return "product_subject_verb"
     if re.search(r"\b(?:put|place|keep|carry|bring|move|tuck|embed|mention|name|use)\b[^.!?]{0,80}\bleadpoet\b", lowered):
         return "product_as_object"
@@ -1657,6 +1657,22 @@ def leadpoet_mention_pattern(text: str) -> str:
         return "leadpoet_lets"
     if re.search(r"\bleadpoet\s+finds?\b", text, flags=re.I):
         return "leadpoet_finds"
+    if re.search(r"\bleadpoet\s+enables?\b", text, flags=re.I):
+        return "leadpoet_enables"
+    if re.search(r"\bleadpoet\s+provides?\b", text, flags=re.I):
+        return "leadpoet_provides"
+    if re.search(r"\bleadpoet\s+delivers?\b", text, flags=re.I):
+        return "leadpoet_delivers"
+    if re.search(r"\bleadpoet\s+powers?\b", text, flags=re.I):
+        return "leadpoet_powers"
+    if re.search(r"\bleadpoet\s+unlocks?\b", text, flags=re.I):
+        return "leadpoet_unlocks"
+    if re.search(r"\bleadpoet\s+brings?\b", text, flags=re.I):
+        return "leadpoet_brings"
+    if re.search(r"\bleadpoet\s+drives?\b", text, flags=re.I):
+        return "leadpoet_drives"
+    if re.search(r"\bleadpoet\s+creates?\b", text, flags=re.I):
+        return "leadpoet_creates"
     if re.search(r"\binside\s+leadpoet\b", text, flags=re.I):
         return "inside_leadpoet"
     if re.search(r"\bwhere\s+leadpoet\s+enters\b", text, flags=re.I):
