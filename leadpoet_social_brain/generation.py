@@ -252,6 +252,29 @@ PRODUCT_MENTION_LANES = [
     ),
 ]
 
+PRODUCT_MENTION_PLACEMENT_TARGETS = [
+    (
+        "early embedded",
+        "If the product name is needed, place it in the first paragraph after a concrete mechanism. Do not open with a product definition.",
+    ),
+    (
+        "middle turn",
+        "Let the first idea stand on its own, then use the product name at the turn into implication or mechanism.",
+    ),
+    (
+        "late consequence",
+        "Mention the product near the end as a consequence of the point, embedded in a sentence rather than a tagline.",
+    ),
+    (
+        "product-free close",
+        "If the product name appears, keep the final line product-free so the post ends on the idea, not the brand.",
+    ),
+    (
+        "quiet tuck-in",
+        "Use the least disruptive product mention possible. If omission is allowed, let the mechanism carry the point.",
+    ),
+]
+
 
 class SocialBrainGenerator:
     def __init__(self, store: SQLiteStore, provider: DraftProvider | None = None):
@@ -650,6 +673,13 @@ def product_mention_prompt_section(
     selected = selected_product_mention_lanes(request, trends or [], count=4) if request else PRODUCT_MENTION_LANES[:4]
     primary_name, primary_guidance = selected[0]
     lane_options = "\n".join(f"- {name}: {guidance}" for name, guidance in selected)
+    placement_selected = (
+        selected_product_mention_placement_targets(request, trends or [], count=4)
+        if request
+        else PRODUCT_MENTION_PLACEMENT_TARGETS[:4]
+    )
+    placement_name, placement_guidance = placement_selected[0]
+    placement_options = "\n".join(f"- {name}: {guidance}" for name, guidance in placement_selected)
     return (
         "Dynamic Product Mention:\n"
         "- Do not make the product mention the same final paragraph every time.\n"
@@ -658,8 +688,12 @@ def product_mention_prompt_section(
         f"\"the useful {example_prefix} signal is...\", or no product name if the saved-context mechanism is already clear.\n"
         "- If the post needs the name for positioning, embed it in a concrete sentence rather than defining the company.\n"
         f"Primary product mention lane for this request: {primary_name}: {primary_guidance}\n"
+        f"Primary product mention placement target for this request: {placement_name}: {placement_guidance}\n"
+        "Use the lane for the rhetorical job and the placement target for where the name enters.\n"
         "Product mention lanes for this request:\n"
         f"{lane_options}\n"
+        "Product mention placement targets for this request:\n"
+        f"{placement_options}\n"
         "- In multi-option prompts, option 1 should use the primary lane and each option should use a different product mention lane."
     )
 
@@ -681,6 +715,25 @@ def selected_product_mention_lanes(
 
 def primary_product_mention_lane(request: DraftRequest, trends: list[TrendItem]) -> tuple[str, str]:
     return selected_product_mention_lanes(request, trends, count=1)[0]
+
+
+def selected_product_mention_placement_targets(
+    request: DraftRequest,
+    trends: list[TrendItem],
+    *,
+    count: int,
+) -> list[tuple[str, str]]:
+    seed_source = variation_seed_source(request, trends)
+    digest = hashlib.sha256(f"product-placement|{seed_source}".encode("utf-8")).hexdigest()
+    start = int(digest[:8], 16) % len(PRODUCT_MENTION_PLACEMENT_TARGETS)
+    return [
+        PRODUCT_MENTION_PLACEMENT_TARGETS[(start + offset) % len(PRODUCT_MENTION_PLACEMENT_TARGETS)]
+        for offset in range(min(count, len(PRODUCT_MENTION_PLACEMENT_TARGETS)))
+    ]
+
+
+def primary_product_mention_placement_target(request: DraftRequest, trends: list[TrendItem]) -> tuple[str, str]:
+    return selected_product_mention_placement_targets(request, trends, count=1)[0]
 
 
 def selected_structure_shapes(
@@ -1164,6 +1217,7 @@ def build_context_snapshot(
         )
     primary_structure = primary_structure_shape(request, trends)
     primary_product_lane = primary_product_mention_lane(request, trends)
+    primary_product_placement = primary_product_mention_placement_target(request, trends)
     primary_layout = primary_layout_target(request, trends)
     primary_closing = primary_closing_target(request, trends)
     primary_rhythm = primary_human_rhythm_target(request, trends)
@@ -1192,6 +1246,10 @@ def build_context_snapshot(
         "primary_product_mention_lane": {
             "name": primary_product_lane[0],
             "guidance": primary_product_lane[1],
+        },
+        "primary_product_mention_placement_target": {
+            "name": primary_product_placement[0],
+            "guidance": primary_product_placement[1],
         },
         "primary_layout_target": {
             "name": primary_layout[0],
@@ -1224,6 +1282,10 @@ def build_context_snapshot(
         "product_mention_options": [
             {"name": name, "guidance": guidance}
             for name, guidance in selected_product_mention_lanes(request, trends, count=4)
+        ],
+        "product_mention_placement_options": [
+            {"name": name, "guidance": guidance}
+            for name, guidance in selected_product_mention_placement_targets(request, trends, count=4)
         ],
         "avoid_phrases": avoid_phrases or [],
         "active_writing_rules": active_rules or {},
@@ -1819,16 +1881,50 @@ def anchor_draft_to_workspace(
     ):
         return text
     anchor_line = workspace_anchor_line(anchor, request, bundle, trends=trends, active_rules=active_rules)
-    candidates = [
-        f"{text.rstrip()}\n\n{anchor_line}",
-        f"{first_sentence_or_line(text)}\n\n{anchor_line}",
-        anchor_line,
-    ]
+    placement_target = primary_product_mention_placement_target(request, trends)[0]
+    candidates = workspace_anchor_candidates(text, anchor_line, placement_target)
     for candidate in candidates:
         cleaned = clean_generated_text(candidate, max_chars=max_chars)
         if len(cleaned) <= max_chars and anchor.lower() in cleaned.lower():
             return cleaned
     return text
+
+
+def workspace_anchor_candidates(text: str, anchor_line: str, placement_target: str) -> list[str]:
+    stripped = text.strip()
+    if not stripped:
+        return [anchor_line]
+    paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\s*\n+", stripped) if paragraph.strip()]
+    if not paragraphs:
+        return [anchor_line]
+    first_line = first_sentence_or_line(stripped)
+    candidates: list[str] = []
+    if placement_target == "early embedded":
+        candidates.extend([
+            f"{anchor_line}\n\n{stripped}",
+            f"{first_line}\n\n{anchor_line}",
+        ])
+    elif placement_target == "middle turn":
+        if len(paragraphs) > 1:
+            candidates.append("\n\n".join([paragraphs[0], anchor_line, *paragraphs[1:]]))
+        candidates.append(f"{first_line}\n\n{anchor_line}")
+    elif placement_target == "late consequence":
+        candidates.append(f"{stripped}\n\n{anchor_line}")
+    elif placement_target == "product-free close":
+        if len(paragraphs) > 1:
+            candidates.append("\n\n".join([*paragraphs[:-1], anchor_line, paragraphs[-1]]))
+        candidates.append(f"{anchor_line}\n\n{stripped}")
+    elif placement_target == "quiet tuck-in":
+        candidates.extend([
+            f"{first_line}\n\n{anchor_line}",
+            f"{stripped}\n\n{anchor_line}",
+        ])
+    candidates.extend([
+        f"{stripped}\n\n{anchor_line}",
+        f"{first_line}\n\n{anchor_line}",
+        anchor_line,
+    ])
+    return dedupe_preserve_order(candidates)
 
 
 def workspace_anchor_line(

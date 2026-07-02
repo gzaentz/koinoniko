@@ -855,6 +855,9 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
     print("Primary product mention lane counts:")
     for key, value in sorted(payload["primary_product_mention_lane_counts"].items()):
         print(f"- {key}: {value}")
+    print("Primary product mention placement target counts:")
+    for key, value in sorted(payload["primary_product_mention_placement_target_counts"].items()):
+        print(f"- {key}: {value}")
     print("Primary layout target counts:")
     for key, value in sorted(payload["primary_layout_target_counts"].items()):
         print(f"- {key}: {value}")
@@ -944,6 +947,14 @@ def build_naturalness_audit(
             first_product_lane = str(product_options[0].get("name") or "")
         if not primary_product_lane:
             primary_product_lane = first_product_lane
+        primary_product_placement = ""
+        product_placement_option = (
+            draft.context_snapshot.get("primary_product_mention_placement_target")
+            if isinstance(draft.context_snapshot, dict)
+            else None
+        )
+        if isinstance(product_placement_option, dict):
+            primary_product_placement = str(product_placement_option.get("name") or "")
         primary_layout_target = ""
         layout_option = (
             draft.context_snapshot.get("primary_layout_target")
@@ -984,6 +995,7 @@ def build_naturalness_audit(
                 "first_structure_option": first_structure,
                 "primary_product_mention_lane": primary_product_lane,
                 "first_product_mention_lane": first_product_lane,
+                "primary_product_mention_placement_target": primary_product_placement,
                 "primary_layout_target": primary_layout_target,
                 "primary_closing_target": primary_closing_target,
                 "primary_human_rhythm_target": primary_human_rhythm_target,
@@ -1016,6 +1028,13 @@ def build_naturalness_audit(
     first_product_lane_counts = Counter(str(row["first_product_mention_lane"]) for row in rows if row["first_product_mention_lane"])
     if len(primary_product_lane_counts) < min(5, len(trends), count):
         warnings.append("Product mention guidance did not vary enough across trends.")
+    primary_product_placement_counts = Counter(
+        str(row["primary_product_mention_placement_target"])
+        for row in rows
+        if row["primary_product_mention_placement_target"]
+    )
+    if len(primary_product_placement_counts) < min(4, len(trends), count):
+        warnings.append("Product mention placement guidance did not vary enough across trends.")
     primary_layout_target_counts = Counter(str(row["primary_layout_target"]) for row in rows if row["primary_layout_target"])
     if len(primary_layout_target_counts) < min(4, len(trends), count):
         warnings.append("Layout target guidance did not vary enough across trends.")
@@ -1064,6 +1083,7 @@ def build_naturalness_audit(
         "unique_last_lines": unique_last_lines,
         "primary_structure_option_counts": dict(primary_structure_counts),
         "primary_product_mention_lane_counts": dict(primary_product_lane_counts),
+        "primary_product_mention_placement_target_counts": dict(primary_product_placement_counts),
         "primary_layout_target_counts": dict(primary_layout_target_counts),
         "primary_closing_target_counts": dict(primary_closing_target_counts),
         "primary_human_rhythm_target_counts": dict(primary_human_rhythm_target_counts),

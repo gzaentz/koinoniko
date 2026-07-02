@@ -40,12 +40,15 @@ from leadpoet_social_brain.generation import (
     primary_human_rhythm_target,
     primary_layout_target,
     primary_product_mention_lane,
+    primary_product_mention_placement_target,
     primary_structure_shape,
     selected_closing_targets,
     selected_human_rhythm_targets,
     selected_layout_targets,
     selected_product_mention_lanes,
+    selected_product_mention_placement_targets,
     selected_structure_shapes,
+    workspace_anchor_candidates,
 )
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
 from leadpoet_social_brain.openrouter_provider import OpenRouterProvider, create_provider
@@ -1181,7 +1184,9 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Primary closing target for this request:", prompt)
             self.assertIn("Dynamic Product Mention:", prompt)
             self.assertIn("Primary product mention lane for this request:", prompt)
+            self.assertIn("Primary product mention placement target for this request:", prompt)
             self.assertIn("Product mention lanes for this request:", prompt)
+            self.assertIn("Product mention placement targets for this request:", prompt)
             store.close()
 
     def test_generation_prompt_is_example_first_not_label_heavy(self):
@@ -1448,6 +1453,64 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(primary_product_mention_lane(request_a, [trend_a])[0], lanes_a[0])
         self.assertEqual(primary_product_mention_lane(request_b, [trend_b])[0], lanes_b[0])
 
+    def test_product_mention_placement_targets_rotate_across_trends(self):
+        request_a = DraftRequest(
+            platform="x",
+            topic="sales AI",
+            post_type="founder_insight",
+            angle="buyer timing beats generic data",
+            trend_ids=["trend_a"],
+        )
+        request_b = DraftRequest(
+            platform="x",
+            topic="sales AI",
+            post_type="founder_insight",
+            angle="buyer timing beats generic data",
+            trend_ids=["trend_b"],
+        )
+        trend_a = TrendItem(
+            id="trend_a",
+            title="ZoomInfo context layer",
+            source_type="web",
+            topic="sales AI",
+            summary="Context layer",
+            why_it_matters="It proves context matters.",
+            leadpoet_angle="Buyer timing beats generic data.",
+            date=utc_now(),
+        )
+        trend_b = TrendItem(
+            id="trend_b",
+            title="Close launches AI agent",
+            source_type="web",
+            topic="sales AI",
+            summary="AI agent",
+            why_it_matters="It proves agents need better timing.",
+            leadpoet_angle="Account context should decide action.",
+            date=utc_now(),
+        )
+
+        placements_a = [name for name, _ in selected_product_mention_placement_targets(request_a, [trend_a], count=4)]
+        placements_b = [name for name, _ in selected_product_mention_placement_targets(request_b, [trend_b], count=4)]
+
+        self.assertEqual(len(placements_a), 4)
+        self.assertEqual(len(set(placements_a)), 4)
+        self.assertNotEqual(placements_a[0], placements_b[0])
+        self.assertEqual(primary_product_mention_placement_target(request_a, [trend_a])[0], placements_a[0])
+        self.assertEqual(primary_product_mention_placement_target(request_b, [trend_b])[0], placements_b[0])
+
+    def test_workspace_anchor_candidates_respect_product_placement(self):
+        text = "Buyer timing should choose the account.\n\nCopy comes later."
+        anchor = "The account-timing question comes before louder outbound. Leadpoet owns that part."
+
+        middle = workspace_anchor_candidates(text, anchor, "middle turn")[0]
+        product_free_close = workspace_anchor_candidates(text, anchor, "product-free close")[0]
+        late = workspace_anchor_candidates(text, anchor, "late consequence")[0]
+
+        self.assertEqual(middle, f"Buyer timing should choose the account.\n\n{anchor}\n\nCopy comes later.")
+        self.assertEqual(product_free_close, middle)
+        self.assertEqual(late, f"{text}\n\n{anchor}")
+        self.assertNotIn("Leadpoet", product_free_close.split("\n\n")[-1])
+
     def test_ingest_x_post_stores_metrics_and_notes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -1555,11 +1618,13 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("selected_context_sections", saved_draft.context_snapshot)
             self.assertIn("primary_structure_option", saved_draft.context_snapshot)
             self.assertIn("primary_product_mention_lane", saved_draft.context_snapshot)
+            self.assertIn("primary_product_mention_placement_target", saved_draft.context_snapshot)
             self.assertIn("primary_layout_target", saved_draft.context_snapshot)
             self.assertIn("primary_closing_target", saved_draft.context_snapshot)
             self.assertIn("primary_human_rhythm_target", saved_draft.context_snapshot)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["structure_variation_options"]), 1)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["product_mention_options"]), 1)
+            self.assertGreaterEqual(len(saved_draft.context_snapshot["product_mention_placement_options"]), 1)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["layout_target_options"]), 1)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["closing_target_options"]), 1)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["human_rhythm_options"]), 1)
@@ -1570,6 +1635,10 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(
                 saved_draft.context_snapshot["primary_product_mention_lane"]["name"],
                 saved_draft.context_snapshot["product_mention_options"][0]["name"],
+            )
+            self.assertEqual(
+                saved_draft.context_snapshot["primary_product_mention_placement_target"]["name"],
+                saved_draft.context_snapshot["product_mention_placement_options"][0]["name"],
             )
             self.assertEqual(
                 saved_draft.context_snapshot["primary_layout_target"]["name"],
@@ -2278,6 +2347,7 @@ class SocialBrainTest(unittest.TestCase):
                 "Primary closing target for this request:",
                 "Primary human rhythm target for this request:",
                 "Primary product mention lane for this request:",
+                "Primary product mention placement target for this request:",
             ]:
                 self.assertEqual(primary_line(writer_prompt, prefix), primary_line(evaluator_prompt, prefix))
                 self.assertEqual(primary_line(writer_prompt, prefix), primary_line(repair_prompt, prefix))
@@ -2603,6 +2673,10 @@ class SocialBrainTest(unittest.TestCase):
                 5,
             )
             self.assertGreaterEqual(
+                len({draft.context_snapshot["product_mention_placement_options"][0]["name"] for draft in drafts}),
+                4,
+            )
+            self.assertGreaterEqual(
                 len({draft.context_snapshot["human_rhythm_options"][0]["name"] for draft in drafts}),
                 4,
             )
@@ -2708,6 +2782,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertGreaterEqual(payload["unique_last_lines"], 5)
             self.assertGreaterEqual(len(payload["primary_structure_option_counts"]), 5)
             self.assertGreaterEqual(len(payload["primary_product_mention_lane_counts"]), 5)
+            self.assertGreaterEqual(len(payload["primary_product_mention_placement_target_counts"]), 4)
             self.assertGreaterEqual(len(payload["primary_layout_target_counts"]), 4)
             self.assertGreaterEqual(len(payload["primary_closing_target_counts"]), 4)
             self.assertGreaterEqual(len(payload["primary_human_rhythm_target_counts"]), 4)
@@ -3925,6 +4000,7 @@ class SocialBrainTest(unittest.TestCase):
                 "Primary closing target for this request:",
                 "Primary human rhythm target for this request:",
                 "Primary product mention lane for this request:",
+                "Primary product mention placement target for this request:",
             ]:
                 writer_line = next(line for line in provider.prompts[1].splitlines() if line.startswith(prefix))
                 evaluator_line = next(line for line in provider.prompts[2].splitlines() if line.startswith(prefix))
