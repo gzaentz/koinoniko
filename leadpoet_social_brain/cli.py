@@ -1818,6 +1818,16 @@ def leadpoet_mention_pattern(text: str) -> str:
         return "before_leadpoet_earns"
     if re.search(r"\bleadpoet\s+earns\b", text, flags=re.I):
         return "leadpoet_earns"
+    if re.search(r"\bwhen\s+(?:a\s+rep|they)\s+opens?\s+leadpoet\b", text, flags=re.I):
+        return "rep_opens_leadpoet"
+    if re.search(r"\bclear\s+enough\s+in\s+leadpoet\b", text, flags=re.I):
+        return "clear_enough_in_leadpoet"
+    if re.search(r"\bin\s+leadpoet,\s+the\s+account\s+reason\b", text, flags=re.I):
+        return "in_leadpoet_account_reason"
+    if re.search(r"\bin\s+leadpoet,\s+that\s+belief\b", text, flags=re.I):
+        return "in_leadpoet_belief"
+    if re.search(r"\bin\s+leadpoet,\b", text, flags=re.I):
+        return "in_leadpoet"
     if re.search(r"\b(?:put|place|keep|carry|bring|move|tuck|embed|mention|name|use)\b[^.!?]{0,80}\bleadpoet\b", text, flags=re.I):
         return "leadpoet_as_object"
     if re.search(r"\breaches\s+leadpoet\b|\bleadpoet\b[^.!?]{0,80}\b(?:before|after|when|where|if|because|as)\b", text, flags=re.I):

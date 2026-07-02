@@ -3131,10 +3131,11 @@ class SocialBrainTest(unittest.TestCase):
                 draft.text,
                 "Verified data tells an agent who exists.\n\n"
                 "The harder question is why this account is worth action now. "
-                "By the time Leadpoet appears, the account-timing point should already be concrete.",
+                "In Leadpoet, that account-timing point has to be concrete before copy.",
             )
             self.assertNotIn("Leadpoet is building", draft.text)
             self.assertNotIn("For Leadpoet", draft.text)
+            self.assertNotIn("By the time Leadpoet appears", draft.text)
             self.assertTrue(
                 any("avoid default 'Leadpoet is building...' product definition" in prompt for prompt in provider.prompts)
             )
@@ -3175,9 +3176,10 @@ class SocialBrainTest(unittest.TestCase):
                 draft.text,
                 "Verified data tells an agent who exists.\n\n"
                 "The harder question is why this account is worth action now. "
-                "By the time Leadpoet appears, the account-timing point should already be concrete.",
+                "In Leadpoet, that account-timing point has to be concrete before copy.",
             )
             self.assertNotIn("For Leadpoet", draft.text)
+            self.assertNotIn("By the time Leadpoet appears", draft.text)
             self.assertIn("avoid formulaic 'For Leadpoet...' product lead-in", provider.prompts[-1])
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
             store.close()
@@ -3346,9 +3348,10 @@ class SocialBrainTest(unittest.TestCase):
 
             self.assertEqual(
                 draft.text,
-                "More names do not fix judgment.\n\nTiming before copy should stay visible by the time it reaches Leadpoet.",
+                "More names do not fix judgment.\n\nIn Leadpoet, timing before copy should stay visible.",
             )
             self.assertNotIn("That is where Leadpoet", draft.text)
+            self.assertNotIn("by the time it reaches Leadpoet", draft.text)
             self.assertIn("avoid formulaic 'that is where Leadpoet...' product lead-in", provider.prompts[-1])
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
             store.close()
@@ -3535,9 +3538,12 @@ class SocialBrainTest(unittest.TestCase):
         combined = "\n".join(outputs_by_lane.values())
         for banned in ["Leadpoet is", "Leadpoet is building", "For Leadpoet", "Leadpoet should"]:
             self.assertNotIn(banned.lower(), combined.lower())
-        self.assertIn("Bring Leadpoet in after the timing reason is clear", combined)
-        self.assertIn("That answer should reach Leadpoet before any copy gets written", combined)
-        self.assertIn("That belief can reach Leadpoet without another volume claim", combined)
+        self.assertIn("In Leadpoet, that timing reason has to be visible before copy", combined)
+        self.assertIn("When they open Leadpoet, that answer should already be clear", combined)
+        self.assertIn("In Leadpoet, that belief stays practical", combined)
+        self.assertNotRegex(combined, r"\bbring\s+Leadpoet\s+in\b")
+        self.assertNotRegex(combined, r"\b(?:reaches?|reach)\s+Leadpoet\b")
+        self.assertNotRegex(combined, r"\bby the time\b[^.!?\n]*\bLeadpoet\b")
         mention_patterns = [
             leadpoet_mention_pattern(text)
             for text in outputs_by_lane.values()
@@ -4851,6 +4857,10 @@ class SocialBrainTest(unittest.TestCase):
             "The account reason gets specific inside Leadpoet.": "inside_leadpoet",
             "The handoff is where Leadpoet enters.": "where_leadpoet_enters",
             "Timing changes before Leadpoet earns the mention.": "before_leadpoet_earns",
+            "When they open Leadpoet, that answer should already be clear.": "rep_opens_leadpoet",
+            "Before louder outbound, the account-timing question has to be clear enough in Leadpoet.": "clear_enough_in_leadpoet",
+            "In Leadpoet, the account reason should already name what changed.": "in_leadpoet_account_reason",
+            "In Leadpoet, that belief stays practical.": "in_leadpoet_belief",
         }
 
         for text, expected in cases.items():
