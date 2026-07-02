@@ -80,6 +80,7 @@ LEADPOET_DEFINITION_PATTERNS = [
     (r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:should|can|needs?|has\s+to)\b", "avoid formulaic Leadpoet modal lead-in"),
     (r"\b(?:that|this)\s+is\s+where\s+leadpoet\b|\bthat['’]?s\s+where\s+leadpoet\b", "avoid formulaic 'that is where Leadpoet...' product lead-in"),
     (r"\bthat\s+is\s+the\s+leadpoet\s+(?:job|bar|point|constraint|product belief)\b", "avoid formulaic 'That is the Leadpoet...' closer"),
+    (r"\bthe\s+leadpoet\s+(?:product belief|signal|point|constraint|job|bar|part)\s+is\b", "avoid formulaic 'The Leadpoet ... is...' product definition"),
     (r"(?m)(?:^|\n\n)\s*leadpoet(?:'s|’s)?\s+(?:bet|job|role)\b", "avoid formulaic Leadpoet closer"),
     (r"(?m)(?:^|\n\n)\s*the layer worth building\b", "avoid generic 'layer worth building' closer"),
 ]
@@ -1603,6 +1604,7 @@ def deterministic_leadpoet_definition_repair(
         r"\bLeadpoet\s+is\s+built[^.!?\n]*(?:[.!?]|$)",
         r"\bLeadpoet\s+is[^.!?\n]*(?:[.!?]|$)",
         r"\bLeadpoet(?:'s|’s)\s+(?:bet|job|role)\s+is[^.!?\n]*(?:[.!?]|$)",
+        r"\bThe\s+Leadpoet\s+(?:product belief|signal|point|constraint|job|bar|part)\s+is[^.!?\n]*(?:[.!?]|$)",
     ]:
         repaired = re.sub(
             pattern,
@@ -1699,7 +1701,7 @@ def leadpoet_formulaic_intro_replacement(match: re.Match[str], *, product_lane: 
         "boundary line": "That is the sharper side of the boundary for Leadpoet: {body}",
         "signal language": "The signal has to make this plain before Leadpoet earns the mention: {body}",
         "ownership without definition": "The account-timing question can carry the Leadpoet name without a definition line: {body}",
-        "implicit product belief": "The Leadpoet product belief is simple: {body}",
+        "implicit product belief": "Inside Leadpoet, keep the belief concrete: {body}",
     }
     if product_lane == "no-name wedge":
         template = "The useful wedge is buyer timing: {body}"
@@ -1727,7 +1729,7 @@ def leadpoet_modal_leadin_replacement(match: re.Match[str], *, product_lane: str
         "boundary line": "Verified data is not enough; the Leadpoet side of the line is whether it can {body}.",
         "signal language": "The useful signal is the one Leadpoet can use to {body}.",
         "ownership without definition": "The account-timing question is the Leadpoet part when it can {body}.",
-        "implicit product belief": "The Leadpoet product belief is simple: {body}.",
+        "implicit product belief": "Inside Leadpoet, keep the belief concrete: {body}.",
     }
     replacement = templates.get(product_lane, templates["quiet embedded name"]).format(body=body)
     if ending != "." and replacement.endswith("."):
@@ -1762,7 +1764,7 @@ def leadpoet_where_leadin_replacement(match: re.Match[str], *, product_lane: str
             "boundary line": "The sharper boundary for Leadpoet is this: {body}.",
             "signal language": "The account signal gets specific around Leadpoet here: {body}.",
             "ownership without definition": "The account-timing question keeps Leadpoet grounded here: {body}.",
-            "implicit product belief": "The Leadpoet product belief is concrete: {body}.",
+            "implicit product belief": "Inside Leadpoet, the product belief stays concrete: {body}.",
         }
         replacement = templates.get(product_lane, templates["quiet embedded name"]).format(
             body=body[0].lower() + body[1:] if body else "buyer timing changes the account choice"
@@ -2041,15 +2043,15 @@ def workspace_anchor_line(
 
 def leadpoet_anchor_line(product_lane: str) -> str:
     lines = {
-        "mechanism-first": "Buyer timing needs to become visible before a sequence starts; that is the Leadpoet job.",
-        "consequence-first": "The account choice gets better when Leadpoet can show why now.",
-        "quiet embedded name": "A useful Leadpoet draft makes the account reason obvious before the copy starts.",
-        "no-name wedge": "Leadpoet can stay quiet in the copy, but the account reason still has to show up.",
-        "operator scene": "A rep should see the changed account before the generated email; Leadpoet starts there.",
-        "boundary line": "Verified data can say who exists; Leadpoet needs to show who is worth action now.",
-        "signal language": "The Leadpoet signal has to tie timing, context, and the next account to work.",
-        "ownership without definition": "Leadpoet owns the account-timing question before outbound gets louder.",
-        "implicit product belief": "Leadpoet's product belief is simple: timing should pick the account before copy writes the email.",
+        "mechanism-first": "Buyer timing has to become visible before a sequence starts; that account-change check is where Leadpoet belongs.",
+        "consequence-first": "The account choice gets better when the why-now reason is visible inside Leadpoet.",
+        "quiet embedded name": "Put Leadpoet inside the account reason before the copy starts.",
+        "no-name wedge": "The account reason can carry the post; Leadpoet does not need the last-line tagline.",
+        "operator scene": "A rep should see the changed account before the generated email. Put Leadpoet at that handoff.",
+        "boundary line": "Verified data can say who exists; the Leadpoet side is who is worth action now.",
+        "signal language": "The useful account signal ties timing, context, and the next account before Leadpoet enters the copy.",
+        "ownership without definition": "Before outbound gets louder, the account-timing question is the Leadpoet work.",
+        "implicit product belief": "Inside Leadpoet, the belief stays practical: timing should pick the account before copy writes the email.",
     }
     return lines.get(product_lane, lines["signal language"])
 

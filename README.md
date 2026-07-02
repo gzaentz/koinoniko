@@ -833,7 +833,7 @@ intent, and the evaluator rewrites if the result is generic, unsupported, or too
 Active Writing Rules also repair obvious violations such as missing Leadpoet positioning,
 blocked phrases, formulaic `Leadpoet is...` / `For Leadpoet...` / `Leadpoet should...`
 style modal phrasing, `That is where Leadpoet...` wrappers, `That is the Leadpoet...`
-closers, or em dashes.
+closers, `The Leadpoet ... is...` definitions, or em dashes.
 The user only reviews the final queued post, not the internal brief.
 
 `Use in Post` on a trend or `Use Pattern` on a pattern opens Create Post with that source preselected. Generated output still enters the review queue; it does not publish automatically.
