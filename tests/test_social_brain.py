@@ -3857,12 +3857,12 @@ class SocialBrainTest(unittest.TestCase):
                 if "Repair this X post" in prompt:
                     self.repair_count += 1
                     repairs = [
-                        "Static records answer who exists. The why-now signal has to become usable inside Leadpoet.",
+                        "Static records answer who exists.\n\nBy the time the signal reaches Leadpoet, the why-now reason should already be clear.\n\nThe email is downstream.",
                         "Buyer timing is where the Leadpoet signal starts.\n\nThe email is downstream.",
                         "A rep does not need another prettier list.\n\nThe account-change moment is Leadpoet's lane.\n\nThat is when copy becomes useful.",
-                        "- Signal\n- Context\n- A reason now\n\nThe account should be worth action before the sequence starts.",
+                        "- Signal\n- Context\n- A reason now\n\nThe account should be worth action before the sequence starts.\n\nThe handoff is where Leadpoet enters.",
                         "The handoff from signal to sequence is where Leadpoet enters.\n\nThe contact record is only the start.",
-                        "What changes when context is real?\n\nCopy comes later.\n\nInside Leadpoet, the account reason comes before the first sentence.",
+                        "What changes when context is real?\n\nCopy comes later.\n\nThe account reason reaches Leadpoet there.",
                         "The CRM record can be perfect.\n\nTiming changes the account choice before Leadpoet earns the mention.\n\nStill too late is still too late.",
                     ]
                     return [repairs[(self.repair_count - 1) % len(repairs)]]
@@ -3988,12 +3988,12 @@ class SocialBrainTest(unittest.TestCase):
                 if "Repair this X post" in prompt:
                     self.repair_count += 1
                     repairs = [
-                        "Static records answer who exists. The why-now signal has to become usable inside Leadpoet.",
+                        "Static records answer who exists.\n\nBy the time the signal reaches Leadpoet, the why-now reason should already be clear.\n\nThe email is downstream.",
                         "Buyer timing is where the Leadpoet signal starts.\n\nThe email is downstream.",
                         "A rep does not need another prettier list.\n\nThe account-change moment is Leadpoet's lane.\n\nThat is when copy becomes useful.",
-                        "- Signal\n- Context\n- A reason now\n\nThe account should be worth action before the sequence starts.",
+                        "- Signal\n- Context\n- A reason now\n\nThe account should be worth action before the sequence starts.\n\nThe handoff is where Leadpoet enters.",
                         "The handoff from signal to sequence is where Leadpoet enters.\n\nThe contact record is only the start.",
-                        "What changes when context is real?\n\nCopy comes later.\n\nInside Leadpoet, the account reason comes before the first sentence.",
+                        "What changes when context is real?\n\nCopy comes later.\n\nThe account reason reaches Leadpoet there.",
                         "The CRM record can be perfect.\n\nTiming changes the account choice before Leadpoet earns the mention.\n\nStill too late is still too late.",
                     ]
                     return [repairs[(self.repair_count - 1) % len(repairs)]]
@@ -4304,12 +4304,13 @@ class SocialBrainTest(unittest.TestCase):
             self.assertFalse(any("were not covered" in warning for warning in payload["warnings"]))
             store.close()
 
-    def test_audit_naturalness_x_plan_only_warns_on_concentrated_assignments(self):
+    def test_audit_naturalness_x_plan_only_balances_repeated_trend_assignments(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
             store.seed_defaults()
             store.save_trend_item(
                 TrendItem(
+                    id="one-repeated-trend",
                     title="One repeated trend",
                     source_type="web",
                     topic="sales AI",
@@ -4329,15 +4330,21 @@ class SocialBrainTest(unittest.TestCase):
                 length_mode="standard",
             )
 
-            self.assertTrue(
-                any("Structure guidance is too concentrated" in warning for warning in payload["warnings"])
-            )
-            self.assertTrue(
-                any("Product mention syntax guidance is too concentrated" in warning for warning in payload["warnings"])
+            self.assertEqual(payload["post_count"], 5)
+            self.assertGreaterEqual(len(payload["primary_structure_option_counts"]), 4)
+            self.assertEqual(len(payload["primary_product_mention_lane_counts"]), 5)
+            self.assertGreaterEqual(len(payload["primary_product_mention_placement_target_counts"]), 4)
+            self.assertEqual(len(payload["primary_product_mention_syntax_target_counts"]), 5)
+            self.assertLessEqual(max(payload["primary_structure_option_counts"].values()), 2)
+            self.assertLessEqual(max(payload["primary_product_mention_lane_counts"].values()), 2)
+            self.assertLessEqual(max(payload["primary_product_mention_placement_target_counts"].values()), 2)
+            self.assertLessEqual(max(payload["primary_product_mention_syntax_target_counts"].values()), 2)
+            self.assertFalse(
+                any("guidance is too concentrated" in warning for warning in payload["warnings"])
             )
             store.close()
 
-    def test_audit_naturalness_x_warns_on_concentrated_guidance_assignments(self):
+    def test_audit_naturalness_x_balances_guidance_but_still_warns_on_repeated_outputs(self):
         class VariedTextProvider:
             def __init__(self):
                 self.final_count = 0
@@ -4387,11 +4394,16 @@ class SocialBrainTest(unittest.TestCase):
                 save_drafts=False,
             )
 
+            self.assertFalse(
+                any("guidance is too concentrated" in warning for warning in payload["warnings"])
+            )
+            self.assertEqual(len(payload["primary_structure_option_counts"]), 5)
+            self.assertGreaterEqual(len(payload["primary_product_mention_syntax_target_counts"]), 4)
             self.assertTrue(
-                any("Structure guidance is too concentrated" in warning for warning in payload["warnings"])
+                any("Generated post layouts are not varied enough" in warning for warning in payload["warnings"])
             )
             self.assertTrue(
-                any("Product mention syntax guidance is too concentrated" in warning for warning in payload["warnings"])
+                any("Repeated stock phrase appeared" in warning for warning in payload["warnings"])
             )
             store.close()
 
@@ -4429,11 +4441,11 @@ class SocialBrainTest(unittest.TestCase):
                         ]
                     )
 
-            self.assertEqual(exit_code, 1)
+            self.assertEqual(exit_code, 0)
             load_provider.assert_not_called()
             self.assertIn("Planned: 5 post(s) across 5 trend(s)", output.getvalue())
             self.assertIn("Provider calls: no", output.getvalue())
-            self.assertIn("Warnings:", output.getvalue())
+            self.assertNotIn("Warnings:", output.getvalue())
 
     def test_audit_naturalness_x_warns_on_repeated_closing_line(self):
         class RepeatedCloserProvider:

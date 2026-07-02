@@ -975,27 +975,21 @@ def build_naturalness_plan_audit(
     requested_count = count
     if cover_all_trends:
         count = max(count, len(trends))
+    audit_plan = naturalness_audit_request_plan(
+        trends,
+        count=count,
+        post_type=post_type,
+        length_mode=length_mode,
+    )
     rows: list[dict[str, object]] = []
-    for index in range(count):
-        trend = trends[index % len(trends)]
-        request = naturalness_audit_request_for_trend(
-            trend,
-            post_type=post_type,
-            length_mode=length_mode,
-        )
+    for index, trend, request, assignment in audit_plan:
         rows.append(
             {
                 "index": index + 1,
                 "trend_id": trend.id,
                 "trend_title": trend.title,
                 "topic": trend.topic,
-                "primary_structure_option": primary_structure_shape(request, [trend])[0],
-                "primary_product_mention_lane": primary_product_mention_lane(request, [trend])[0],
-                "primary_product_mention_placement_target": primary_product_mention_placement_target(request, [trend])[0],
-                "primary_product_mention_syntax_target": primary_product_mention_syntax_target(request, [trend])[0],
-                "primary_layout_target": primary_layout_target(request, [trend])[0],
-                "primary_closing_target": primary_closing_target(request, [trend])[0],
-                "primary_human_rhythm_target": primary_human_rhythm_target(request, [trend])[0],
+                **assignment,
             }
         )
     covered_trend_ids = {str(row["trend_id"]) for row in rows if row["trend_id"]}
@@ -1088,20 +1082,125 @@ def append_plan_concentration_warning(
         warnings.append(f"{label} is too concentrated: {value} appears {value_count}/{total} planned post(s).")
 
 
+NATURALNESS_ASSIGNMENT_FIELDS = (
+    "primary_structure_option",
+    "primary_product_mention_lane",
+    "primary_product_mention_placement_target",
+    "primary_product_mention_syntax_target",
+    "primary_layout_target",
+    "primary_closing_target",
+    "primary_human_rhythm_target",
+)
+
+
+def naturalness_audit_request_plan(
+    trends: list[TrendItem],
+    *,
+    count: int,
+    post_type: str,
+    length_mode: str,
+) -> list[tuple[int, TrendItem, DraftRequest, dict[str, str]]]:
+    counters: dict[str, Counter[str]] = {
+        field: Counter()
+        for field in NATURALNESS_ASSIGNMENT_FIELDS
+    }
+    combo_counts: Counter[tuple[str, ...]] = Counter()
+    plan: list[tuple[int, TrendItem, DraftRequest, dict[str, str]]] = []
+    candidate_slot_count = max(24, count * 3)
+    for index in range(count):
+        trend = trends[index % len(trends)]
+        best_score: tuple[int, int, int, int, int] | None = None
+        best_request: DraftRequest | None = None
+        best_assignment: dict[str, str] | None = None
+        for slot in range(candidate_slot_count):
+            request = naturalness_audit_request_for_trend(
+                trend,
+                post_type=post_type,
+                length_mode=length_mode,
+                variation_slot=slot,
+            )
+            assignment = naturalness_guidance_assignment(request, trend)
+            score = naturalness_assignment_balance_score(
+                assignment,
+                counters=counters,
+                combo_counts=combo_counts,
+                previous_assignment=plan[-1][3] if plan else None,
+                slot=slot,
+            )
+            if best_score is None or score < best_score:
+                best_score = score
+                best_request = request
+                best_assignment = assignment
+        if best_request is None or best_assignment is None:
+            raise RuntimeError("Unable to build naturalness audit request plan.")
+        for field in NATURALNESS_ASSIGNMENT_FIELDS:
+            counters[field][best_assignment[field]] += 1
+        combo_counts[tuple(best_assignment[field] for field in NATURALNESS_ASSIGNMENT_FIELDS)] += 1
+        plan.append((index, trend, best_request, best_assignment))
+    return plan
+
+
+def naturalness_guidance_assignment(request: DraftRequest, trend: TrendItem) -> dict[str, str]:
+    trends = [trend]
+    return {
+        "primary_structure_option": primary_structure_shape(request, trends)[0],
+        "primary_product_mention_lane": primary_product_mention_lane(request, trends)[0],
+        "primary_product_mention_placement_target": primary_product_mention_placement_target(request, trends)[0],
+        "primary_product_mention_syntax_target": primary_product_mention_syntax_target(request, trends)[0],
+        "primary_layout_target": primary_layout_target(request, trends)[0],
+        "primary_closing_target": primary_closing_target(request, trends)[0],
+        "primary_human_rhythm_target": primary_human_rhythm_target(request, trends)[0],
+    }
+
+
+def naturalness_assignment_balance_score(
+    assignment: dict[str, str],
+    *,
+    counters: dict[str, Counter[str]],
+    combo_counts: Counter[tuple[str, ...]],
+    previous_assignment: dict[str, str] | None,
+    slot: int,
+) -> tuple[int, int, int, int, int]:
+    next_counts = [
+        counters[field][assignment[field]] + 1
+        for field in NATURALNESS_ASSIGNMENT_FIELDS
+    ]
+    combo = tuple(assignment[field] for field in NATURALNESS_ASSIGNMENT_FIELDS)
+    consecutive_overlap = 0
+    if previous_assignment:
+        consecutive_overlap = sum(
+            1
+            for field in NATURALNESS_ASSIGNMENT_FIELDS
+            if assignment[field] == previous_assignment[field]
+        )
+    return (
+        max(next_counts),
+        sum(count * count for count in next_counts),
+        combo_counts[combo] + 1,
+        consecutive_overlap,
+        slot,
+    )
+
+
 def naturalness_audit_request_for_trend(
     trend: TrendItem,
     *,
     post_type: str,
     length_mode: str,
+    variation_slot: int | None = None,
 ) -> DraftRequest:
+    extra_context = "Naturalness audit: use this trend, vary the post structure, and avoid a formulaic product definition."
+    if variation_slot is not None:
+        extra_context = (
+            f"{extra_context} Batch variation slot {variation_slot}: use a distinct route for structure, "
+            "Leadpoet placement, sentence rhythm, and close. Do not print the slot."
+        )
     return DraftRequest(
         platform="x",
         topic=trend.topic or "sales AI",
         post_type=post_type,
         angle=trend.leadpoet_angle or trend.title,
-        extra_context=(
-            "Naturalness audit: use this trend, vary the post structure, and avoid a formulaic product definition."
-        ),
+        extra_context=extra_context,
         use_trends=True,
         trend_ids=[trend.id],
         length_mode=length_mode,
@@ -1131,14 +1230,15 @@ def build_naturalness_audit(
         count = max(count, len(trends))
     rows: list[dict[str, object]] = []
     batch_recent_outputs: list[str] = []
-    for index in range(count):
-        trend = trends[index % len(trends)]
+    audit_plan = naturalness_audit_request_plan(
+        trends,
+        count=count,
+        post_type=post_type,
+        length_mode=length_mode,
+    )
+    for index, trend, request, _assignment in audit_plan:
         draft = generator.generate(
-            naturalness_audit_request_for_trend(
-                trend,
-                post_type=post_type,
-                length_mode=length_mode,
-            ),
+            request,
             variants=1,
             save=save_drafts,
             recent_output_texts=batch_recent_outputs,
@@ -1225,7 +1325,7 @@ def build_naturalness_audit(
                 "leadpoet_phrase_pattern": leadpoet_phrase_pattern_for_text(draft.text),
                 "leadpoet_sentence_template": leadpoet_sentence_template(draft.text),
                 "leadpoet_paragraph_position": leadpoet_text_position(draft.text),
-                "leadpoet_in_final_line": bool(re.search(r"\bleadpoet\b", last_nonempty_line(draft.text), flags=re.I)),
+                "leadpoet_in_final_line": leadpoet_in_closing_text_unit(draft.text),
                 "leadpoet_sentence_position": leadpoet_sentence_position(draft.text),
                 "leadpoet_starts_sentence": leadpoet_starts_sentence(draft.text),
                 "layout_fingerprint": post_layout_fingerprint(draft.text),
@@ -1766,6 +1866,15 @@ def last_nonempty_line(text: str) -> str:
         if cleaned:
             return cleaned
     return ""
+
+
+def leadpoet_in_closing_text_unit(text: str) -> bool:
+    closing_line = last_nonempty_line(text)
+    if not closing_line:
+        return False
+    sentences = text_sentences(closing_line)
+    closing_unit = sentences[-1] if sentences else closing_line
+    return bool(re.search(r"\bleadpoet\b", closing_unit, flags=re.I))
 
 
 def cmd_plan_week_x(store: SQLiteStore, args: argparse.Namespace) -> int:

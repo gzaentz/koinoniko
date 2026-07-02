@@ -1020,16 +1020,26 @@ def draft_option_variation_matrix(request: DraftRequest, trends: list[TrendItem]
 
 
 def variation_seed_source(request: DraftRequest, trends: list[TrendItem]) -> str:
-    return "|".join(
+    audit_variation_slot = ""
+    if request.extra_context:
+        match = re.search(r"\bBatch variation slot \d+\b", request.extra_context)
+        if match:
+            audit_variation_slot = match.group(0)
+    seed_parts = [
+        request.platform,
+        request.topic,
+        request.post_type,
+        request.angle or "",
+    ]
+    if audit_variation_slot:
+        seed_parts.append(audit_variation_slot)
+    seed_parts.extend(
         [
-            request.platform,
-            request.topic,
-            request.post_type,
-            request.angle or "",
             ",".join(request.trend_ids or []),
             ",".join(trend.id for trend in trends),
         ]
     )
+    return "|".join(seed_parts)
 
 
 def build_recent_output_context(
