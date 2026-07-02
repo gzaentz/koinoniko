@@ -76,6 +76,7 @@ LEADPOET_DEFINITION_PATTERNS = [
     (r"\bleadpoet is building\b", "avoid default 'Leadpoet is building...' product definition"),
     (r"\bleadpoet is built\b", "avoid default 'Leadpoet is built for...' product definition"),
     (r"\bleadpoet is\b", "avoid standalone 'Leadpoet is...' product definition"),
+    (r"(?m)(?:^|\n\n)\s*for leadpoet,\s+", "avoid formulaic 'For Leadpoet...' product lead-in"),
     (r"(?m)(?:^|\n\n)\s*leadpoet(?:'s|’s)?\s+(?:bet|job|role)\b", "avoid formulaic Leadpoet closer"),
     (r"(?m)(?:^|\n\n)\s*the layer worth building\b", "avoid generic 'layer worth building' closer"),
 ]
@@ -654,7 +655,7 @@ def product_mention_prompt_section(
         "- Do not make the product mention the same final paragraph every time.\n"
         f"- Avoid standalone sentences beginning \"{product_label} is...\", \"{product_label} is building...\", or \"{product_label}'s bet...\".\n"
         "- Prefer varied human phrasing: \"the part we care about...\", \"that is where the product has to start...\", "
-        f"\"for {example_prefix}, the useful signal is...\", or no product name if the saved-context mechanism is already clear.\n"
+        f"\"the useful {example_prefix} signal is...\", or no product name if the saved-context mechanism is already clear.\n"
         "- If the post needs the name for positioning, embed it in a concrete sentence rather than defining the company.\n"
         f"Primary product mention lane for this request: {primary_name}: {primary_guidance}\n"
         "Product mention lanes for this request:\n"
@@ -1544,6 +1545,12 @@ def deterministic_leadpoet_definition_repair(
             repaired,
             flags=re.I,
         )
+    repaired = re.sub(
+        r"(?m)(^|\n\n)(\s*)For\s+Leadpoet,\s*([^.!?\n]*(?:[.!?]|$))",
+        lambda match: leadpoet_formulaic_intro_replacement(match, product_lane=product_lane),
+        repaired,
+        flags=re.I,
+    )
     cleaned = clean_generated_text(repaired, max_chars=max_chars)
     if not cleaned or len(cleaned) > max_chars:
         return text
@@ -1575,6 +1582,48 @@ def leadpoet_definition_replacement(match: re.Match[str], *, product_lane: str) 
     if "layer" in lowered or "signal" in lowered:
         return lane_replacements["ownership without definition"]
     return lane_replacements["quiet embedded name"]
+
+
+def leadpoet_formulaic_intro_replacement(match: re.Match[str], *, product_lane: str) -> str:
+    prefix = match.group(1) or ""
+    indent = match.group(2) or ""
+    body = " ".join((match.group(3) or "").strip().split())
+    ending = "."
+    if body and body[-1] in ".!?":
+        ending = body[-1]
+        body = body[:-1].strip()
+    lowered_body = body.lower()
+    if lowered_body.startswith("the harder question is "):
+        tail = body[len("the harder question is "):]
+        return f"{prefix}{indent}Leadpoet has to stay on the harder question: {tail}{ending}"
+    if lowered_body.startswith("account context has to "):
+        tail = body[len("account context has to "):]
+        return f"{prefix}{indent}Leadpoet has to make account context {tail}{ending}"
+    if lowered_body.startswith("timing means "):
+        tail = body[len("timing means "):]
+        return f"{prefix}{indent}Leadpoet makes timing useful when it means {tail}{ending}"
+    if lowered_body.startswith("buyer timing is "):
+        tail = body[len("buyer timing is "):]
+        return f"{prefix}{indent}Leadpoet keeps buyer timing tied to {tail}{ending}"
+    if body:
+        body = body[0].lower() + body[1:]
+    body = f"{body}{ending}" if body else ""
+    lane_templates = {
+        "mechanism-first": "The Leadpoet mechanism starts where {body}",
+        "consequence-first": "Leadpoet earns the mention only if {body}",
+        "quiet embedded name": "The useful Leadpoet sentence is the one where {body}",
+        "operator scene": "A rep should feel the Leadpoet signal when {body}",
+        "boundary line": "Leadpoet belongs on the sharper side of this boundary: {body}",
+        "signal language": "The Leadpoet signal has to make this plain: {body}",
+        "ownership without definition": "Leadpoet can own the account-timing question without a product-definition line: {body}",
+        "implicit product belief": "Leadpoet's product belief is simple: {body}",
+    }
+    if product_lane == "no-name wedge":
+        template = "The useful wedge is buyer timing: {body}"
+    else:
+        template = lane_templates.get(product_lane, "The useful Leadpoet sentence is the one where {body}")
+    replacement = template.format(body=body or "buyer timing changes the account choice.")
+    return f"{prefix}{indent}{replacement}"
 
 
 def draft_rule_violations(
@@ -1906,6 +1955,7 @@ Rules:
 - Do not make it more polished or corporate.
 - Prefer one concrete mechanism or situation over a polished summary.
 - If a violation mentions a product-definition sentence, rewrite that sentence into a mechanism, scene, or consequence instead of another "Leadpoet is..." line.
+- If a violation mentions a formulaic product lead-in, remove the preface and make the product name part of the actual claim.
 - Do not add unsupported claims, anecdotes, proof, metrics, or customer stories.
 - Do not include the exact words "not just".
 - Do not refuse, caveat, or ask for more details. Return a publishable post.
