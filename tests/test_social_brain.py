@@ -1634,6 +1634,8 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(len(provider.prompts), 3)
             self.assertIn("Produce the structured Post Intent", provider.prompts[0])
             self.assertIn("Writing and review instructions:", provider.prompts[1])
+            self.assertIn("Draft Option Variation Map:", provider.prompts[1])
+            self.assertIn("Use these as distinct assignments, not labels to print in the post.", provider.prompts[1])
             self.assertIn("Final evaluator should check", provider.prompts[2])
             saved_draft = store.get_generated_draft(drafts[0].id)
             self.assertIsNotNone(saved_draft)
@@ -1678,6 +1680,32 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(
                 saved_draft.context_snapshot["primary_human_rhythm_target"]["name"],
                 saved_draft.context_snapshot["human_rhythm_options"][0]["name"],
+            )
+            option_lines = [
+                line.strip()
+                for line in provider.prompts[1].splitlines()
+                if line.strip().startswith("- Option ")
+            ]
+            self.assertEqual(len(option_lines), 3)
+            self.assertIn(
+                f"structure={saved_draft.context_snapshot['structure_variation_options'][0]['name']}",
+                option_lines[0],
+            )
+            self.assertIn(
+                f"structure={saved_draft.context_snapshot['structure_variation_options'][1]['name']}",
+                option_lines[1],
+            )
+            self.assertIn(
+                f"product mention lane={saved_draft.context_snapshot['product_mention_options'][0]['name']}",
+                option_lines[0],
+            )
+            self.assertIn(
+                f"product mention lane={saved_draft.context_snapshot['product_mention_options'][1]['name']}",
+                option_lines[1],
+            )
+            self.assertIn(
+                f"product placement={saved_draft.context_snapshot['product_mention_placement_options'][0]['name']}",
+                option_lines[0],
             )
             self.assertIn("skills", saved_draft.context_snapshot)
             skill_paths = {skill["path"] for skill in saved_draft.context_snapshot["skills"]}

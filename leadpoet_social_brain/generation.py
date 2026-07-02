@@ -812,6 +812,32 @@ def primary_human_rhythm_target(request: DraftRequest, trends: list[TrendItem]) 
     return selected_human_rhythm_targets(request, trends, count=1)[0]
 
 
+def draft_option_variation_matrix(request: DraftRequest, trends: list[TrendItem], *, count: int = 3) -> str:
+    structures = selected_structure_shapes(request, trends, count=count)
+    layouts = selected_layout_targets(request, trends, count=count)
+    closings = selected_closing_targets(request, trends, count=count)
+    rhythms = selected_human_rhythm_targets(request, trends, count=count)
+    lanes = selected_product_mention_lanes(request, trends, count=count)
+    placements = selected_product_mention_placement_targets(request, trends, count=count)
+    lines = [
+        "Draft Option Variation Map:",
+        "Use these as distinct assignments, not labels to print in the post.",
+    ]
+    for index in range(count):
+        lines.append(
+            (
+                f"- Option {index + 1}: "
+                f"structure={structures[index][0]}; "
+                f"layout={layouts[index][0]}; "
+                f"closing={closings[index][0]}; "
+                f"rhythm={rhythms[index][0]}; "
+                f"product mention lane={lanes[index][0]}; "
+                f"product placement={placements[index][0]}"
+            )
+        )
+    return "\n".join(lines)
+
+
 def variation_seed_source(request: DraftRequest, trends: list[TrendItem]) -> str:
     return "|".join(
         [
@@ -1031,6 +1057,7 @@ def build_best_writer_prompt(
     human_rhythm_section = human_rhythm_prompt_section(request, trends)
     structure_section = structure_variation_prompt_section(request, trends)
     product_mention_section = product_mention_prompt_section(anchor, request=request, trends=trends)
+    option_variation_section = draft_option_variation_matrix(request, trends, count=3)
     return f"""Write 3 X draft options for this workspace.
 
 Prioritize exact Voice Examples, worked-reason notes, and the writing skills below over generic marketing instincts.
@@ -1063,6 +1090,8 @@ Facts & Context:
 {structure_section}
 
 {product_mention_section}
+
+{option_variation_section}
 
 Trend context:
 {trends_text or "No timely trends selected."}
