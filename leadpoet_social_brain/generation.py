@@ -2618,21 +2618,23 @@ def leadpoet_subject_verb_replacement(match: re.Match[str], *, product_lane: str
     lowered_body = body.lower()
     action = leadpoet_subject_verb_action(body, verb=verb)
     if product_lane_omits_name(product_lane):
-        replacement = f"Buyer timing should stay concrete: {action}."
-    elif product_syntax == "product as object":
-        replacement = f"The account-change check should be clear enough in Leadpoet to guide the next step: {action}."
-    elif product_syntax == "prepositional tuck-in":
-        replacement = f"In Leadpoet, that account reason should already be specific: {action}."
-    elif product_syntax == "possessive modifier":
-        replacement = f"The signal should stay concrete in Leadpoet: {action}."
+        replacement = leadpoet_subject_verb_name_omission_replacement(action, product_lane=product_lane)
     elif product_syntax == "name omitted":
         replacement = f"The signal has to {action}."
     elif product_syntax == "handoff point":
-        replacement = f"At the handoff into Leadpoet, the account reason has to {action}."
-    elif product_syntax == "question-adjacent":
-        replacement = f"When the signal shows up in Leadpoet, ask plainly: can this {action}?"
+        replacement = f"At the handoff into Leadpoet, the signal has one job: {action}."
     elif product_syntax == "earned late noun":
-        replacement = f"First {action}. Then the product name can enter as the destination, not the point."
+        replacement = f"First, {action}. The destination can be Leadpoet after the reason is clear."
+    elif lane_replacement := leadpoet_subject_verb_lane_replacement(action, product_lane=product_lane):
+        replacement = lane_replacement
+    elif product_syntax == "product as object":
+        replacement = f"Put Leadpoet after the account reason, not before it: {action}."
+    elif product_syntax == "prepositional tuck-in":
+        replacement = f"In Leadpoet, the account reason should already be specific: {action}."
+    elif product_syntax == "possessive modifier":
+        replacement = f"The timing constraint should stay concrete in Leadpoet: {action}."
+    elif product_syntax == "question-adjacent":
+        replacement = f"The Leadpoet question is plain: can the signal {action}?"
     elif verb.startswith("own"):
         if "timing" in lowered_body or "account" in lowered_body:
             replacement = "In Leadpoet, the account-timing question needs a specific answer before copy starts."
@@ -2666,6 +2668,31 @@ def leadpoet_subject_verb_replacement(match: re.Match[str], *, product_lane: str
     if ending != "." and replacement.endswith("."):
         replacement = f"{replacement[:-1]}{ending}"
     return f"{prefix}{indent}{replacement}"
+
+
+def leadpoet_subject_verb_lane_replacement(action: str, *, product_lane: str) -> str | None:
+    lane_templates = {
+        "mechanism-first": "The mechanism comes first: {action}. Leadpoet comes after that, when the account reason is usable.",
+        "consequence-first": "That only matters if it changes the next account choice in Leadpoet: {action}.",
+        "quiet embedded name": "The account reason can carry Leadpoet quietly: {action}.",
+        "operator scene": "When a rep opens Leadpoet, the changed account should be obvious before the generated email: {action}.",
+        "boundary line": "Verified data can stop at fit; the timing line has to stay sharper in Leadpoet: {action}.",
+        "signal language": "A signal should be specific before it shows up in Leadpoet: {action}.",
+        "ownership without definition": "Use Leadpoet as the pressure test for the account reason: {action}.",
+        "implicit product belief": "The product belief stays practical in Leadpoet: {action}.",
+    }
+    template = lane_templates.get(product_lane)
+    return template.format(action=action) if template else None
+
+
+def leadpoet_subject_verb_name_omission_replacement(action: str, *, product_lane: str) -> str:
+    lane_templates = {
+        "no-name wedge": "Buyer timing should stay concrete: {action}.",
+        "mechanism carries it": "Let the mechanism carry the point: {action}.",
+        "context-only wedge": "Account context should do the work here: {action}.",
+    }
+    template = lane_templates.get(product_lane, lane_templates["no-name wedge"])
+    return template.format(action=action)
 
 
 def leadpoet_subject_verb_action(body: str, *, verb: str = "") -> str:

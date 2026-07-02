@@ -3718,6 +3718,56 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotRegex(combined, r"\bleadpoet\s+(?:owns?|makes?|starts?|keeps?|turns?|focuses)\b")
         self.assertTrue(all(not any(leadpoet_bad_phrase_counts(text).values()) for text in outputs_by_syntax.values()))
 
+    def test_deterministic_leadpoet_subject_verb_repairs_vary_by_lane(self):
+        outputs_by_lane = {}
+        for index in range(240):
+            trend = TrendItem(
+                id=f"lane_subject_verb_repair_trend_{index}",
+                title=f"Lane subject verb repair trend {index}",
+                source_type="web",
+                topic="sales AI",
+                summary="Context layer",
+                why_it_matters="It proves context matters.",
+                leadpoet_angle="Buyer timing beats generic data.",
+                date=utc_now(),
+            )
+            request = DraftRequest(
+                platform="x",
+                topic="sales AI",
+                post_type="founder_insight",
+                angle="buyer timing beats generic data",
+                trend_ids=[trend.id],
+            )
+            lane = primary_product_mention_lane(request, [trend])[0]
+            outputs_by_lane.setdefault(
+                lane,
+                deterministic_leadpoet_definition_repair(
+                    "Leadpoet makes timing useful when an account has a reason to listen.",
+                    request=request,
+                    trends=[trend],
+                    max_chars=280,
+                ),
+            )
+
+        self.assertEqual(len(outputs_by_lane), 11)
+        self.assertGreaterEqual(len(set(outputs_by_lane.values())), 9)
+        combined = "\n".join(outputs_by_lane.values()).lower()
+        self.assertNotRegex(combined, r"\bleadpoet\s+(?:owns?|makes?|starts?|keeps?|turns?|focuses)\b")
+        self.assertTrue(all(not any(leadpoet_bad_phrase_counts(text).values()) for text in outputs_by_lane.values()))
+        mention_patterns = [
+            leadpoet_mention_pattern(text)
+            for text in outputs_by_lane.values()
+        ]
+        self.assertIn("no_leadpoet", mention_patterns)
+        self.assertGreaterEqual(len(set(mention_patterns)), 3)
+        templates = [
+            leadpoet_sentence_template(text)
+            for text in outputs_by_lane.values()
+            if leadpoet_sentence_template(text) != "no_leadpoet"
+        ]
+        self.assertGreaterEqual(len(set(templates)), 6)
+        self.assertLessEqual(max(templates.count(template) for template in set(templates)), 2)
+
     def test_missing_anchor_fallback_varies_leadpoet_line_by_trend(self):
         class NoAnchorProvider:
             def generate(self, prompt: str, *, variants: int) -> list[str]:
