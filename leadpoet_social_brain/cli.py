@@ -296,6 +296,7 @@ def build_parser() -> argparse.ArgumentParser:
     audit_naturalness.add_argument("--length", choices=["short", "standard", "long"], default="standard")
     audit_naturalness.add_argument("--save-drafts", action="store_true")
     audit_naturalness.add_argument("--plan-only", action="store_true", help="Audit deterministic trend/variation coverage without calling the LLM provider.")
+    audit_naturalness.add_argument("--cover-all-trends", action="store_true", help="Raise the effective post count to cover every loaded matching trend.")
     audit_naturalness.add_argument("--json", action="store_true", dest="json_output")
     audit_naturalness.add_argument("--fail-on-warning", action="store_true")
     audit_naturalness.set_defaults(func=cmd_audit_naturalness_x)
@@ -856,6 +857,7 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
             trend_status=args.trend_status,
             post_type=args.post_type,
             length_mode=args.length,
+            cover_all_trends=args.cover_all_trends,
         )
     else:
         provider = load_configured_provider(store)
@@ -871,6 +873,7 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
             post_type=args.post_type,
             length_mode=args.length,
             save_drafts=args.save_drafts,
+            cover_all_trends=args.cover_all_trends,
         )
     if args.json_output:
         print(json.dumps(payload, indent=2))
@@ -948,6 +951,7 @@ def build_naturalness_plan_audit(
     trend_status: str | None,
     post_type: str,
     length_mode: str,
+    cover_all_trends: bool = False,
 ) -> dict[str, object]:
     if count <= 0:
         raise SystemExit("--count must be greater than 0.")
@@ -955,6 +959,9 @@ def build_naturalness_plan_audit(
     trends = store.list_trends(status=trend_status or None, limit=effective_trend_limit)
     if not trends:
         raise SystemExit("No trends found for naturalness audit.")
+    requested_count = count
+    if cover_all_trends:
+        count = max(count, len(trends))
     rows: list[dict[str, object]] = []
     for index in range(count):
         trend = trends[index % len(trends)]
@@ -1027,6 +1034,8 @@ def build_naturalness_plan_audit(
         "mode": "plan_only",
         "trend_count": len(trends),
         "post_count": len(rows),
+        "requested_count": requested_count,
+        "cover_all_trends": cover_all_trends,
         "covered_trend_count": len(covered_trend_ids),
         "uncovered_trend_count": uncovered_trend_count,
         "loaded_all_matching_trends": trend_limit <= 0,
@@ -1087,6 +1096,7 @@ def build_naturalness_audit(
     post_type: str,
     length_mode: str,
     save_drafts: bool,
+    cover_all_trends: bool = False,
 ) -> dict[str, object]:
     if count <= 0:
         raise SystemExit("--count must be greater than 0.")
@@ -1094,6 +1104,9 @@ def build_naturalness_audit(
     trends = store.list_trends(status=trend_status or None, limit=effective_trend_limit)
     if not trends:
         raise SystemExit("No trends found for naturalness audit.")
+    requested_count = count
+    if cover_all_trends:
+        count = max(count, len(trends))
     rows: list[dict[str, object]] = []
     batch_recent_outputs: list[str] = []
     for index in range(count):
@@ -1343,6 +1356,8 @@ def build_naturalness_audit(
     return {
         "trend_count": len(trends),
         "post_count": len(rows),
+        "requested_count": requested_count,
+        "cover_all_trends": cover_all_trends,
         "covered_trend_count": len(covered_trend_ids),
         "uncovered_trend_count": uncovered_trend_count,
         "loaded_all_matching_trends": trend_limit <= 0,

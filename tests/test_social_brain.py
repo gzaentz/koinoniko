@@ -3310,20 +3310,41 @@ class SocialBrainTest(unittest.TestCase):
             "Why LinkedIn engagement is becoming one of the most valuable sales signals",
             "The four layers of winning GTM infrastructure",
         ]
+        leadpoet_angles = [
+            "Buyer timing needs proprietary account context.",
+            "Follow-up speed only helps when the account reason is clear.",
+            "Revenue teams need buyer intent that explains why now.",
+            "AI sales workflows need timing signals before copy.",
+            "CRM-native agents still need account-level qualification.",
+            "More SDR agents create more need for deciding who matters.",
+            "Marketing agents need context that sales can act on.",
+            "Content intelligence matters when it becomes buyer timing.",
+            "Intent data is useful when it changes rep prioritization.",
+            "Revenue marketing needs context that survives the handoff.",
+            "CX signals should become sales timing instead of dashboard noise.",
+            "Modern marketing stacks still need account qualification.",
+            "AI-native GTM loops need a source of account truth.",
+            "CRM AI only works when timing changes the next action.",
+            "Commerce agents raise the bar for account-level context.",
+            "Agentic commerce makes buyer timing more operational.",
+            "LinkedIn engagement is a weak signal until tied to account context.",
+            "Winning GTM infrastructure needs a proprietary intent layer.",
+        ]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
             store.seed_defaults()
             provider = CookieCutterTrendProvider()
-            for title in trend_titles:
+            for index, title in enumerate(trend_titles):
                 store.save_trend_item(
                     TrendItem(
+                        id=f"naturalness-audit-trend-{index + 1:02d}",
                         title=title,
                         source_type="web",
                         topic="sales AI",
                         summary="Current GTM trend fixture for generation audit.",
                         why_it_matters="It shows the market moving toward context and timing.",
-                        leadpoet_angle="Buyer timing needs proprietary account context.",
+                        leadpoet_angle=leadpoet_angles[index],
                         date=utc_now(),
                     )
                 )
@@ -3471,6 +3492,103 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("primary_structure_option", payload["rows"][0])
             self.assertIn("primary_product_mention_syntax_target", payload["rows"][0])
             self.assertTrue(any("were not covered" in warning for warning in payload["warnings"]))
+            store.close()
+
+    def test_audit_naturalness_x_cover_all_trends_expands_plan_count(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            for index in range(6):
+                store.save_trend_item(
+                    TrendItem(
+                        title=f"Trend {index}",
+                        source_type="web",
+                        topic="sales AI",
+                        summary="A trend about GTM context.",
+                        why_it_matters="It shows timing matters.",
+                        leadpoet_angle=f"Buyer timing needs proprietary account context {index}.",
+                        date=utc_now(),
+                    )
+                )
+
+            payload = build_naturalness_plan_audit(
+                store,
+                count=5,
+                trend_limit=0,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+                cover_all_trends=True,
+            )
+
+            self.assertEqual(payload["requested_count"], 5)
+            self.assertTrue(payload["cover_all_trends"])
+            self.assertEqual(payload["post_count"], 6)
+            self.assertEqual(payload["trend_count"], 6)
+            self.assertEqual(payload["covered_trend_count"], 6)
+            self.assertEqual(payload["uncovered_trend_count"], 0)
+            self.assertFalse(any("were not covered" in warning for warning in payload["warnings"]))
+            store.close()
+
+    def test_audit_naturalness_x_cover_all_trends_expands_generated_count(self):
+        class CoverAllProvider:
+            def __init__(self):
+                self.final_count = 0
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "Signal quality matters before copy.\n\nInside Leadpoet, account timing explains why now.",
+                        "The account can look valid and still be late.\n\nInside Leadpoet, timing changes the next action.",
+                        "More contacts do not create judgment.\n\nInside Leadpoet, the account reason has to come first.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    self.final_count += 1
+                    return [
+                        evaluation_json(
+                            f"Signal {self.final_count} matters before copy.\n\n"
+                            f"Inside Leadpoet, account timing explains why now {self.final_count}."
+                        )
+                    ]
+                return ["Signal quality matters before copy."]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            for index in range(6):
+                store.save_trend_item(
+                    TrendItem(
+                        title=f"Trend {index}",
+                        source_type="web",
+                        topic="sales AI",
+                        summary="A trend about GTM context.",
+                        why_it_matters="It shows timing matters.",
+                        leadpoet_angle=f"Buyer timing needs proprietary account context {index}.",
+                        date=utc_now(),
+                    )
+                )
+
+            payload = build_naturalness_audit(
+                store,
+                SocialBrainGenerator(store, provider=CoverAllProvider()),
+                count=5,
+                trend_limit=0,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+                save_drafts=False,
+                cover_all_trends=True,
+            )
+
+            self.assertEqual(payload["requested_count"], 5)
+            self.assertTrue(payload["cover_all_trends"])
+            self.assertEqual(payload["post_count"], 6)
+            self.assertEqual(payload["trend_count"], 6)
+            self.assertEqual(payload["covered_trend_count"], 6)
+            self.assertEqual(payload["uncovered_trend_count"], 0)
+            self.assertFalse(any("were not covered" in warning for warning in payload["warnings"]))
             store.close()
 
     def test_audit_naturalness_x_plan_only_warns_on_concentrated_assignments(self):
@@ -7446,9 +7564,11 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(args.length, "standard")
         self.assertFalse(args.save_drafts)
         self.assertFalse(args.plan_only)
+        self.assertFalse(args.cover_all_trends)
         self.assertFalse(args.fail_on_warning)
         self.assertTrue(parser.parse_args(["audit-naturalness-x", "--fail-on-warning"]).fail_on_warning)
         self.assertTrue(parser.parse_args(["audit-naturalness-x", "--plan-only"]).plan_only)
+        self.assertTrue(parser.parse_args(["audit-naturalness-x", "--cover-all-trends"]).cover_all_trends)
 
     def test_weekly_pattern_refresh_task_updates_weekly_and_monthly_windows(self):
         with tempfile.TemporaryDirectory() as tmpdir:
