@@ -2126,6 +2126,8 @@ class SocialBrainTest(unittest.TestCase):
 
             self.assertEqual(payload["post_count"], 20)
             self.assertEqual(payload["trend_count"], len(trend_titles))
+            self.assertEqual(payload["covered_trend_count"], len(trend_titles))
+            self.assertEqual(payload["uncovered_trend_count"], 0)
             self.assertGreaterEqual(provider.repair_count, 20)
             self.assertTrue(all(count == 0 for count in payload["bad_phrase_counts"].values()))
             self.assertEqual(payload["warnings"], [])
@@ -2196,6 +2198,55 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(
                 any("Leadpoet mention phrasing is too concentrated" in warning for warning in payload["warnings"])
             )
+            store.close()
+
+    def test_audit_naturalness_x_warns_when_not_all_loaded_trends_are_covered(self):
+        class CoverageProvider:
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "Buyer timing is still the useful sales AI question.\n\nLeadpoet has to make the reason visible.",
+                        "A correct account record can still be late.\n\nThe Leadpoet signal has to explain why now.",
+                        "More names do not fix prioritization.\n\nThat is where Leadpoet focuses: timing before copy.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    return [evaluation_json("Buyer timing is still the useful sales AI question.\n\nLeadpoet has to make the reason visible.")]
+                return ["Leadpoet has to make timing visible."]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            for index in range(7):
+                store.save_trend_item(
+                    TrendItem(
+                        title=f"Current trend {index}",
+                        source_type="web",
+                        topic="sales AI",
+                        summary="A current GTM trend.",
+                        why_it_matters="It proves timing matters.",
+                        leadpoet_angle="Buyer timing needs proprietary account context.",
+                        date=utc_now(),
+                    )
+                )
+
+            payload = build_naturalness_audit(
+                store,
+                SocialBrainGenerator(store, provider=CoverageProvider()),
+                count=5,
+                trend_limit=0,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+                save_drafts=False,
+            )
+
+            self.assertTrue(payload["loaded_all_matching_trends"])
+            self.assertEqual(payload["trend_count"], 7)
+            self.assertEqual(payload["covered_trend_count"], 5)
+            self.assertEqual(payload["uncovered_trend_count"], 2)
+            self.assertTrue(any("were not covered" in warning for warning in payload["warnings"]))
             store.close()
 
     def test_generation_allows_supported_first_person_context(self):
@@ -5332,7 +5383,7 @@ class SocialBrainTest(unittest.TestCase):
         args = parser.parse_args(["audit-naturalness-x"])
 
         self.assertEqual(args.count, 20)
-        self.assertEqual(args.trend_limit, 20)
+        self.assertEqual(args.trend_limit, 0)
         self.assertEqual(args.trend_status, "unused")
         self.assertEqual(args.post_type, "founder_insight")
         self.assertEqual(args.length, "standard")

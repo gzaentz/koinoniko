@@ -219,7 +219,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     audit_naturalness = subparsers.add_parser("audit-naturalness-x", help="Generate trend posts and report naturalness/structure metrics.")
     audit_naturalness.add_argument("--count", type=int, default=20)
-    audit_naturalness.add_argument("--trend-limit", type=int, default=20)
+    audit_naturalness.add_argument("--trend-limit", type=int, default=0, help="Maximum matching trends to load. Use 0 for all current matching trends.")
     audit_naturalness.add_argument("--trend-status", default="unused")
     audit_naturalness.add_argument("--post-type", default="founder_insight")
     audit_naturalness.add_argument("--length", choices=["short", "standard", "long"], default="standard")
@@ -793,6 +793,7 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
         print(json.dumps(payload, indent=2))
         return 0
     print(f"Generated: {payload['post_count']} post(s) across {payload['trend_count']} trend(s)")
+    print(f"Trend coverage: {payload['covered_trend_count']} covered, {payload['uncovered_trend_count']} uncovered")
     print(f"Saved drafts: {'yes' if args.save_drafts else 'no'}")
     print("Leadpoet mention shapes:")
     for key, value in sorted(payload["leadpoet_shapes"].items()):
@@ -827,7 +828,8 @@ def build_naturalness_audit(
 ) -> dict[str, object]:
     if count <= 0:
         raise SystemExit("--count must be greater than 0.")
-    trends = store.list_trends(status=trend_status or None, limit=trend_limit)
+    effective_trend_limit = trend_limit if trend_limit > 0 else 1000
+    trends = store.list_trends(status=trend_status or None, limit=effective_trend_limit)
     if not trends:
         raise SystemExit("No trends found for naturalness audit.")
     rows: list[dict[str, object]] = []
@@ -883,6 +885,12 @@ def build_naturalness_audit(
     first_structure_counts = Counter(str(row["first_structure_option"]) for row in rows if row["first_structure_option"])
     if len(first_structure_counts) < min(5, len(trends), count):
         warnings.append("Structure guidance did not vary enough across trends.")
+    covered_trend_ids = {str(row["trend_id"]) for row in rows if row["trend_id"]}
+    uncovered_trend_count = max(0, len(trends) - len(covered_trend_ids))
+    if uncovered_trend_count:
+        warnings.append(
+            f"{uncovered_trend_count} loaded trend(s) were not covered; raise --count or lower --trend-limit for full coverage."
+        )
     mention_pattern_counts = Counter(
         str(row["leadpoet_mention_pattern"])
         for row in rows
@@ -894,6 +902,10 @@ def build_naturalness_audit(
     return {
         "trend_count": len(trends),
         "post_count": len(rows),
+        "covered_trend_count": len(covered_trend_ids),
+        "uncovered_trend_count": uncovered_trend_count,
+        "loaded_all_matching_trends": trend_limit <= 0,
+        "trend_limit": trend_limit,
         "leadpoet_shapes": dict(Counter(str(row["leadpoet_shape"]) for row in rows)),
         "bad_phrase_counts": bad_phrase_counts,
         "unique_first_lines": unique_first_lines,
