@@ -3456,10 +3456,10 @@ def _format_example(post, bundle: ContextBundle) -> str:
 
 
 def _format_trend(trend: TrendItem) -> str:
-    hooks = _trend_list(trend.suggested_hooks)[:3]
+    hooks = trend_prompt_lines_for_generation(_trend_list(trend.suggested_hooks))[:3]
     key_points = _trend_json_list(trend.key_points_json)
     claims = _trend_json_list(trend.important_claims_json)
-    post_angles = _trend_json_list(trend.post_angles_json)
+    post_angles = trend_prompt_lines_for_generation(_trend_json_list(trend.post_angles_json))
     saved_angle = trend_angle_for_generation(trend)
     what_is_new = claims[0] if claims else (key_points[1] if len(key_points) > 1 else trend.source_excerpt or "The timing or market context around this signal has changed.")
     why_gtm = key_points[2] if len(key_points) > 2 else trend.why_it_matters
@@ -3516,6 +3516,15 @@ def trend_angle_for_generation(trend: TrendItem) -> str:
 
 def trend_angle_is_formulaic(angle: str) -> bool:
     return any(re.search(pattern, angle, flags=re.I) for pattern, _label in LEADPOET_DEFINITION_PATTERNS)
+
+
+def trend_prompt_lines_for_generation(values: list[str]) -> list[str]:
+    lines = []
+    for value in values:
+        line = " ".join(str(value or "").split())
+        if line and not trend_angle_is_formulaic(line):
+            lines.append(line)
+    return lines
 
 
 def trend_specific_generation_angle(trend: TrendItem) -> str:

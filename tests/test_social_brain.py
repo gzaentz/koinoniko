@@ -4416,6 +4416,52 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotIn("Leadpoet should", payload["rows"][0]["request_angle"])
             store.close()
 
+    def test_formulaic_trend_hooks_and_post_angles_are_removed_before_prompting(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            trend = store.save_trend_item(
+                TrendItem(
+                    id="formulaic-prompt-seeds-trend",
+                    title="Sales AI Agents Add Buying Windows",
+                    source_type="web",
+                    topic="sales AI",
+                    summary="A trend about agents using timing signals.",
+                    why_it_matters="It shows account timing moving upstream from copy.",
+                    leadpoet_angle="Leadpoet is building the timing layer for sales AI.",
+                    suggested_hooks=(
+                        "Leadpoet should explain why timing beats generated email volume.\n"
+                        "Sales AI is becoming a timing layer.\n"
+                        "Leadpoet is building the intent layer."
+                    ),
+                    post_angles_json=json.dumps(
+                        [
+                            "Leadpoet can argue buyer timing beats generated copy.",
+                            "Buyer timing beats generated email volume.",
+                        ]
+                    ),
+                    date=utc_now(),
+                )
+            )
+
+            prompt = SocialBrainGenerator(store).build_prompt(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    use_trends=True,
+                    trend_ids=[trend.id],
+                )
+            )
+
+            self.assertIn("Saved angle:\nUse Sales AI Agents Add Buying Windows as market proof", prompt)
+            self.assertIn("- Sales AI is becoming a timing layer.", prompt)
+            self.assertIn("- Buyer timing beats generated email volume.", prompt)
+            self.assertNotIn("Leadpoet should explain why timing beats", prompt)
+            self.assertNotIn("Leadpoet is building the intent layer", prompt)
+            self.assertNotIn("Leadpoet can argue buyer timing", prompt)
+            store.close()
+
     def test_audit_naturalness_x_cover_all_trends_expands_plan_count(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
