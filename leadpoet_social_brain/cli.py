@@ -98,6 +98,19 @@ REPEATED_PHRASE_STOPWORDS = {
     "would",
 }
 
+LEADPOET_AUDIT_BAD_PATTERNS = [
+    ("leadpoet is building", r"\bleadpoet\s+is\s+building\b"),
+    ("leadpoet is built", r"\bleadpoet\s+is\s+built\b"),
+    ("leadpoet is", r"\bleadpoet\s+is\b"),
+    ("for leadpoet", r"(?m)(?:^|\n\n)\s*for\s+leadpoet,\s+"),
+    ("leadpoet modal lead-in", r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:should|can|needs?|has\s+to)\b"),
+    ("that/this is where leadpoet", r"\b(?:that|this)\s+is\s+where\s+leadpoet\b|\bthat['’]?s\s+where\s+leadpoet\b"),
+    ("that is the leadpoet closer", r"\bthat\s+is\s+the\s+leadpoet\s+(?:job|bar|point|constraint|product belief)\b"),
+    ("leadpoet bet/job/role", r"(?m)(?:^|\n\n)\s*leadpoet(?:'s|’s)?\s+(?:bet|job|role)\b"),
+    ("the layer worth building", r"(?m)(?:^|\n\n)\s*the\s+layer\s+worth\s+building\b"),
+]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -1015,15 +1028,9 @@ def build_naturalness_audit(
         )
     text_blob = "\n\n".join(str(row["text"]) for row in rows).lower()
     warnings: list[str] = []
-    bad_phrase_counts = {
-        "leadpoet is building": text_blob.count("leadpoet is building"),
-        "leadpoet is built": text_blob.count("leadpoet is built"),
-        "leadpoet is": text_blob.count("leadpoet is"),
-        "leadpoet's bet": text_blob.count("leadpoet's bet"),
-        "leadpoet’s bet": text_blob.count("leadpoet’s bet"),
-    }
+    bad_phrase_counts = leadpoet_bad_phrase_counts(text_blob)
     if any(bad_phrase_counts.values()):
-        warnings.append("Cookie-cutter Leadpoet product-definition phrase still appeared.")
+        warnings.append("Cookie-cutter or formulaic Leadpoet phrasing still appeared.")
     unique_first_lines = len({str(row["first_line"]).lower() for row in rows if row["first_line"]})
     if unique_first_lines < min(5, len(rows)):
         warnings.append("First lines are not varied enough.")
@@ -1260,8 +1267,10 @@ def leadpoet_mention_pattern(text: str) -> str:
         return "leadpoet_is"
     if re.search(r"\bfor\s+leadpoet\b", text, flags=re.I):
         return "for_leadpoet"
-    if re.search(r"\bthat\s+is\s+where\s+leadpoet\b|\bthat's\s+where\s+leadpoet\b", text, flags=re.I):
+    if re.search(r"\b(?:that|this)\s+is\s+where\s+leadpoet\b|\bthat['’]?s\s+where\s+leadpoet\b", text, flags=re.I):
         return "that_is_where_leadpoet"
+    if re.search(r"\bthat\s+is\s+the\s+leadpoet\s+(?:job|bar|point|constraint|product belief)\b", text, flags=re.I):
+        return "that_is_the_leadpoet_closer"
     if re.search(r"\bleadpoet\s+lane\b|\bleadpoet's\s+lane\b|\bleadpoet’s\s+lane\b", text, flags=re.I):
         return "leadpoet_lane"
     if re.search(r"\bleadpoet\s+signal\b|\bleadpoet's\s+signal\b|\bleadpoet’s\s+signal\b", text, flags=re.I):
@@ -1285,6 +1294,13 @@ def leadpoet_mention_pattern(text: str) -> str:
     if re.search(r"\bleadpoet(?:'s|’s)\s+\w+", text, flags=re.I):
         return "leadpoet_possessive"
     return "leadpoet_contextual"
+
+
+def leadpoet_bad_phrase_counts(text: str) -> dict[str, int]:
+    return {
+        key: len(re.findall(pattern, text, flags=re.I))
+        for key, pattern in LEADPOET_AUDIT_BAD_PATTERNS
+    }
 
 
 def repeated_batch_phrase_counts(texts: list[str], *, phrase_size: int = 4) -> dict[str, int]:

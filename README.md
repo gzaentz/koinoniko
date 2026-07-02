@@ -814,7 +814,7 @@ python3 -m leadpoet_social_brain.cli audit-naturalness-x \
   --fail-on-warning
 ```
 
-By default, `audit-naturalness-x` loads all matching current trends (`--trend-limit 0`) and generates 20 reviewed posts against them. It reports bad phrase counts for cookie-cutter Leadpoet definitions, repeated stock phrases, first-line and closing-line variety, primary structure counts, primary layout target counts, primary closing target counts, primary human rhythm target counts, primary product mention lane and placement counts, actual Leadpoet paragraph/sentence placement, Leadpoet mention pattern counts, generated layout fingerprints, and trend coverage. If there are more loaded trends than generated posts, the audit warns; raise `--count` to cover every current trend. Use `--json` when you want the full rows and generated text for manual review.
+By default, `audit-naturalness-x` loads all matching current trends (`--trend-limit 0`) and generates 20 reviewed posts against them. It reports bad phrase counts for cookie-cutter Leadpoet definitions and formulaic Leadpoet lead-ins, repeated stock phrases, first-line and closing-line variety, primary structure counts, primary layout target counts, primary closing target counts, primary human rhythm target counts, primary product mention lane and placement counts, actual Leadpoet paragraph/sentence placement, Leadpoet mention pattern counts, generated layout fingerprints, and trend coverage. If there are more loaded trends than generated posts, the audit warns; raise `--count` to cover every current trend. Use `--json` when you want the full rows and generated text for manual review.
 
 This command uses the configured LLM provider, so a live audit sends the selected trends, saved context, and generation prompts to that provider. Run it only in an environment where that is acceptable.
 
@@ -832,7 +832,8 @@ concrete detail, post shape, and evidence boundary. The natural writer drafts fr
 intent, and the evaluator rewrites if the result is generic, unsupported, or too polished.
 Active Writing Rules also repair obvious violations such as missing Leadpoet positioning,
 blocked phrases, formulaic `Leadpoet is...` / `For Leadpoet...` / `Leadpoet should...`
-phrasing, `That is where Leadpoet...` wrappers, or em dashes.
+style modal phrasing, `That is where Leadpoet...` wrappers, `That is the Leadpoet...`
+closers, or em dashes.
 The user only reviews the final queued post, not the internal brief.
 
 `Use in Post` on a trend or `Use Pattern` on a pattern opens Create Post with that source preselected. Generated output still enters the review queue; it does not publish automatically.
