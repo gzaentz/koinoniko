@@ -78,6 +78,7 @@ LEADPOET_DEFINITION_PATTERNS = [
     (r"\bleadpoet is\b", "avoid standalone 'Leadpoet is...' product definition"),
     (r"(?m)(?:^|\n\n)\s*for leadpoet,\s+", "avoid formulaic 'For Leadpoet...' product lead-in"),
     (r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:should|can|needs?|has\s+to)\b", "avoid formulaic Leadpoet modal lead-in"),
+    (r"\b(?:that|this)\s+is\s+where\s+leadpoet\b|\bthat['’]?s\s+where\s+leadpoet\b", "avoid formulaic 'that is where Leadpoet...' product lead-in"),
     (r"(?m)(?:^|\n\n)\s*leadpoet(?:'s|’s)?\s+(?:bet|job|role)\b", "avoid formulaic Leadpoet closer"),
     (r"(?m)(?:^|\n\n)\s*the layer worth building\b", "avoid generic 'layer worth building' closer"),
 ]
@@ -685,7 +686,7 @@ def product_mention_prompt_section(
         "Dynamic Product Mention:\n"
         "- Do not make the product mention the same final paragraph every time.\n"
         f"- Avoid standalone sentences beginning \"{product_label} is...\", \"{product_label} is building...\", or \"{product_label}'s bet...\".\n"
-        "- Prefer varied human phrasing: \"the part we care about...\", \"that is where the product has to start...\", "
+        "- Prefer varied human phrasing: \"the part we care about...\", \"the mechanism has to start before copy...\", "
         f"\"the useful {example_prefix} signal is...\", or no product name if the saved-context mechanism is already clear.\n"
         "- If the post needs the name for positioning, embed it in a concrete sentence rather than defining the company.\n"
         f"Primary product mention lane for this request: {primary_name}: {primary_guidance}\n"
@@ -1620,6 +1621,18 @@ def deterministic_leadpoet_definition_repair(
         repaired,
         flags=re.I,
     )
+    repaired = re.sub(
+        r"(?m)(^|(?<=[.!?])\s+|\n\n)(\s*)(?:That|This)\s+is\s+where\s+Leadpoet\s+([^.!?\n]*(?:[.!?]|$))",
+        lambda match: leadpoet_where_leadin_replacement(match, product_lane=product_lane),
+        repaired,
+        flags=re.I,
+    )
+    repaired = re.sub(
+        r"(?m)(^|(?<=[.!?])\s+|\n\n)(\s*)That['’]?s\s+where\s+Leadpoet\s+([^.!?\n]*(?:[.!?]|$))",
+        lambda match: leadpoet_where_leadin_replacement(match, product_lane=product_lane),
+        repaired,
+        flags=re.I,
+    )
     cleaned = clean_generated_text(repaired, max_chars=max_chars)
     if not cleaned or len(cleaned) > max_chars:
         return text
@@ -1664,7 +1677,7 @@ def leadpoet_formulaic_intro_replacement(match: re.Match[str], *, product_lane: 
     lowered_body = body.lower()
     if lowered_body.startswith("the harder question is "):
         tail = body[len("the harder question is "):]
-        return f"{prefix}{indent}The harder question is {tail}{ending} That is where Leadpoet belongs."
+        return f"{prefix}{indent}The harder question is {tail}{ending} Leadpoet belongs on that problem, not a product-definition line."
     if lowered_body.startswith("account context has to "):
         tail = body[len("account context has to "):]
         return f"{prefix}{indent}Account context has to {tail}{ending} That is the Leadpoet constraint."
@@ -1716,6 +1729,43 @@ def leadpoet_modal_leadin_replacement(match: re.Match[str], *, product_lane: str
         "implicit product belief": "The Leadpoet product belief is simple: {body}.",
     }
     replacement = templates.get(product_lane, templates["quiet embedded name"]).format(body=body)
+    if ending != "." and replacement.endswith("."):
+        replacement = f"{replacement[:-1]}{ending}"
+    return f"{prefix}{indent}{replacement}"
+
+
+def leadpoet_where_leadin_replacement(match: re.Match[str], *, product_lane: str) -> str:
+    prefix = match.group(1) or ""
+    indent = match.group(2) or ""
+    body = " ".join((match.group(3) or "").strip().split())
+    ending = "."
+    if body and body[-1] in ".!?":
+        ending = body[-1]
+        body = body[:-1].strip()
+    lowered = body.lower()
+    if lowered.startswith("focuses:"):
+        detail = body.split(":", 1)[1].strip()
+        replacement = f"{detail[0].upper() + detail[1:] if detail else 'Timing before copy'} is the useful Leadpoet focus."
+    elif lowered.startswith("focuses on "):
+        detail = body[len("focuses on "):].strip()
+        replacement = f"{detail[0].upper() + detail[1:] if detail else 'Buyer timing'} is the useful Leadpoet focus."
+    elif lowered.startswith(("should ", "can ", "needs ", "need ", "has to ")):
+        replacement = f"The Leadpoet constraint {body}."
+    else:
+        templates = {
+            "mechanism-first": "The mechanism is the Leadpoet point: {body}.",
+            "consequence-first": "The consequence is the Leadpoet point: {body}.",
+            "quiet embedded name": "The useful Leadpoet point is concrete: {body}.",
+            "no-name wedge": "The useful wedge is concrete: {body}.",
+            "operator scene": "A rep should feel the Leadpoet point in the work: {body}.",
+            "boundary line": "The sharper boundary for Leadpoet is this: {body}.",
+            "signal language": "The useful Leadpoet signal is concrete: {body}.",
+            "ownership without definition": "The account-timing question carries the Leadpoet point: {body}.",
+            "implicit product belief": "The Leadpoet product belief is concrete: {body}.",
+        }
+        replacement = templates.get(product_lane, templates["quiet embedded name"]).format(
+            body=body[0].lower() + body[1:] if body else "buyer timing changes the account choice"
+        )
     if ending != "." and replacement.endswith("."):
         replacement = f"{replacement[:-1]}{ending}"
     return f"{prefix}{indent}{replacement}"
@@ -2086,6 +2136,7 @@ Rules:
 - If a violation mentions a product-definition sentence, rewrite that sentence into a mechanism, scene, or consequence instead of another "Leadpoet is..." line.
 - If a violation mentions a formulaic product lead-in, remove the preface and make the product name part of the actual claim.
 - If a violation mentions a formulaic Leadpoet modal lead-in, make Leadpoet the object, mechanism, or constraint inside the sentence instead of the sentence subject.
+- If a violation mentions "that is where Leadpoet...", make the point concrete without using that wrapper.
 - Do not add unsupported claims, anecdotes, proof, metrics, or customer stories.
 - Do not include the exact words "not just".
 - Do not refuse, caveat, or ask for more details. Return a publishable post.

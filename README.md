@@ -832,7 +832,7 @@ concrete detail, post shape, and evidence boundary. The natural writer drafts fr
 intent, and the evaluator rewrites if the result is generic, unsupported, or too polished.
 Active Writing Rules also repair obvious violations such as missing Leadpoet positioning,
 blocked phrases, formulaic `Leadpoet is...` / `For Leadpoet...` / `Leadpoet should...`
-phrasing, or em dashes.
+phrasing, `That is where Leadpoet...` wrappers, or em dashes.
 The user only reviews the final queued post, not the internal brief.
 
 `Use in Post` on a trend or `Use Pattern` on a pattern opens Create Post with that source preselected. Generated output still enters the review queue; it does not publish automatically.
