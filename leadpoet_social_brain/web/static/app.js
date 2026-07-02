@@ -1587,13 +1587,15 @@ async function moveToScheduled(id) {
   await refresh();
 }
 
+async function openQueueDetailById(id) {
+  const payload = await api(`/api/queue/${encodeURIComponent(id)}`);
+  state.queueDetail = payload.item;
+  renderQueueModal();
+  openModal("queueModal");
+}
+
 window.openQueueDetail = (id) => {
-  runButton(null, "", async () => {
-    const payload = await api(`/api/queue/${encodeURIComponent(id)}`);
-    state.queueDetail = payload.item;
-    renderQueueModal();
-    openModal("queueModal");
-  });
+  runButton(null, "", () => openQueueDetailById(id));
 };
 
 function renderQueueModal() {
@@ -1827,27 +1829,31 @@ async function createPost() {
   syncCreatePostSelectionsFromInputs();
   const trendId = state.selectedTrendForCreate?.id || "";
   const patternId = state.selectedPatternForCreate?.id || "";
+  const requestBody = {
+    instruction,
+    topic: $("createPostTopic").value || "uncategorized",
+    post_type: $("createPostType").value || "founder_insight",
+    length_mode: createPostLengthValue(),
+    use_trends: Boolean(trendId),
+    trend_ids: trendId ? [trendId] : [],
+    use_patterns: Boolean(patternId),
+    pattern_ids: patternId ? [patternId] : [],
+    scheduled_at: $("createPostScheduled").value,
+    extra_context: $("createPostExtra").value,
+  };
+  showMessage("Generating post for review.");
+  closeModal("createPostModal");
+  setView("reviewer");
   const payload = await api("/api/content/create-post", {
     method: "POST",
-    body: JSON.stringify({
-      instruction,
-      topic: $("createPostTopic").value || "uncategorized",
-      post_type: $("createPostType").value || "founder_insight",
-      length_mode: createPostLengthValue(),
-      use_trends: Boolean(trendId),
-      trend_ids: trendId ? [trendId] : [],
-      use_patterns: Boolean(patternId),
-      pattern_ids: patternId ? [patternId] : [],
-      scheduled_at: $("createPostScheduled").value,
-      extra_context: $("createPostExtra").value,
-    }),
+    body: JSON.stringify(requestBody),
   });
+  const createdQueueId = payload.queue_id || payload.item?.id || "";
   const warnings = payload.warnings || [];
   $("createPostResult").innerHTML = warnings.length
     ? warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join("")
     : "";
   showMessage(warnings.length ? `Created post for review. ${warnings[0]}` : "Created post for review.");
-  closeModal("createPostModal");
   $("createPostInstruction").value = "";
   $("createPostExtra").value = "";
   $("createPostScheduled").value = "";
@@ -1858,7 +1864,7 @@ async function createPost() {
   state.selectedPatternForCreate = null;
   renderCreatePostPatternHint();
   await refresh();
-  setView("reviewer");
+  if (createdQueueId) await openQueueDetailById(createdQueueId);
 }
 
 async function planWeek() {
