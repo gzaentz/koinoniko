@@ -803,11 +803,11 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
     for key, value in sorted(payload["bad_phrase_counts"].items()):
         print(f"- {key}: {value}")
     print(f"Unique first lines: {payload['unique_first_lines']}")
-    print("First structure option counts:")
-    for key, value in sorted(payload["first_structure_option_counts"].items()):
+    print("Primary structure option counts:")
+    for key, value in sorted(payload["primary_structure_option_counts"].items()):
         print(f"- {key}: {value}")
-    print("First product mention lane counts:")
-    for key, value in sorted(payload["first_product_mention_lane_counts"].items()):
+    print("Primary product mention lane counts:")
+    for key, value in sorted(payload["primary_product_mention_lane_counts"].items()):
         print(f"- {key}: {value}")
     print("Leadpoet mention pattern counts:")
     for key, value in sorted(payload["leadpoet_mention_pattern_counts"].items()):
@@ -855,14 +855,34 @@ def build_naturalness_audit(
             variants=1,
             save=save_drafts,
         )[0]
+        primary_structure = ""
         first_structure = ""
+        primary_option = (
+            draft.context_snapshot.get("primary_structure_option")
+            if isinstance(draft.context_snapshot, dict)
+            else None
+        )
+        if isinstance(primary_option, dict):
+            primary_structure = str(primary_option.get("name") or "")
         options = draft.context_snapshot.get("structure_variation_options") if isinstance(draft.context_snapshot, dict) else None
         if isinstance(options, list) and options and isinstance(options[0], dict):
             first_structure = str(options[0].get("name") or "")
+        if not primary_structure:
+            primary_structure = first_structure
+        primary_product_lane = ""
         first_product_lane = ""
+        primary_product_option = (
+            draft.context_snapshot.get("primary_product_mention_lane")
+            if isinstance(draft.context_snapshot, dict)
+            else None
+        )
+        if isinstance(primary_product_option, dict):
+            primary_product_lane = str(primary_product_option.get("name") or "")
         product_options = draft.context_snapshot.get("product_mention_options") if isinstance(draft.context_snapshot, dict) else None
         if isinstance(product_options, list) and product_options and isinstance(product_options[0], dict):
             first_product_lane = str(product_options[0].get("name") or "")
+        if not primary_product_lane:
+            primary_product_lane = first_product_lane
         rows.append(
             {
                 "index": index + 1,
@@ -873,7 +893,9 @@ def build_naturalness_audit(
                 "leadpoet_shape": leadpoet_mention_shape(draft.text),
                 "leadpoet_mention_pattern": leadpoet_mention_pattern(draft.text),
                 "first_line": first_nonempty_line(draft.text),
+                "primary_structure_option": primary_structure,
                 "first_structure_option": first_structure,
+                "primary_product_mention_lane": primary_product_lane,
                 "first_product_mention_lane": first_product_lane,
             }
         )
@@ -891,11 +913,15 @@ def build_naturalness_audit(
     unique_first_lines = len({str(row["first_line"]).lower() for row in rows if row["first_line"]})
     if unique_first_lines < min(5, len(rows)):
         warnings.append("First lines are not varied enough.")
+    primary_structure_counts = Counter(str(row["primary_structure_option"]) for row in rows if row["primary_structure_option"])
     first_structure_counts = Counter(str(row["first_structure_option"]) for row in rows if row["first_structure_option"])
-    if len(first_structure_counts) < min(5, len(trends), count):
+    if len(primary_structure_counts) < min(5, len(trends), count):
         warnings.append("Structure guidance did not vary enough across trends.")
+    primary_product_lane_counts = Counter(
+        str(row["primary_product_mention_lane"]) for row in rows if row["primary_product_mention_lane"]
+    )
     first_product_lane_counts = Counter(str(row["first_product_mention_lane"]) for row in rows if row["first_product_mention_lane"])
-    if len(first_product_lane_counts) < min(5, len(trends), count):
+    if len(primary_product_lane_counts) < min(5, len(trends), count):
         warnings.append("Product mention guidance did not vary enough across trends.")
     covered_trend_ids = {str(row["trend_id"]) for row in rows if row["trend_id"]}
     uncovered_trend_count = max(0, len(trends) - len(covered_trend_ids))
@@ -921,8 +947,10 @@ def build_naturalness_audit(
         "leadpoet_shapes": dict(Counter(str(row["leadpoet_shape"]) for row in rows)),
         "bad_phrase_counts": bad_phrase_counts,
         "unique_first_lines": unique_first_lines,
-        "first_structure_option_counts": dict(first_structure_counts),
-        "first_product_mention_lane_counts": dict(first_product_lane_counts),
+        "primary_structure_option_counts": dict(primary_structure_counts),
+        "primary_product_mention_lane_counts": dict(primary_product_lane_counts),
+        "first_structure_option_counts": dict(first_structure_counts or primary_structure_counts),
+        "first_product_mention_lane_counts": dict(first_product_lane_counts or primary_product_lane_counts),
         "leadpoet_mention_pattern_counts": dict(mention_pattern_counts),
         "warnings": warnings,
         "rows": rows,

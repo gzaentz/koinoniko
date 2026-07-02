@@ -26,7 +26,15 @@ from leadpoet_social_brain.content_queue import create_post_x, plan_week_x, post
 from leadpoet_social_brain.cli import build_naturalness_audit, build_parser as build_cli_parser, main as cli_main
 from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.core.models import ContentQueueItem, ContextSection, DraftRequest, EngagementMetrics, Pattern, PostNote, SocialPost, SyncMetadata, TrendItem, utc_now
-from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator, clean_generated_text, selected_product_mention_lanes, selected_structure_shapes
+from leadpoet_social_brain.generation import (
+    MISSING_PROVIDER_MESSAGE,
+    SocialBrainGenerator,
+    clean_generated_text,
+    primary_product_mention_lane,
+    primary_structure_shape,
+    selected_product_mention_lanes,
+    selected_structure_shapes,
+)
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
 from leadpoet_social_brain.openrouter_provider import OpenRouterProvider, create_provider
 from leadpoet_social_brain.pattern_scout import (
@@ -1154,7 +1162,9 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Natural Voice Calibration:", prompt)
             self.assertIn("Sound like one specific founder noticing a real thing", prompt)
             self.assertIn("Structure Variation:", prompt)
+            self.assertIn("Primary structure for this request:", prompt)
             self.assertIn("Dynamic Product Mention:", prompt)
+            self.assertIn("Primary product mention lane for this request:", prompt)
             self.assertIn("Product mention lanes for this request:", prompt)
             store.close()
 
@@ -1239,6 +1249,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(len(structures_a), 4)
         self.assertEqual(len(set(structures_a)), 4)
         self.assertNotEqual(structures_a[0], structures_b[0])
+        self.assertEqual(primary_structure_shape(request_a, [trend_a])[0], structures_a[0])
+        self.assertEqual(primary_structure_shape(request_b, [trend_b])[0], structures_b[0])
 
     def test_product_mention_lanes_rotate_across_trends(self):
         request_a = DraftRequest(
@@ -1282,6 +1294,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(len(lanes_a), 4)
         self.assertEqual(len(set(lanes_a)), 4)
         self.assertNotEqual(lanes_a[0], lanes_b[0])
+        self.assertEqual(primary_product_mention_lane(request_a, [trend_a])[0], lanes_a[0])
+        self.assertEqual(primary_product_mention_lane(request_b, [trend_b])[0], lanes_b[0])
 
     def test_ingest_x_post_stores_metrics_and_notes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1388,8 +1402,18 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("quality_notes", saved_draft.context_snapshot)
             self.assertIn("selected_patterns", saved_draft.context_snapshot)
             self.assertIn("selected_context_sections", saved_draft.context_snapshot)
+            self.assertIn("primary_structure_option", saved_draft.context_snapshot)
+            self.assertIn("primary_product_mention_lane", saved_draft.context_snapshot)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["structure_variation_options"]), 1)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["product_mention_options"]), 1)
+            self.assertEqual(
+                saved_draft.context_snapshot["primary_structure_option"]["name"],
+                saved_draft.context_snapshot["structure_variation_options"][0]["name"],
+            )
+            self.assertEqual(
+                saved_draft.context_snapshot["primary_product_mention_lane"]["name"],
+                saved_draft.context_snapshot["product_mention_options"][0]["name"],
+            )
             self.assertIn("skills", saved_draft.context_snapshot)
             skill_paths = {skill["path"] for skill in saved_draft.context_snapshot["skills"]}
             self.assertIn("skills/global_voice.md", skill_paths)
@@ -2230,6 +2254,8 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(all(count == 0 for count in payload["bad_phrase_counts"].values()))
             self.assertEqual(payload["warnings"], [])
             self.assertGreaterEqual(payload["unique_first_lines"], 5)
+            self.assertGreaterEqual(len(payload["primary_structure_option_counts"]), 5)
+            self.assertGreaterEqual(len(payload["primary_product_mention_lane_counts"]), 5)
             self.assertGreaterEqual(len(payload["first_structure_option_counts"]), 5)
             self.assertGreaterEqual(len(payload["first_product_mention_lane_counts"]), 5)
             self.assertGreaterEqual(len(payload["leadpoet_mention_pattern_counts"]), 5)

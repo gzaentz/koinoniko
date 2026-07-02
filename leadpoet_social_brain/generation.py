@@ -513,11 +513,14 @@ def natural_voice_prompt_section(bundle: ContextBundle | None = None, anchor: st
 
 def structure_variation_prompt_section(request: DraftRequest, trends: list[TrendItem]) -> str:
     selected = selected_structure_shapes(request, trends, count=4)
+    primary_name, primary_guidance = selected[0]
     options = "\n".join(f"- {name}: {guidance}" for name, guidance in selected)
     return (
         "Structure Variation:\n"
         "Avoid the default template: trend recap -> generic product definition -> tidy closer.\n"
-        "Use a shape that fits the specific idea. In multi-option prompts, each option must use a different shape.\n"
+        f"Primary structure for this request: {primary_name}: {primary_guidance}\n"
+        "Use the primary structure unless another listed shape clearly fits the idea better. "
+        "In multi-option prompts, option 1 should use the primary structure and each option must use a different shape.\n"
         f"{options}"
     )
 
@@ -530,6 +533,7 @@ def product_mention_prompt_section(
     product_label = anchor or "the product"
     example_prefix = anchor or "the product"
     selected = selected_product_mention_lanes(request, trends or [], count=4) if request else PRODUCT_MENTION_LANES[:4]
+    primary_name, primary_guidance = selected[0]
     lane_options = "\n".join(f"- {name}: {guidance}" for name, guidance in selected)
     return (
         "Dynamic Product Mention:\n"
@@ -538,9 +542,10 @@ def product_mention_prompt_section(
         "- Prefer varied human phrasing: \"the part we care about...\", \"that is where the product has to start...\", "
         f"\"for {example_prefix}, the useful signal is...\", or no product name if the saved-context mechanism is already clear.\n"
         "- If the post needs the name for positioning, embed it in a concrete sentence rather than defining the company.\n"
+        f"Primary product mention lane for this request: {primary_name}: {primary_guidance}\n"
         "Product mention lanes for this request:\n"
         f"{lane_options}\n"
-        "- In multi-option prompts, each option should use a different product mention lane."
+        "- In multi-option prompts, option 1 should use the primary lane and each option should use a different product mention lane."
     )
 
 
@@ -559,6 +564,10 @@ def selected_product_mention_lanes(
     ]
 
 
+def primary_product_mention_lane(request: DraftRequest, trends: list[TrendItem]) -> tuple[str, str]:
+    return selected_product_mention_lanes(request, trends, count=1)[0]
+
+
 def selected_structure_shapes(
     request: DraftRequest,
     trends: list[TrendItem],
@@ -571,6 +580,10 @@ def selected_structure_shapes(
         POST_STRUCTURE_SHAPES[(start + offset) % len(POST_STRUCTURE_SHAPES)]
         for offset in range(min(count, len(POST_STRUCTURE_SHAPES)))
     ]
+
+
+def primary_structure_shape(request: DraftRequest, trends: list[TrendItem]) -> tuple[str, str]:
+    return selected_structure_shapes(request, trends, count=1)[0]
 
 
 def variation_seed_source(request: DraftRequest, trends: list[TrendItem]) -> str:
@@ -967,6 +980,8 @@ def build_context_snapshot(
                 "performance": _performance_summary(bundle.metrics_by_post_id.get(post.id)),
             }
         )
+    primary_structure = primary_structure_shape(request, trends)
+    primary_product_lane = primary_product_mention_lane(request, trends)
     return {
         "workspace_id": bundle.workspace_id,
         "request": request.__dict__,
@@ -985,6 +1000,14 @@ def build_context_snapshot(
         "strategy_summary": strategy_summary,
         "evaluation": evaluation,
         "quality_notes": quality_notes,
+        "primary_structure_option": {
+            "name": primary_structure[0],
+            "guidance": primary_structure[1],
+        },
+        "primary_product_mention_lane": {
+            "name": primary_product_lane[0],
+            "guidance": primary_product_lane[1],
+        },
         "structure_variation_options": [
             {"name": name, "guidance": guidance}
             for name, guidance in selected_structure_shapes(request, trends, count=4)
