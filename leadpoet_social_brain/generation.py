@@ -955,10 +955,12 @@ def build_recent_output_context(
             details.append(f"last={row['last_line']}")
         if row["leadpoet_sentence"]:
             details.append(f"leadpoet={row['leadpoet_sentence']}")
+        if row["leadpoet_grammar"]:
+            details.append(f"leadpoet_grammar={row['leadpoet_grammar']}")
         lines.append(f"- {'; '.join(details)}")
     lines.extend(
         [
-            "Avoid repeating those first-line shapes, final-line moves, and Leadpoet sentence grammar.",
+            "Avoid repeating those first-line shapes, final-line moves, and Leadpoet grammar fingerprints.",
             "If Leadpoet appears, change its sentence role, placement, and neighboring words from the recent examples.",
         ]
     )
@@ -1040,14 +1042,16 @@ def recent_output_row(text: str, *, source: str, topic_scope: str = "same_topic"
     first = truncate_for_prompt(first_sentence_or_line(cleaned), 110)
     last = truncate_for_prompt(last_nonempty_text_line(cleaned), 110)
     leadpoet_sentence = truncate_for_prompt(first_sentence_with_word(cleaned, "Leadpoet"), 130)
+    leadpoet_grammar = leadpoet_sentence_grammar_fingerprint(leadpoet_sentence)
     layout = recent_output_layout(cleaned)
-    fingerprint = "|".join([first.lower(), last.lower(), leadpoet_sentence.lower(), layout])
+    fingerprint = "|".join([first.lower(), last.lower(), leadpoet_sentence.lower(), leadpoet_grammar, layout])
     return {
         "source": source,
         "topic_scope": topic_scope,
         "first_line": first,
         "last_line": last,
         "leadpoet_sentence": leadpoet_sentence,
+        "leadpoet_grammar": leadpoet_grammar,
         "layout": layout,
         "fingerprint": fingerprint,
     }
@@ -1070,6 +1074,35 @@ def first_sentence_with_word(text: str, word: str) -> str:
         if re.search(rf"\b{re.escape(word)}\b", sentence, flags=re.I):
             return " ".join(sentence.split())
     return ""
+
+
+def leadpoet_sentence_grammar_fingerprint(sentence: str) -> str:
+    if not re.search(r"\bleadpoet\b", sentence, flags=re.I):
+        return ""
+    cleaned = re.sub(r"^(?:[-*•]\s+|\d+[.)]\s+)", "", sentence.strip())
+    lowered = " ".join(cleaned.lower().replace("’", "'").split())
+    if re.match(r"leadpoet\s+is(?:\s+building|\s+built)?\b", lowered):
+        return "leadpoet_is_definition"
+    if re.match(
+        r"leadpoet\s+(?:owns?|can|gets?|makes?|starts?|keeps?|turns?|focuses|needs?|should|has\s+to|belongs|must|only\s+matters)\b",
+        lowered,
+    ):
+        return "leadpoet_subject_verb"
+    if re.search(r"\b(?:put|place|keep|carry|bring|move|tuck|embed|mention|name|use)\b[^.!?]{0,80}\bleadpoet\b", lowered):
+        return "product_as_object"
+    if re.match(r"(?:inside|in|into|through|within|around|near|next\s+to)\s+leadpoet\b", lowered):
+        return "prepositional_leadpoet_open"
+    if re.search(r"\b(?:inside|in|into|through|within|before|after|around|near|next\s+to)\s+leadpoet\b", lowered):
+        return "prepositional_tuck_in"
+    if re.search(r"\bleadpoet's\s+\w+|\bleadpoet\s+(?:signal|line|mention|lane|edge|question|constraint|part|work|side|wedge)\b", lowered):
+        return "product_modifier"
+    if re.search(r"\bleadpoet\b[^.!?]{0,80}\b(?:before|after|when|where|if|because|as)\b", lowered):
+        return "clause_embedded"
+    if re.match(r"(?:the|a|that|this)\b.*\bleadpoet\b", lowered):
+        return "contextual_noun_phrase"
+    if re.match(r"leadpoet\b", lowered):
+        return "leadpoet_line_start"
+    return "contextual"
 
 
 def recent_output_layout(text: str) -> str:
@@ -2220,17 +2253,21 @@ def recent_output_repetition_violations(
     first = normalize_recent_output_fragment(first_sentence_or_line(cleaned))
     last = normalize_recent_output_fragment(last_nonempty_text_line(cleaned))
     leadpoet_sentence = normalize_recent_output_fragment(first_sentence_with_word(cleaned, "Leadpoet"))
+    leadpoet_grammar = leadpoet_sentence_grammar_fingerprint(first_sentence_with_word(cleaned, "Leadpoet"))
     violations: list[str] = []
     for row in recent_output_rows:
         row_first = normalize_recent_output_fragment(row.get("first_line", ""))
         row_last = normalize_recent_output_fragment(row.get("last_line", ""))
         row_leadpoet = normalize_recent_output_fragment(row.get("leadpoet_sentence", ""))
+        row_leadpoet_grammar = row.get("leadpoet_grammar", "")
         if first and row_first and first == row_first:
             violations.append("change repeated recent opening line")
         if last and row_last and last == row_last and last != first:
             violations.append("change repeated recent closing line")
         if leadpoet_sentence and row_leadpoet and leadpoet_sentence == row_leadpoet:
             violations.append("change repeated recent Leadpoet sentence")
+        if leadpoet_grammar and row_leadpoet_grammar and leadpoet_grammar == row_leadpoet_grammar:
+            violations.append(f"change repeated recent Leadpoet grammar: {leadpoet_grammar}")
     return dedupe_preserve_order(violations)
 
 

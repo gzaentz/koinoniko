@@ -814,7 +814,7 @@ python3 -m leadpoet_social_brain.cli audit-naturalness-x \
   --fail-on-warning
 ```
 
-By default, `audit-naturalness-x` loads all matching current trends (`--trend-limit 0`) and generates 20 reviewed posts against them. Each generated audit post feeds into the next prompt as anti-sameness context, so the batch actively avoids repeating its own openings, closers, layouts, and Leadpoet sentence grammar. It reports bad phrase counts for cookie-cutter Leadpoet definitions and formulaic Leadpoet lead-ins, repeated stock phrases, first-line and closing-line variety, primary structure counts, primary layout target counts, primary closing target counts, primary human rhythm target counts, primary product mention lane, placement, and syntax guidance counts, guidance concentration warnings, actual Leadpoet paragraph/sentence placement, actual Leadpoet syntax counts, Leadpoet mention pattern counts, generated layout fingerprints, and trend coverage. If there are more loaded trends than generated posts, the audit warns; raise `--count` or pass `--cover-all-trends` to cover every current trend. Use `--json` when you want the full rows and generated text for manual review.
+By default, `audit-naturalness-x` loads all matching current trends (`--trend-limit 0`) and generates 20 reviewed posts against them. Each generated audit post feeds into the next prompt as anti-sameness context, so the batch actively avoids repeating its own openings, closers, layouts, and Leadpoet grammar fingerprints. It reports bad phrase counts for cookie-cutter Leadpoet definitions and formulaic Leadpoet lead-ins, repeated stock phrases, first-line and closing-line variety, primary structure counts, primary layout target counts, primary closing target counts, primary human rhythm target counts, primary product mention lane, placement, and syntax guidance counts, guidance concentration warnings, actual Leadpoet paragraph/sentence placement, actual Leadpoet syntax counts, Leadpoet mention pattern counts, generated layout fingerprints, and trend coverage. If there are more loaded trends than generated posts, the audit warns; raise `--count` or pass `--cover-all-trends` to cover every current trend. Use `--json` when you want the full rows and generated text for manual review.
 
 This command uses the configured LLM provider, so a live audit sends the selected trends, saved context, and generation prompts to that provider. Run it only in an environment where that is acceptable.
 
@@ -846,9 +846,9 @@ structures, layouts, rhythms, product mention lanes, product placement targets, 
 product mention syntax targets before the evaluator chooses the final post.
 Recent queued and published posts, including cross-topic queue context after same-topic
 matches, add anti-sameness context so new drafts avoid repeating their openings, closers,
-layouts, and Leadpoet sentence grammar. Newer queue items are prioritized so fresh batch
+layouts, and Leadpoet grammar fingerprints. Newer queue items are prioritized so fresh batch
 outputs guide the next draft. Final drafts are also repaired if they exactly repeat a
-recent opener, closer, or Leadpoet sentence.
+recent opener or closer, repeat a Leadpoet sentence, or reuse a recent Leadpoet grammar fingerprint.
 The user only reviews the final queued post, not the internal brief.
 
 `Use in Post` on a trend or `Use Pattern` on a pattern opens Create Post with that source preselected. Generated output still enters the review queue; it does not publish automatically.

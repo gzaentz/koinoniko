@@ -1803,11 +1803,13 @@ class SocialBrainTest(unittest.TestCase):
             for prompt in provider.prompts[:3]:
                 self.assertIn("Recent Output Anti-Sameness:", prompt)
                 self.assertIn("The useful Leadpoet question is why this account now.", prompt)
+                self.assertIn("leadpoet_grammar=product_modifier", prompt)
                 self.assertIn("Avoid repeating those first-line shapes", prompt)
             rows = draft.context_snapshot["recent_output_anti_sameness"]
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["source"], "queue:needs_review")
             self.assertEqual(rows[0]["leadpoet_sentence"], "The useful Leadpoet question is why this account now.")
+            self.assertEqual(rows[0]["leadpoet_grammar"], "product_modifier")
             store.close()
 
     def test_generator_includes_cross_topic_recent_output_anti_sameness_context(self):
@@ -1958,6 +1960,74 @@ class SocialBrainTest(unittest.TestCase):
                 "Inside Leadpoet, the account reason has to come before generated copy.",
             )
             self.assertNotIn("The useful Leadpoet question is why this account now.", draft.text)
+            self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
+            store.close()
+
+    def test_generation_repairs_repeated_recent_leadpoet_grammar(self):
+        class RepeatingLeadpoetGrammarProvider:
+            def __init__(self):
+                self.repair_count = 0
+                self.repair_prompts: list[str] = []
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "Static records answer who exists.\n\nThe useful Leadpoet signal has to explain why now.",
+                        "The CRM can be right and still late.\n\nTiming has to explain why now before the account reaches Leadpoet.",
+                        "More names do not fix account judgment.\n\nThe sequence is downstream.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    return [
+                        evaluation_json(
+                            "Static records answer who exists.\n\n"
+                            "The useful Leadpoet signal has to explain why now."
+                        )
+                    ]
+                if "Repair this X post" in prompt:
+                    self.repair_count += 1
+                    self.repair_prompts.append(prompt)
+                    return [
+                        "A correct contact record can still be late.\n\n"
+                        "Timing has to explain why now before the account reaches Leadpoet."
+                    ]
+                return ["A correct contact record can still be late."]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            store.save_content_queue_item(
+                ContentQueueItem(
+                    text=(
+                        "Static records answer who exists.\n\n"
+                        "The useful Leadpoet question is why this account now."
+                    ),
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    scheduled_at="2026-07-03T10:00:00+00:00",
+                )
+            )
+            provider = RepeatingLeadpoetGrammarProvider()
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle="account timing beats more generated email",
+                ),
+                variants=1,
+            )[0]
+
+            self.assertEqual(provider.repair_count, 1)
+            self.assertIn("change repeated recent Leadpoet grammar: product_modifier", provider.repair_prompts[0])
+            self.assertEqual(
+                draft.text,
+                "A correct contact record can still be late.\n\n"
+                "Timing has to explain why now before the account reaches Leadpoet.",
+            )
+            self.assertNotIn("The useful Leadpoet signal", draft.text)
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
             store.close()
 
@@ -3797,6 +3867,7 @@ class SocialBrainTest(unittest.TestCase):
         class RepeatedPhraseProvider:
             def __init__(self):
                 self.final_count = 0
+                self.repair_count = 0
 
             def generate(self, prompt: str, *, variants: int) -> list[str]:
                 if "Do not write the post yet" in prompt:
@@ -3824,6 +3895,16 @@ class SocialBrainTest(unittest.TestCase):
                             f"The Leadpoet signal can make signal {endings[index]} visible."
                         )
                     ]
+                if "Repair this X post" in prompt:
+                    repairs = [
+                        "Static records answer who exists. Buyer timing should choose the account before copy.\n\nTiming becomes useful before the account reaches Leadpoet.",
+                        "The CRM can be correct. Buyer timing should choose the account before copy.\n\nInside Leadpoet, the account reason gets specific.",
+                        "More names do not fix judgment. Buyer timing should choose the account before copy.\n\nThe account reason gets specific inside Leadpoet.",
+                        "Context only matters when it changes action. Buyer timing should choose the account before copy.\n\nPut Leadpoet behind the account-change check.",
+                    ]
+                    text = repairs[self.repair_count % len(repairs)]
+                    self.repair_count += 1
+                    return [text]
                 return ["Static records answer who exists. The Leadpoet signal can make timing visible."]
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -3863,6 +3944,7 @@ class SocialBrainTest(unittest.TestCase):
         class FinalLineProvider:
             def __init__(self):
                 self.final_count = 0
+                self.repair_count = 0
 
             def generate(self, prompt: str, *, variants: int) -> list[str]:
                 if "Do not write the post yet" in prompt:
@@ -3891,6 +3973,16 @@ class SocialBrainTest(unittest.TestCase):
                     index = self.final_count % len(first_lines)
                     self.final_count += 1
                     return [evaluation_json(f"{first_lines[index]}\n\nBuyer timing should choose the account. {endings[index]}")]
+                if "Repair this X post" in prompt:
+                    repairs = [
+                        "The CRM can be correct.\n\nBuyer timing should choose the account before it reaches Leadpoet.",
+                        "More names do not fix judgment.\n\nInside Leadpoet, the account reason stays visible.",
+                        "Context only matters when it changes action.\n\nThe account reason gets specific inside Leadpoet.",
+                        "A sales agent needs timing before copy.\n\nPut Leadpoet behind the account-change check.",
+                    ]
+                    text = repairs[self.repair_count % len(repairs)]
+                    self.repair_count += 1
+                    return [text]
                 return ["Buyer timing should choose the account. The useful question stays inside Leadpoet."]
 
         with tempfile.TemporaryDirectory() as tmpdir:
