@@ -83,7 +83,7 @@ LEADPOET_DEFINITION_PATTERNS = [
     (r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:should|can|needs?|has\s+to)\b", "avoid formulaic Leadpoet modal lead-in"),
     (r"\b(?:that|this)\s+is\s+where\s+leadpoet\b|\bthat['’]?s\s+where\s+leadpoet\b", "avoid formulaic 'this is where' product lead-in"),
     (r"\bthat\s+is\s+the\s+leadpoet\s+(?:job|bar|point|constraint|product belief)\b", "avoid formulaic 'That is the Leadpoet...' closer"),
-    (r"\bthe\s+leadpoet\s+(?:product belief|signal|point|constraint|job|bar|part)\s+is\b", "avoid formulaic 'The Leadpoet ... is...' product definition"),
+    (r"\bthe\s+leadpoet\s+(?:product belief|signal|point|constraint|job|bar|part)\s+is\b", "avoid product modifier plus noun followed by 'is'"),
     (r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:belongs|only\s+matters|must)\b", "avoid formulaic Leadpoet fallback lead-in"),
     (r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:owns?|makes?|starts?|keeps?|turns?|focuses|helps?|gives?|answers?|shows?|lets?|finds?|enables?|provides?|delivers?|powers?|unlocks?|brings?|drives?|creates?)\b", "avoid formulaic Leadpoet subject-verb lead-in"),
     (r"(?m)(?:^|\n\n)\s*leadpoet(?:'s|’s)?\s+(?:bet|job|role)\b", "avoid formulaic Leadpoet closer"),
@@ -365,7 +365,7 @@ PRODUCT_MENTION_SYNTAX_TARGETS = [
     ),
     (
         "possessive modifier",
-        "Use the product name as a modifier of a concrete noun only if the noun does real work. Avoid 'The product signal is...' definitions.",
+        "Use the product name as a modifier of a concrete noun only if the noun does real work. Avoid modifier-noun definitions.",
     ),
     (
         "name omitted",
@@ -831,7 +831,7 @@ def product_mention_prompt_section(
         "- Avoid letting every product sentence use the same grammar, especially direct product-name-as-subject verbs like owns, can, makes, or starts.\n"
         "- Avoid product-subject helper/tagline lead-ins using verbs like helps, enables, unlocks, or provides; let the mechanism, account change, or consequence lead instead.\n"
         "- Prefer varied human phrasing: \"the part we care about...\", \"the mechanism has to start before copy...\", "
-        "\"the timing signal this product cares about is...\", or no product name if the saved-context mechanism is already clear.\n"
+        "\"the timing signal this product cares about...\", or no product name if the saved-context mechanism is already clear.\n"
         "- If the post needs the name for positioning, embed it in a concrete sentence rather than defining the company.\n"
         f"Primary product mention lane for this request: {primary_name}: {primary_guidance}\n"
         f"Primary product mention placement target for this request: {placement_name}: {placement_guidance}\n"

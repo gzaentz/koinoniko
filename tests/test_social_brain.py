@@ -1208,6 +1208,8 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotIn("\"Leadpoet is...\"", prompt)
             self.assertNotIn("\"Leadpoet is building...\"", prompt)
             self.assertNotIn("\"Leadpoet helps...\"", prompt)
+            self.assertNotIn("\"the product is...\"", prompt)
+            self.assertNotIn("\"we are building...\"", prompt)
             store.close()
 
     def test_generation_prompt_is_example_first_not_label_heavy(self):
@@ -3508,7 +3510,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Leadpoet", draft.text)
             self.assertNotIn("The Leadpoet product belief is", draft.text)
             self.assertFalse(any(leadpoet_bad_phrase_counts(draft.text).values()), draft.text)
-            self.assertIn("avoid formulaic 'The Leadpoet ... is...' product definition", provider.prompts[-1])
+            self.assertIn("avoid product modifier plus noun followed by 'is'", provider.prompts[-1])
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
             store.close()
 
