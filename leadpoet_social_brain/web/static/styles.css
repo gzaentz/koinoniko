@@ -2307,11 +2307,41 @@ main {
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
 
+.schedule-field {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.schedule-field input {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 400;
+  text-transform: none;
+}
+
 .schedule-shortcuts {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: -4px;
+}
+
+.schedule-shortcuts-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  width: min(460px, calc(100vw - 56px));
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--white);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.14);
 }
 
 .schedule-shortcuts button {

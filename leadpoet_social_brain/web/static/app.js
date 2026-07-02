@@ -1609,14 +1609,17 @@ function renderQueueModal() {
     <div class="form-grid">
       <label>Topic<input id="detailTopic" value="${escapeAttr(item.topic)}"></label>
       <label>Post type<input id="detailPostType" value="${escapeAttr(item.post_type)}"></label>
-      <label>Scheduled time<input id="detailScheduled" type="datetime-local" value="${escapeAttr(scheduledValue)}"></label>
+      <div class="schedule-field">
+        <label for="detailScheduled">Scheduled time</label>
+        <input id="detailScheduled" type="datetime-local" value="${escapeAttr(scheduledValue)}" onfocus="openDetailScheduleShortcuts(event)" onclick="openDetailScheduleShortcuts(event)">
+        <div id="detailScheduleShortcuts" class="schedule-shortcuts schedule-shortcuts-popover hidden" aria-label="Schedule shortcuts">
+          <button class="secondary" type="button" onclick='setDetailSchedulePreset(event, "tomorrow_morning")'>Tomorrow AM</button>
+          <button class="secondary" type="button" onclick='setDetailSchedulePreset(event, "next_weekday_morning")'>Next Weekday AM</button>
+          <button class="secondary" type="button" onclick='setDetailSchedulePreset(event, "two_hours")'>+2 Hours</button>
+          <button class="quiet-button" type="button" onclick="clearDetailSchedule(event)">Clear</button>
+        </div>
+      </div>
       <label>Status<input value="${escapeAttr(label(item.status))}" disabled></label>
-    </div>
-    <div class="schedule-shortcuts" aria-label="Schedule shortcuts">
-      <button class="secondary" type="button" onclick='setDetailSchedulePreset(event, "tomorrow_morning")'>Tomorrow AM</button>
-      <button class="secondary" type="button" onclick='setDetailSchedulePreset(event, "next_weekday_morning")'>Next Weekday AM</button>
-      <button class="secondary" type="button" onclick='setDetailSchedulePreset(event, "two_hours")'>+2 Hours</button>
-      <button class="quiet-button" type="button" onclick="clearDetailSchedule(event)">Clear</button>
     </div>
     <div class="queue-detail-toolbar">
       <button class="secondary" type="button" onclick="openQueueMoreDetails(event)">More Details</button>
@@ -1774,12 +1777,22 @@ window.approveQueue = (event, id) => {
   });
 };
 
+window.openDetailScheduleShortcuts = (event) => {
+  event?.stopPropagation();
+  $("detailScheduleShortcuts")?.classList.remove("hidden");
+};
+
+function closeDetailScheduleShortcuts() {
+  $("detailScheduleShortcuts")?.classList.add("hidden");
+}
+
 window.setDetailSchedulePreset = (event, preset) => {
   event.preventDefault();
   const input = $("detailScheduled");
   if (!input) return;
   input.value = schedulePresetValue(preset);
   input.focus();
+  closeDetailScheduleShortcuts();
 };
 
 window.clearDetailSchedule = (event) => {
@@ -1788,6 +1801,7 @@ window.clearDetailSchedule = (event) => {
   if (!input) return;
   input.value = "";
   input.focus();
+  closeDetailScheduleShortcuts();
 };
 
 window.moveToReview = (event, id) => {
@@ -2909,6 +2923,7 @@ function hasOpenTransientDropdown() {
     state.editingPostField ||
       isOpenById("reviewAddMenu") ||
       isOpenById("accountSyncMenu") ||
+      isOpenById("detailScheduleShortcuts") ||
       hasOpenCreatePostFieldMenu()
   );
 }
@@ -2916,6 +2931,7 @@ function hasOpenTransientDropdown() {
 function closeTransientDropdowns({ exceptCreatePostField = "", keepPostFieldEditor = false } = {}) {
   closeReviewAddMenu();
   closeAccountSyncMenu();
+  closeDetailScheduleShortcuts();
   closeCreatePostFieldMenus(exceptCreatePostField);
   if (!keepPostFieldEditor) {
     closePostFieldEditor();
@@ -3472,6 +3488,7 @@ function setup() {
   $("accountSyncMenuButton").addEventListener("click", toggleAccountSyncMenu);
   $("accountSyncMenu").addEventListener("click", (event) => event.stopPropagation());
   document.addEventListener("click", closePostFieldEditor);
+  document.addEventListener("click", closeDetailScheduleShortcuts);
   setupCreatePostFieldCombo("topic");
   setupCreatePostFieldCombo("post_type");
   setupCreatePostFieldCombo("length");
