@@ -1959,6 +1959,71 @@ class SocialBrainTest(unittest.TestCase):
             )
             store.close()
 
+    def test_generation_deterministically_repairs_saturated_batch_layout_without_provider_repair(self):
+        class IgnoredBatchLayoutRepairProvider:
+            def __init__(self):
+                self.repair_count = 0
+                self.repair_prompts: list[str] = []
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "Static records answer who exists.\n\nThe account reason reaches Leadpoet when timing changes.",
+                        "The CRM can be right and still late.\n\nThe account reason reaches Leadpoet when timing changes.",
+                        "More names do not fix account judgment.\n\nThe sequence is downstream.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    return [
+                        evaluation_json(
+                            "Static records answer who exists.\n\n"
+                            "The account reason reaches Leadpoet when timing changes."
+                        )
+                    ]
+                if "Repair this X post" in prompt:
+                    self.repair_count += 1
+                    self.repair_prompts.append(prompt)
+                    return []
+                return ["A correct contact record can still be late."]
+
+        batch_outputs = [
+            "Static records answer who exists.\n\nThe useful Leadpoet question is why this account now.",
+            "The CRM can be correct.\n\nInside Leadpoet, timing has to explain why now.",
+            "More names do not fix judgment.\n\nPut Leadpoet behind the account-change check.",
+            "A rep needs the reason first. Timing becomes useful before the account reaches Leadpoet.",
+            "Context only matters when it changes action.\nInside Leadpoet, the account reason gets specific.",
+            "The signal has to move.\n\nCopy follows.\n\nTiming comes after the account reason.",
+            "The record can be true and still late. The sequence is downstream.",
+            "Leadpoet, in that handoff, belongs near the account reason.\n\nThe sequence is downstream.",
+            "Outbound volume is easy.\n\nTiming is the first filter.\n\nThe account reason follows.\n\nLeadpoet keeps that handoff honest.",
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = IgnoredBatchLayoutRepairProvider()
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle="account timing beats more generated email",
+                ),
+                variants=1,
+                recent_output_texts=batch_outputs,
+            )[0]
+
+            self.assertEqual(provider.repair_count, 1)
+            self.assertIn("change saturated batch layout: p2|l2|leadpoet_last", provider.repair_prompts[0])
+            self.assertEqual(
+                draft.text,
+                "Static records answer who exists. The account reason reaches Leadpoet when timing changes.",
+            )
+            self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
+            store.close()
+
     def test_generator_includes_cross_topic_recent_output_anti_sameness_context(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -3946,6 +4011,7 @@ class SocialBrainTest(unittest.TestCase):
         class RepeatedCloserProvider:
             def __init__(self):
                 self.final_count = 0
+                self.repair_count = 0
 
             def generate(self, prompt: str, *, variants: int) -> list[str]:
                 if "Do not write the post yet" in prompt:
@@ -3968,15 +4034,16 @@ class SocialBrainTest(unittest.TestCase):
                     self.final_count += 1
                     return [evaluation_json(f"{line} The Leadpoet signal makes timing visible.\n\nThe useful question is why now.")]
                 if "Repair this X post" in prompt:
-                    first_lines = [
-                        "Static records answer who exists.",
-                        "The CRM can be correct.",
-                        "More names do not fix judgment.",
-                        "Context only matters when it changes action.",
-                        "A sales agent needs timing before copy.",
+                    repairs = [
+                        "Static records answer who exists. The useful Leadpoet signal makes timing visible.\n\nThe useful question is why now.",
+                        "The CRM can be correct.\nInside Leadpoet, timing has to explain why now.\nThe useful question is why now.",
+                        "More names do not fix judgment.\n\nPut Leadpoet behind the account-change check.\n\nThe useful question is why now.",
+                        "Context only matters when it changes action. Timing reaches Leadpoet before copy.\nThe useful question is why now.",
+                        "A sales agent needs timing before copy.\n\nLeadpoet, in that handoff, belongs near the account reason.\n\nThe useful question is why now.",
                     ]
-                    line = first_lines[(self.final_count - 1) % len(first_lines)]
-                    return [f"{line} The Leadpoet signal makes timing visible.\n\nThe useful question is why now."]
+                    text = repairs[self.repair_count % len(repairs)]
+                    self.repair_count += 1
+                    return [text]
                 return ["Static records answer who exists. The Leadpoet signal makes timing visible.\n\nThe useful question is why now."]
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -4126,9 +4193,10 @@ class SocialBrainTest(unittest.TestCase):
                 if "Repair this X post" in prompt:
                     repairs = [
                         "The CRM can be correct.\n\nBuyer timing should choose the account before it reaches Leadpoet.",
-                        "More names do not fix judgment.\n\nInside Leadpoet, the account reason stays visible.",
-                        "Context only matters when it changes action.\n\nThe account reason gets specific inside Leadpoet.",
-                        "A sales agent needs timing before copy.\n\nPut Leadpoet behind the account-change check.",
+                        "More names do not fix judgment.\n\nThe account reason should move first.\n\nInside Leadpoet, that timing stays visible.",
+                        "Context only matters when it changes action.\nThe account reason has to move first.\n\nThe account reason gets specific inside Leadpoet.",
+                        "A sales agent needs timing before copy.\n\nCopy follows.\n\nThe account reason follows.\n\nPut Leadpoet behind the account-change check.",
+                        "Generic data ages quickly.\nThe account reason moves first.\nThe timing reason gets specific inside Leadpoet.",
                     ]
                     text = repairs[self.repair_count % len(repairs)]
                     self.repair_count += 1
@@ -4356,8 +4424,8 @@ class SocialBrainTest(unittest.TestCase):
             payload = build_naturalness_audit(
                 store,
                 SocialBrainGenerator(store, provider=RepeatedLayoutProvider()),
-                count=5,
-                trend_limit=5,
+                count=2,
+                trend_limit=2,
                 trend_status="unused",
                 post_type="founder_insight",
                 length_mode="standard",

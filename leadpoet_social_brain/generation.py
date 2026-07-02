@@ -1126,6 +1126,10 @@ def first_sentence_with_word(text: str, word: str) -> str:
     return ""
 
 
+def post_text_sentences(text: str) -> list[str]:
+    return [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", text.strip()) if part.strip()]
+
+
 def leadpoet_sentence_grammar_fingerprint(sentence: str) -> str:
     if not re.search(r"\bleadpoet\b", sentence, flags=re.I):
         return ""
@@ -1979,27 +1983,64 @@ def apply_deterministic_rule_repair(
     recent_output_rows: list[dict[str, str]] | None = None,
     recent_output_batch_summary: dict[str, object] | None = None,
 ) -> tuple[str, list[str]]:
-    repaired = deterministic_leadpoet_definition_repair(
-        text,
-        request=request,
-        trends=trends,
-        max_chars=max_chars,
-    )
-    if repaired == text:
-        return text, previous_violations
-    violations = draft_rule_violations(
-        repaired,
-        request,
-        bundle,
-        trends=trends,
-        avoid_phrases=avoid_phrases,
-        active_rules=active_rules,
-        recent_output_rows=recent_output_rows,
-        recent_output_batch_summary=recent_output_batch_summary,
-    )
-    if len(violations) <= len(previous_violations):
-        return repaired, violations
-    return text, previous_violations
+    candidates = [
+        deterministic_leadpoet_definition_repair(
+            text,
+            request=request,
+            trends=trends,
+            max_chars=max_chars,
+        )
+    ]
+    if any("saturated batch layout" in violation.lower() for violation in previous_violations):
+        candidates.extend(deterministic_layout_saturation_repair_candidates(text, max_chars=max_chars))
+
+    best_text = text
+    best_violations = previous_violations
+    for candidate in dedupe_preserve_order([candidate for candidate in candidates if candidate and candidate != text]):
+        violations = draft_rule_violations(
+            candidate,
+            request,
+            bundle,
+            trends=trends,
+            avoid_phrases=avoid_phrases,
+            active_rules=active_rules,
+            recent_output_rows=recent_output_rows,
+            recent_output_batch_summary=recent_output_batch_summary,
+        )
+        if len(violations) < len(best_violations):
+            best_text = candidate
+            best_violations = violations
+    return best_text, best_violations
+
+
+def deterministic_layout_saturation_repair_candidates(text: str, *, max_chars: int) -> list[str]:
+    cleaned = clean_generated_text(text, max_chars=max_chars)
+    if not cleaned:
+        return []
+    paragraphs = [
+        " ".join(paragraph.split())
+        for paragraph in re.split(r"\n\s*\n+", cleaned)
+        if paragraph.strip()
+    ]
+    candidates: list[str] = []
+    if len(paragraphs) <= 1:
+        sentences = post_text_sentences(cleaned)
+        if len(sentences) >= 2:
+            candidates.append(f"{sentences[0]}\n\n{' '.join(sentences[1:])}")
+            candidates.append("\n".join(sentences))
+    else:
+        candidates.append(" ".join(paragraphs))
+        candidates.append("\n".join(paragraphs))
+        if len(paragraphs) >= 3:
+            candidates.append(f"{paragraphs[0]}\n\n{' '.join(paragraphs[1:])}")
+        sentences = post_text_sentences(" ".join(paragraphs))
+        if len(sentences) >= 3:
+            candidates.append(f"{sentences[0]}\n\n{sentences[1]}\n\n{' '.join(sentences[2:])}")
+    return [
+        candidate
+        for candidate in (clean_generated_text(candidate, max_chars=max_chars) for candidate in candidates)
+        if candidate and candidate != cleaned and len(candidate) <= max_chars
+    ]
 
 
 def deterministic_leadpoet_definition_repair(
