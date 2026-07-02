@@ -2182,6 +2182,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["warnings"], [])
             self.assertGreaterEqual(payload["unique_first_lines"], 5)
             self.assertGreaterEqual(len(payload["first_structure_option_counts"]), 5)
+            self.assertGreaterEqual(len(payload["first_product_mention_lane_counts"]), 5)
             self.assertGreaterEqual(len(payload["leadpoet_mention_pattern_counts"]), 5)
             self.assertLess(max(payload["leadpoet_mention_pattern_counts"].values()), 10)
             self.assertNotIn("leadpoet_is_building", payload["leadpoet_shapes"])
