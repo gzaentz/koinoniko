@@ -1806,12 +1806,20 @@ class SocialBrainTest(unittest.TestCase):
                 self.assertIn("Recent Output Anti-Sameness:", prompt)
                 self.assertIn("The useful Leadpoet question is why this account now.", prompt)
                 self.assertIn("leadpoet_grammar=product_modifier", prompt)
+                self.assertIn(
+                    "leadpoet_template=the useful {product} {domain} is why this {domain} now",
+                    prompt,
+                )
                 self.assertIn("Avoid repeating those first-line shapes", prompt)
             rows = draft.context_snapshot["recent_output_anti_sameness"]
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["source"], "queue:needs_review")
             self.assertEqual(rows[0]["leadpoet_sentence"], "The useful Leadpoet question is why this account now.")
             self.assertEqual(rows[0]["leadpoet_grammar"], "product_modifier")
+            self.assertEqual(
+                rows[0]["leadpoet_sentence_template"],
+                "the useful {product} {domain} is why this {domain} now",
+            )
             store.close()
 
     def test_generation_repairs_saturated_batch_leadpoet_grammar_outside_recent_rows(self):
@@ -1947,6 +1955,77 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(
                 draft.text,
                 "Static records answer who exists. The account reason reaches Leadpoet when timing explains why now.",
+            )
+            self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
+            store.close()
+
+    def test_generation_deterministically_repairs_saturated_batch_leadpoet_sentence_template_without_provider_repair(self):
+        class IgnoredBatchTemplateRepairProvider:
+            def __init__(self):
+                self.repair_count = 0
+                self.repair_prompts: list[str] = []
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "A correct contact record can still be late.\n\nThe Leadpoet constraint points to prioritization.",
+                        "The CRM can be right and still late.\n\nTiming has to explain why now before the account reaches Leadpoet.",
+                        "More names do not fix account judgment.\n\nThe sequence is downstream.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    return [
+                        evaluation_json(
+                            "A correct contact record can still be late.\n\n"
+                            "The Leadpoet constraint points to prioritization."
+                        )
+                    ]
+                if "Repair this X post" in prompt:
+                    self.repair_count += 1
+                    self.repair_prompts.append(prompt)
+                    return []
+                return ["A correct contact record can still be late."]
+
+        repeated_template = "the {product} {domain} points to {domain}"
+        batch_outputs = [
+            "Static records answer who exists.\n\nThe Leadpoet signal points to timing.",
+            "The CRM can be correct and still late.\n\nThe Leadpoet question points to context.",
+            "More names do not fix judgment.\n\nThe Leadpoet edge points to action.",
+            "A rep needs the reason first.\nTiming becomes useful before the account reaches Leadpoet.",
+            "Context only matters when it changes action.\n\nInside Leadpoet, the account reason gets specific.",
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = IgnoredBatchTemplateRepairProvider()
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle="account timing beats more generated email",
+                ),
+                variants=1,
+                recent_output_texts=batch_outputs,
+            )[0]
+
+            self.assertEqual(provider.repair_count, 1)
+            self.assertIn(
+                f"Batch Leadpoet sentence template counts: {repeated_template}=3",
+                provider.repair_prompts[0],
+            )
+            self.assertIn(
+                f"change saturated batch Leadpoet sentence template: {repeated_template}",
+                provider.repair_prompts[0],
+            )
+            self.assertNotEqual(leadpoet_sentence_template(draft.text), repeated_template)
+            self.assertNotIn("The Leadpoet constraint points to prioritization", draft.text)
+            self.assertEqual(
+                draft.context_snapshot["recent_output_batch_summary"]["leadpoet_sentence_template_counts"][repeated_template],
+                3,
             )
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
             store.close()

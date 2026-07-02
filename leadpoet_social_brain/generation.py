@@ -88,6 +88,55 @@ LEADPOET_DEFINITION_PATTERNS = [
     (r"(?m)(?:^|\n\n)\s*the layer worth building\b", "avoid generic 'layer worth building' closer"),
 ]
 
+LEADPOET_TEMPLATE_DOMAIN_TERMS = (
+    "account",
+    "accounts",
+    "action",
+    "agent",
+    "agents",
+    "buyer",
+    "buyers",
+    "context",
+    "constraint",
+    "constraints",
+    "copy",
+    "crm",
+    "data",
+    "edge",
+    "email",
+    "emails",
+    "gtm",
+    "intent",
+    "judgment",
+    "judgement",
+    "lane",
+    "layer",
+    "lead",
+    "leads",
+    "market",
+    "mention",
+    "name",
+    "names",
+    "outbound",
+    "prioritization",
+    "qualification",
+    "question",
+    "reason",
+    "record",
+    "records",
+    "rep",
+    "reps",
+    "sales",
+    "sequence",
+    "signal",
+    "signals",
+    "system",
+    "timing",
+    "volume",
+    "wedge",
+    "workflow",
+)
+
 POST_STRUCTURE_SHAPES = [
     (
         "specific signal -> blunt implication -> product mechanism",
@@ -963,16 +1012,21 @@ def build_recent_output_context(
             details.append(f"leadpoet_grammar={row['leadpoet_grammar']}")
         if row["leadpoet_phrase_pattern"]:
             details.append(f"leadpoet_pattern={row['leadpoet_phrase_pattern']}")
+        if row["leadpoet_sentence_template"]:
+            details.append(f"leadpoet_template={row['leadpoet_sentence_template']}")
         lines.append(f"- {'; '.join(details)}")
     if batch_summary["post_count"]:
         grammar_counts = batch_summary.get("leadpoet_grammar_counts", {})
         phrase_counts = batch_summary.get("leadpoet_phrase_pattern_counts", {})
+        template_counts = batch_summary.get("leadpoet_sentence_template_counts", {})
         layout_counts = batch_summary.get("layout_counts", {})
         lines.append(f"Batch outputs so far: {batch_summary['post_count']}")
         if isinstance(grammar_counts, dict) and grammar_counts:
             lines.append(f"Batch Leadpoet grammar counts: {recent_output_count_summary(grammar_counts)}")
         if isinstance(phrase_counts, dict) and phrase_counts:
             lines.append(f"Batch Leadpoet phrase pattern counts: {recent_output_count_summary(phrase_counts)}")
+        if isinstance(template_counts, dict) and template_counts:
+            lines.append(f"Batch Leadpoet sentence template counts: {recent_output_count_summary(template_counts)}")
         if isinstance(layout_counts, dict) and layout_counts:
             lines.append(f"Batch layout counts: {recent_output_count_summary(layout_counts)}")
     lines.extend(
@@ -980,6 +1034,7 @@ def build_recent_output_context(
             "Avoid repeating those first-line shapes, final-line moves, and Leadpoet grammar fingerprints.",
             "Treat any Leadpoet grammar fingerprint used 3+ times in this batch as saturated; choose a different product role or omit the name if the point still works.",
             "Treat any Leadpoet phrase pattern used 3+ times in this batch as saturated; choose a different way the name enters the sentence.",
+            "Treat any Leadpoet sentence template used 3+ times in this batch as saturated; change the sentence skeleton, not just the noun beside the product name.",
             "Treat any layout fingerprint used 3+ times in this batch as saturated; change paragraph count, line breaks, or where the product name appears.",
             "If Leadpoet appears, change its sentence role, placement, and neighboring words from the recent examples.",
         ]
@@ -995,11 +1050,13 @@ def batch_recent_output_summary(texts: list[str]) -> dict[str, object]:
     ]
     grammar_counts = Counter(row["leadpoet_grammar"] for row in rows if row["leadpoet_grammar"])
     phrase_counts = Counter(row["leadpoet_phrase_pattern"] for row in rows if row["leadpoet_phrase_pattern"])
+    template_counts = Counter(row["leadpoet_sentence_template"] for row in rows if row["leadpoet_sentence_template"])
     layout_counts = Counter(row["layout"] for row in rows if row["layout"])
     return {
         "post_count": len(rows),
         "leadpoet_grammar_counts": dict(grammar_counts),
         "leadpoet_phrase_pattern_counts": dict(phrase_counts),
+        "leadpoet_sentence_template_counts": dict(template_counts),
         "layout_counts": dict(layout_counts),
     }
 
@@ -1089,8 +1146,19 @@ def recent_output_row(text: str, *, source: str, topic_scope: str = "same_topic"
     leadpoet_sentence = truncate_for_prompt(first_sentence_with_word(cleaned, "Leadpoet"), 130)
     leadpoet_grammar = leadpoet_sentence_grammar_fingerprint(leadpoet_sentence)
     leadpoet_phrase_pattern = leadpoet_phrase_pattern_fingerprint(leadpoet_sentence)
+    leadpoet_sentence_template = leadpoet_sentence_template_fingerprint(leadpoet_sentence)
     layout = recent_output_layout(cleaned)
-    fingerprint = "|".join([first.lower(), last.lower(), leadpoet_sentence.lower(), leadpoet_grammar, leadpoet_phrase_pattern, layout])
+    fingerprint = "|".join(
+        [
+            first.lower(),
+            last.lower(),
+            leadpoet_sentence.lower(),
+            leadpoet_grammar,
+            leadpoet_phrase_pattern,
+            leadpoet_sentence_template,
+            layout,
+        ]
+    )
     return {
         "source": source,
         "topic_scope": topic_scope,
@@ -1099,6 +1167,7 @@ def recent_output_row(text: str, *, source: str, topic_scope: str = "same_topic"
         "leadpoet_sentence": leadpoet_sentence,
         "leadpoet_grammar": leadpoet_grammar,
         "leadpoet_phrase_pattern": leadpoet_phrase_pattern,
+        "leadpoet_sentence_template": leadpoet_sentence_template,
         "layout": layout,
         "fingerprint": fingerprint,
     }
@@ -1202,6 +1271,18 @@ def leadpoet_phrase_pattern_fingerprint(sentence: str) -> str:
     if re.match(r"leadpoet\b", lowered):
         return "leadpoet_line_start"
     return "leadpoet_contextual"
+
+
+def leadpoet_sentence_template_fingerprint(sentence: str) -> str:
+    if not re.search(r"\bleadpoet\b", sentence, flags=re.I):
+        return ""
+    cleaned = re.sub(r"^(?:[-*•]\s+|\d+[.)]\s+)", "", sentence.strip())
+    lowered = " ".join(cleaned.lower().replace("’", "'").split())
+    lowered = re.sub(r"\bleadpoet(?:'s)?\b", "{product}", lowered)
+    lowered = re.sub(r"\b\d+(?:[.,]\d+)?%?\b", "{number}", lowered)
+    lowered = re.sub(rf"\b(?:{'|'.join(LEADPOET_TEMPLATE_DOMAIN_TERMS)})\b", "{domain}", lowered)
+    lowered = re.sub(r"(?:\{domain\}\s*){2,}", "{domain}", lowered)
+    return lowered.strip(" .!?")
 
 
 def recent_output_layout(text: str) -> str:
@@ -2036,7 +2117,15 @@ def apply_deterministic_rule_repair(
             max_chars=max_chars,
         )
     ]
-    if any("leadpoet grammar" in violation.lower() for violation in previous_violations):
+    if any(
+        phrase in violation.lower()
+        for violation in previous_violations
+        for phrase in (
+            "leadpoet grammar",
+            "leadpoet phrase pattern",
+            "leadpoet sentence template",
+        )
+    ):
         candidates.extend(deterministic_leadpoet_grammar_saturation_repair_candidates(text, max_chars=max_chars))
     if any("saturated batch layout" in violation.lower() for violation in previous_violations):
         layout_bases = [text, *candidates]
@@ -2069,14 +2158,16 @@ def deterministic_repair_candidate_score(
     text: str,
     violations: list[str],
     recent_output_batch_summary: dict[str, object] | None,
-) -> tuple[int, int, int, int, int]:
+) -> tuple[int, int, int, int, int, int]:
     grammar = leadpoet_sentence_grammar_fingerprint(first_sentence_with_word(text, "Leadpoet"))
     phrase_pattern = leadpoet_phrase_pattern_fingerprint(first_sentence_with_word(text, "Leadpoet"))
+    sentence_template = leadpoet_sentence_template_fingerprint(first_sentence_with_word(text, "Leadpoet"))
     layout = recent_output_layout(clean_recent_output_text(text))
     grammar_count = batch_summary_count(recent_output_batch_summary, "leadpoet_grammar_counts", grammar)
     phrase_count = batch_summary_count(recent_output_batch_summary, "leadpoet_phrase_pattern_counts", phrase_pattern)
+    template_count = batch_summary_count(recent_output_batch_summary, "leadpoet_sentence_template_counts", sentence_template)
     layout_count = batch_summary_count(recent_output_batch_summary, "layout_counts", layout)
-    return (len(violations), phrase_count, grammar_count, layout_count, len(text))
+    return (len(violations), template_count, phrase_count, grammar_count, layout_count, len(text))
 
 
 def batch_summary_count(summary: dict[str, object] | None, key: str, value: str) -> int:
@@ -2502,6 +2593,7 @@ def recent_output_repetition_violations(
     leadpoet_sentence = normalize_recent_output_fragment(first_sentence_with_word(cleaned, "Leadpoet"))
     leadpoet_grammar = leadpoet_sentence_grammar_fingerprint(first_sentence_with_word(cleaned, "Leadpoet"))
     leadpoet_phrase_pattern = leadpoet_phrase_pattern_fingerprint(first_sentence_with_word(cleaned, "Leadpoet"))
+    leadpoet_sentence_template = leadpoet_sentence_template_fingerprint(first_sentence_with_word(cleaned, "Leadpoet"))
     layout = recent_output_layout(cleaned)
     violations: list[str] = []
     for row in recent_output_rows or []:
@@ -2509,6 +2601,7 @@ def recent_output_repetition_violations(
         row_last = normalize_recent_output_fragment(row.get("last_line", ""))
         row_leadpoet = normalize_recent_output_fragment(row.get("leadpoet_sentence", ""))
         row_leadpoet_grammar = row.get("leadpoet_grammar", "")
+        row_leadpoet_template = row.get("leadpoet_sentence_template", "")
         if first and row_first and first == row_first:
             violations.append("change repeated recent opening line")
         if last and row_last and last == row_last and last != first:
@@ -2517,6 +2610,8 @@ def recent_output_repetition_violations(
             violations.append("change repeated recent Leadpoet sentence")
         if leadpoet_grammar and row_leadpoet_grammar and leadpoet_grammar == row_leadpoet_grammar:
             violations.append(f"change repeated recent Leadpoet grammar: {leadpoet_grammar}")
+        if leadpoet_sentence_template and row_leadpoet_template and leadpoet_sentence_template == row_leadpoet_template:
+            violations.append(f"change repeated recent Leadpoet sentence template: {leadpoet_sentence_template}")
     if leadpoet_grammar and recent_output_batch_summary:
         grammar_counts = recent_output_batch_summary.get("leadpoet_grammar_counts", {})
         if isinstance(grammar_counts, dict) and int(grammar_counts.get(leadpoet_grammar, 0) or 0) >= 3:
@@ -2525,6 +2620,10 @@ def recent_output_repetition_violations(
         phrase_counts = recent_output_batch_summary.get("leadpoet_phrase_pattern_counts", {})
         if isinstance(phrase_counts, dict) and int(phrase_counts.get(leadpoet_phrase_pattern, 0) or 0) >= 3:
             violations.append(f"change saturated batch Leadpoet phrase pattern: {leadpoet_phrase_pattern}")
+    if leadpoet_sentence_template and recent_output_batch_summary:
+        template_counts = recent_output_batch_summary.get("leadpoet_sentence_template_counts", {})
+        if isinstance(template_counts, dict) and int(template_counts.get(leadpoet_sentence_template, 0) or 0) >= 3:
+            violations.append(f"change saturated batch Leadpoet sentence template: {leadpoet_sentence_template}")
     if layout and recent_output_batch_summary:
         layout_counts = recent_output_batch_summary.get("layout_counts", {})
         if isinstance(layout_counts, dict) and int(layout_counts.get(layout, 0) or 0) >= 3:

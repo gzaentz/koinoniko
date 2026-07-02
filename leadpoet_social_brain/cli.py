@@ -34,6 +34,7 @@ from leadpoet_social_brain.generation import (
     MISSING_PROVIDER_MESSAGE,
     SocialBrainGenerator,
     leadpoet_phrase_pattern_fingerprint,
+    leadpoet_sentence_template_fingerprint,
     leadpoet_sentence_grammar_fingerprint,
     primary_closing_target,
     primary_human_rhythm_target,
@@ -1533,63 +1534,7 @@ def leadpoet_phrase_pattern_for_text(text: str) -> str:
 
 def leadpoet_sentence_template(text: str) -> str:
     sentence = first_leadpoet_sentence(text)
-    if not sentence:
-        return "no_leadpoet"
-    cleaned = re.sub(r"^(?:[-*•]\s+|\d+[.)]\s+)", "", sentence.strip())
-    lowered = " ".join(cleaned.lower().replace("’", "'").split())
-    lowered = re.sub(r"\bleadpoet(?:'s)?\b", "{product}", lowered)
-    lowered = re.sub(r"\b\d+(?:[.,]\d+)?%?\b", "{number}", lowered)
-    domain_terms = (
-        "account",
-        "accounts",
-        "action",
-        "agent",
-        "agents",
-        "buyer",
-        "buyers",
-        "context",
-        "constraint",
-        "constraints",
-        "copy",
-        "crm",
-        "data",
-        "edge",
-        "email",
-        "emails",
-        "gtm",
-        "intent",
-        "judgment",
-        "judgement",
-        "lane",
-        "layer",
-        "lead",
-        "leads",
-        "market",
-        "mention",
-        "name",
-        "names",
-        "outbound",
-        "prioritization",
-        "qualification",
-        "question",
-        "reason",
-        "record",
-        "records",
-        "rep",
-        "reps",
-        "sales",
-        "sequence",
-        "signal",
-        "signals",
-        "system",
-        "timing",
-        "volume",
-        "wedge",
-        "workflow",
-    )
-    lowered = re.sub(rf"\b(?:{'|'.join(domain_terms)})\b", "{domain}", lowered)
-    lowered = re.sub(r"(?:\{domain\}\s*){2,}", "{domain}", lowered)
-    return lowered.strip(" .!?")
+    return leadpoet_sentence_template_fingerprint(sentence) or "no_leadpoet"
 
 
 def first_leadpoet_sentence(text: str) -> str:
