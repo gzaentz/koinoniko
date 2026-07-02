@@ -7772,6 +7772,38 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Custom rule: Leadpoet owns buyer timing", rules_text)
             store.close()
 
+    def test_loading_positioning_rules_refreshes_stale_active_context_section(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            store.save_context_section(
+                ContextSection(
+                    kind="positioning",
+                    name="active_positioning_rules",
+                    content=(
+                        "Positioning rules:\n"
+                        "- When referencing another product, validate the market shift, then bring the point back "
+                        "to buyer timing and proprietary context inside Leadpoet."
+                    ),
+                    weight=1.8,
+                )
+            )
+
+            rules = load_positioning_rules(store)
+            section = [
+                section for section in store.list_context_sections(kinds={"positioning"}, active_only=False)
+                if section.name == "active_positioning_rules"
+            ][0]
+            prompt = SocialBrainGenerator(store).build_prompt(
+                DraftRequest(platform="x", topic="sales LLMs", post_type="founder_insight")
+            )
+
+            self.assertTrue(rules)
+            self.assertIn("buyer timing, proprietary context, and the account reason before copy or outreach", section.content)
+            self.assertNotIn("inside Leadpoet", section.content)
+            self.assertNotIn("inside Leadpoet", prompt)
+            store.close()
+
     def test_voice_rules_endpoint_groups_positioning_voice_filters_and_guardrails(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"

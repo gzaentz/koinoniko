@@ -97,22 +97,40 @@ def save_avoid_phrases(store: SQLiteStore, phrases: list[object]) -> list[str]:
 def load_positioning_rules(store: SQLiteStore) -> list[str]:
     raw = store.get_app_setting(VOICE_POSITIONING_RULES_SETTING)
     if raw is None:
-        return default_positioning_rules(store)
-    return with_universal_positioning_rules(rewrite_legacy_positioning_rules(parse_rules_value(raw, [])))
+        rules = default_positioning_rules(store)
+    else:
+        rules = with_universal_positioning_rules(rewrite_legacy_positioning_rules(parse_rules_value(raw, [])))
+    sync_positioning_rules_context(store, rules)
+    return rules
 
 
 def save_positioning_rules(store: SQLiteStore, rules: list[object]) -> list[str]:
     normalized = with_universal_positioning_rules(rewrite_legacy_positioning_rules(normalize_rules(rules)))
     store.save_app_setting(VOICE_POSITIONING_RULES_SETTING, json.dumps(normalized))
+    sync_positioning_rules_context(store, normalized)
+    return normalized
+
+
+def sync_positioning_rules_context(store: SQLiteStore, rules: list[str]) -> None:
+    content = positioning_rules_context_content(rules)
+    existing = next(
+        (
+            section
+            for section in store.list_context_sections(kinds={"positioning"}, active_only=False)
+            if section.name == POSITIONING_RULES_CONTEXT_NAME
+        ),
+        None,
+    )
+    if existing and existing.content == content and existing.active and existing.weight == 1.8:
+        return
     store.save_context_section(
         ContextSection(
             kind="positioning",
             name=POSITIONING_RULES_CONTEXT_NAME,
-            content=positioning_rules_context_content(normalized),
+            content=content,
             weight=1.8,
         )
     )
-    return normalized
 
 
 def load_voice_rules_override(store: SQLiteStore) -> list[str] | None:
