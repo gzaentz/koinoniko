@@ -1847,6 +1847,55 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(rows[0]["topic_scope"], "other_topic")
             store.close()
 
+    def test_recent_output_anti_sameness_prefers_newer_queue_items(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            store.save_content_queue_item(
+                ContentQueueItem(
+                    text=(
+                        "Older scheduled item keeps the stale shape.\n\n"
+                        "The older Leadpoet sentence should not win."
+                    ),
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    scheduled_at="2026-07-01T10:00:00+00:00",
+                    created_at="2026-07-01T09:00:00+00:00",
+                    updated_at="2026-07-01T09:00:00+00:00",
+                )
+            )
+            store.save_content_queue_item(
+                ContentQueueItem(
+                    text=(
+                        "Newest generated item should drive the next draft.\n\n"
+                        "The newest Leadpoet sentence should be avoided."
+                    ),
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    scheduled_at="2026-07-05T10:00:00+00:00",
+                    created_at="2026-07-03T09:00:00+00:00",
+                    updated_at="2026-07-03T09:00:00+00:00",
+                )
+            )
+            provider = FakeProvider()
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle="account timing beats more generated email",
+                ),
+                variants=1,
+            )[0]
+
+            rows = draft.context_snapshot["recent_output_anti_sameness"]
+            self.assertGreaterEqual(len(rows), 2)
+            self.assertEqual(rows[0]["first_line"], "Newest generated item should drive the next draft.")
+            self.assertEqual(rows[0]["leadpoet_sentence"], "The newest Leadpoet sentence should be avoided.")
+            self.assertEqual(rows[1]["first_line"], "Older scheduled item keeps the stale shape.")
+            store.close()
+
     def test_generation_repairs_exact_recent_output_repetition(self):
         class RepeatingRecentOutputProvider:
             def __init__(self):

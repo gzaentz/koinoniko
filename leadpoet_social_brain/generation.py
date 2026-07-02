@@ -987,7 +987,7 @@ def recent_output_rows(
         if append_row(text, source="batch", topic_scope="batch"):
             return rows
 
-    queue_items = store.list_content_queue(platform=request.platform, limit=80)
+    queue_items = sort_recent_outputs_by_recency(store.list_content_queue(platform=request.platform, limit=80))
     same_topic_queue = [item for item in queue_items if recent_output_same_topic(request.topic, item.topic)]
     other_topic_queue = [item for item in queue_items if not recent_output_same_topic(request.topic, item.topic)]
     for item in [*same_topic_queue, *other_topic_queue]:
@@ -995,10 +995,12 @@ def recent_output_rows(
         if append_row(item.text, source=f"queue:{item.status}", topic_scope=topic_scope):
             return rows
 
-    same_topic_posts = store.list_posts(platform=request.platform, topic=request.topic or None, limit=limit * 2)
+    same_topic_posts = sort_recent_outputs_by_recency(
+        store.list_posts(platform=request.platform, topic=request.topic or None, limit=limit * 2)
+    )
     if request.topic:
         other_topic_posts = [
-            post for post in store.list_posts(platform=request.platform, limit=limit * 4)
+            post for post in sort_recent_outputs_by_recency(store.list_posts(platform=request.platform, limit=limit * 4))
             if not recent_output_same_topic(request.topic, post.topic)
         ]
     else:
@@ -1014,6 +1016,19 @@ def recent_output_same_topic(request_topic: str, item_topic: str | None) -> bool
     if not request_topic or not item_topic:
         return True
     return clean_recent_topic(request_topic) == clean_recent_topic(item_topic)
+
+
+def sort_recent_outputs_by_recency(items):
+    return sorted(
+        items,
+        key=lambda item: (
+            str(getattr(item, "created_at", "") or ""),
+            str(getattr(item, "updated_at", "") or ""),
+            str(getattr(item, "scheduled_at", "") or ""),
+            str(getattr(item, "published_at", "") or ""),
+        ),
+        reverse=True,
+    )
 
 
 def clean_recent_topic(topic: str) -> str:
