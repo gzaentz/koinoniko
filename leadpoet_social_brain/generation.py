@@ -2206,7 +2206,10 @@ def workspace_anchor_line(
     active_rules: dict[str, list[str]],
 ) -> str:
     if anchor.lower() == "leadpoet":
-        return leadpoet_anchor_line(primary_product_mention_lane(request, trends)[0])
+        return leadpoet_anchor_line(
+            primary_product_mention_lane(request, trends)[0],
+            product_syntax=primary_product_mention_syntax_target(request, trends)[0],
+        )
     sources = [
         *active_rules.get("positioning_rules", []),
         *(section.content for section in bundle.positioning_sections),
@@ -2225,7 +2228,18 @@ def workspace_anchor_line(
     return f"For {anchor}, the useful layer starts with proprietary context and timing."
 
 
-def leadpoet_anchor_line(product_lane: str) -> str:
+def leadpoet_anchor_line(product_lane: str, product_syntax: str | None = None) -> str:
+    syntax_lines = {
+        "product as object": "Put Leadpoet behind the account-change check, after the why-now signal is clear.",
+        "prepositional tuck-in": "The account reason gets specific inside Leadpoet before generated copy starts.",
+        "possessive modifier": "The useful Leadpoet constraint stays concrete: why this account deserves action now.",
+        "name omitted": "The useful wedge is buyer timing: why this account deserves action now.",
+        "handoff point": "At the handoff into Leadpoet, the signal has to explain why this account is worth action.",
+        "question-adjacent": "Inside Leadpoet, ask the practical question: why this account, this week?",
+        "earned late noun": "The account reason has to stand on its own first. Then Leadpoet earns the mention.",
+    }
+    if product_syntax in syntax_lines:
+        return syntax_lines[product_syntax]
     lines = {
         "mechanism-first": "Buyer timing has to become visible before a sequence starts; that account-change check is where the Leadpoet mention earns its place.",
         "consequence-first": "The account choice gets better when the why-now reason is visible inside Leadpoet.",

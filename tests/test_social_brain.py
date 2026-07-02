@@ -1562,14 +1562,28 @@ class SocialBrainTest(unittest.TestCase):
         ]
 
         lines = {lane: leadpoet_anchor_line(lane) for lane in lanes}
+        syntax_lines = {
+            syntax: leadpoet_anchor_line("mechanism-first", product_syntax=syntax)
+            for syntax in [
+                "product as object",
+                "prepositional tuck-in",
+                "possessive modifier",
+                "name omitted",
+                "handoff point",
+                "question-adjacent",
+                "earned late noun",
+            ]
+        }
 
         self.assertEqual(len(set(lines.values())), len(lanes))
-        for lane, line in lines.items():
-            with self.subTest(lane=lane):
-                self.assertIn("Leadpoet", line)
+        self.assertEqual(len(set(syntax_lines.values())), len(syntax_lines))
+        for label, line in {**lines, **syntax_lines}.items():
+            with self.subTest(label=label):
+                if label != "name omitted":
+                    self.assertIn("Leadpoet", line)
                 self.assertFalse(any(leadpoet_bad_phrase_counts(line).values()), line)
                 self.assertFalse(leadpoet_starts_sentence(line), line)
-                self.assertNotRegex(line, r"\bLeadpoet\s+(?:owns|starts|can|needs?|should|has\s+to)\b")
+                self.assertNotRegex(line, r"\bLeadpoet\s+(?:owns|starts|can|needs?|should|has\s+to|makes?|keeps?|turns?|focuses)\b")
 
     def test_ingest_x_post_stores_metrics_and_notes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2803,6 +2817,10 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotEqual(
                 draft_a.context_snapshot["primary_product_mention_lane"]["name"],
                 draft_b.context_snapshot["primary_product_mention_lane"]["name"],
+            )
+            self.assertNotEqual(
+                draft_a.context_snapshot["primary_product_mention_syntax_target"]["name"],
+                draft_b.context_snapshot["primary_product_mention_syntax_target"]["name"],
             )
             store.close()
 
