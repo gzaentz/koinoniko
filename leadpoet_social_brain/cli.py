@@ -1251,6 +1251,23 @@ def build_naturalness_audit(
     )
     if len(primary_human_rhythm_target_counts) < min(4, len(trends), count):
         warnings.append("Human rhythm guidance did not vary enough across trends.")
+    append_plan_concentration_warning(warnings, "Structure guidance", primary_structure_counts, len(rows))
+    append_plan_concentration_warning(warnings, "Product mention guidance", primary_product_lane_counts, len(rows))
+    append_plan_concentration_warning(
+        warnings,
+        "Product mention placement guidance",
+        primary_product_placement_counts,
+        len(rows),
+    )
+    append_plan_concentration_warning(
+        warnings,
+        "Product mention syntax guidance",
+        primary_product_syntax_counts,
+        len(rows),
+    )
+    append_plan_concentration_warning(warnings, "Layout target guidance", primary_layout_target_counts, len(rows))
+    append_plan_concentration_warning(warnings, "Closing target guidance", primary_closing_target_counts, len(rows))
+    append_plan_concentration_warning(warnings, "Human rhythm guidance", primary_human_rhythm_target_counts, len(rows))
     covered_trend_ids = {str(row["trend_id"]) for row in rows if row["trend_id"]}
     uncovered_trend_count = max(0, len(trends) - len(covered_trend_ids))
     if uncovered_trend_count:

@@ -3506,6 +3506,64 @@ class SocialBrainTest(unittest.TestCase):
             )
             store.close()
 
+    def test_audit_naturalness_x_warns_on_concentrated_guidance_assignments(self):
+        class VariedTextProvider:
+            def __init__(self):
+                self.final_count = 0
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "Signal quality matters before copy.\n\nInside Leadpoet, account timing explains why now.",
+                        "The account can look valid and still be late.\n\nInside Leadpoet, timing changes the next action.",
+                        "More contacts do not create judgment.\n\nInside Leadpoet, the account reason has to come first.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    self.final_count += 1
+                    return [
+                        evaluation_json(
+                            f"Signal {self.final_count} matters before copy.\n\n"
+                            f"Inside Leadpoet, account timing explains why now {self.final_count}."
+                        )
+                    ]
+                return ["Signal quality matters before copy."]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            store.save_trend_item(
+                TrendItem(
+                    title="One repeated trend",
+                    source_type="web",
+                    topic="sales AI",
+                    summary="A trend about GTM context.",
+                    why_it_matters="It shows timing matters.",
+                    leadpoet_angle="Buyer timing needs proprietary account context.",
+                    date=utc_now(),
+                )
+            )
+
+            payload = build_naturalness_audit(
+                store,
+                SocialBrainGenerator(store, provider=VariedTextProvider()),
+                count=5,
+                trend_limit=0,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+                save_drafts=False,
+            )
+
+            self.assertTrue(
+                any("Structure guidance is too concentrated" in warning for warning in payload["warnings"])
+            )
+            self.assertTrue(
+                any("Product mention syntax guidance is too concentrated" in warning for warning in payload["warnings"])
+            )
+            store.close()
+
     def test_audit_naturalness_x_plan_only_cli_skips_provider_load(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"
