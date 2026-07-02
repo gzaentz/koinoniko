@@ -1183,6 +1183,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("## skills/review_filter.md", prompt)
             self.assertIn("# Review Filter", prompt)
             self.assertIn("Use saved Facts & Context as the source of truth", prompt)
+            self.assertIn("Use saved positioning as source material for meaning, not wording to copy", prompt)
             self.assertIn("Do not make another tool, agent, or case study supply the workspace's core mechanism", prompt)
             self.assertIn("explain the exact mechanism that transfers to saved Facts & Context", prompt)
             self.assertIn("Natural Voice Calibration:", prompt)
@@ -7593,11 +7594,14 @@ class SocialBrainTest(unittest.TestCase):
                 section for section in store.list_context_sections(kinds={"positioning"})
                 if section.name == "active_positioning_rules"
             ][0]
-            self.assertIn("Leadpoet owns buyer timing", context.content)
+            self.assertIn("Leadpoet positioning meaning: buyer timing and proprietary account intent", context.content)
+            self.assertNotIn("Leadpoet owns buyer timing", context.content)
             prompt = SocialBrainGenerator(store).build_prompt(
                 DraftRequest(platform="x", topic="sales LLMs", post_type="founder_insight")
             )
-            self.assertIn("Leadpoet owns buyer timing and proprietary account intent.", prompt)
+            self.assertIn("Leadpoet positioning meaning: buyer timing and proprietary account intent", prompt)
+            self.assertIn("Use saved positioning as source material for meaning, not wording to copy", prompt)
+            self.assertNotIn("Leadpoet owns buyer timing and proprietary account intent.", prompt)
             self.assertIn("Write like Gavin saw the problem himself.", prompt)
             self.assertIn("Reject drafts that make another tool sound like Leadpoet.", prompt)
             self.assertIn("worth posting now", prompt)

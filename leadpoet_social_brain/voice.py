@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from leadpoet_social_brain.core.models import DEFAULT_WORKSPACE_ID, ContextSection
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
@@ -11,6 +12,11 @@ VOICE_POSITIONING_RULES_SETTING = "voice.positioning_rules"
 VOICE_RULES_SETTING = "voice.rules"
 VOICE_REVIEW_RULES_SETTING = "voice.review_rules"
 POSITIONING_RULES_CONTEXT_NAME = "active_positioning_rules"
+POSITIONING_SOURCE_PROMPT_GUIDANCE = (
+    "Use saved positioning as source material for meaning, not wording to copy; "
+    "translate any product-definition or product-subject phrasing into a concrete mechanism, "
+    "account change, or consequence before writing."
+)
 DEFAULT_AVOID_PHRASES = [
     "game changer",
     "unlock",
@@ -188,7 +194,8 @@ def rewrite_legacy_positioning_rules(rules: list[str]) -> list[str]:
 def positioning_rules_context_content(rules: list[str]) -> str:
     if not rules:
         return "Positioning rules are currently empty."
-    return "Positioning rules:\n" + "\n".join(f"- {rule}" for rule in rules)
+    lines = "\n".join(f"- {prompt_safe_positioning_rule(rule)}" for rule in rules)
+    return f"Positioning rules:\n{POSITIONING_SOURCE_PROMPT_GUIDANCE}\n{lines}"
 
 
 def review_filter_skill_content(rules: list[str]) -> str:
@@ -207,12 +214,67 @@ def active_rules_prompt_section(
 ) -> str:
     sections: list[str] = []
     if positioning_rules:
-        sections.append("Positioning Rules:\n" + "\n".join(f"- {rule}" for rule in positioning_rules))
+        lines = "\n".join(f"- {prompt_safe_positioning_rule(rule)}" for rule in positioning_rules)
+        sections.append(f"Positioning Rules:\n- {POSITIONING_SOURCE_PROMPT_GUIDANCE}\n{lines}")
     if voice_rules:
         sections.append("Voice Rules:\n" + "\n".join(f"- {rule}" for rule in voice_rules))
     if not sections:
         return "Active Writing Rules:\n- None configured."
     return "Active Writing Rules:\n" + "\n\n".join(sections)
+
+
+def prompt_safe_positioning_rule(rule: str) -> str:
+    cleaned = " ".join(str(rule or "").split())
+    if not cleaned:
+        return cleaned
+    for pattern, rewrite in POSITIONING_RULE_PROMPT_REWRITES:
+        match = pattern.match(cleaned)
+        if match:
+            return rewrite(match)
+    return cleaned
+
+
+def _clean_positioning_meaning(value: str) -> str:
+    return value.strip().rstrip(".")
+
+
+def _rewrite_product_owns_rule(match: re.Match[str]) -> str:
+    product, meaning = match.groups()
+    return (
+        f"{product} positioning meaning: {_clean_positioning_meaning(meaning)}. "
+        "Express this through a concrete mechanism, account change, or consequence."
+    )
+
+
+def _rewrite_product_is_rule(match: re.Match[str]) -> str:
+    product, meaning = match.groups()
+    return (
+        f"{product} positioning meaning: {_clean_positioning_meaning(meaning)}. "
+        "Do not turn it into a standalone company-definition sentence."
+    )
+
+
+def _rewrite_product_helper_rule(match: re.Match[str]) -> str:
+    product, meaning = match.groups()
+    return (
+        f"{product} positioning meaning: {_clean_positioning_meaning(meaning)}. "
+        "Let the mechanism or consequence lead instead of a product-subject helper sentence."
+    )
+
+
+POSITIONING_RULE_PROMPT_REWRITES = [
+    (re.compile(r"^([A-Z][A-Za-z0-9_.-]*)\s+owns?\s+(.+)$"), _rewrite_product_owns_rule),
+    (re.compile(r"^([A-Z][A-Za-z0-9_.-]*)\s+is\s+building\s+(.+)$"), _rewrite_product_is_rule),
+    (re.compile(r"^([A-Z][A-Za-z0-9_.-]*)\s+is\s+built\s+for\s+(.+)$"), _rewrite_product_is_rule),
+    (re.compile(r"^([A-Z][A-Za-z0-9_.-]*)\s+is\s+(.+)$"), _rewrite_product_is_rule),
+    (
+        re.compile(
+            r"^([A-Z][A-Za-z0-9_.-]*)\s+"
+            r"(?:helps?|enables?|unlocks?|provides?|makes?|starts?|keeps?|turns?|focuses|gives?|answers?|shows?|lets?|finds?|delivers?|powers?|brings?|drives?|creates?)\s+(.+)$",
+        ),
+        _rewrite_product_helper_rule,
+    ),
+]
 
 
 def avoid_phrases_prompt_section(phrases: list[str]) -> str:

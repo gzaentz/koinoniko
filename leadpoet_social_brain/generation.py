@@ -7,13 +7,15 @@ from collections import Counter
 from dataclasses import replace
 
 from leadpoet_social_brain.context import ContextManager
-from leadpoet_social_brain.core.models import ContextBundle, DraftRequest, GeneratedDraft, TrendItem, ViralPattern
+from leadpoet_social_brain.core.models import ContextBundle, ContextSection, DraftRequest, GeneratedDraft, TrendItem, ViralPattern
 from leadpoet_social_brain.pattern_scout import select_relevant_patterns
 from leadpoet_social_brain.platforms.x import get_x_adapter
 from leadpoet_social_brain.providers import DraftProvider, ModelRouting, generate_with_provider, resolve_model_routing
 from leadpoet_social_brain.skills import SkillAsset, generation_skills
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 from leadpoet_social_brain.voice import (
+    POSITIONING_RULES_CONTEXT_NAME,
+    POSITIONING_SOURCE_PROMPT_GUIDANCE,
     active_rules_prompt_section,
     avoid_phrases_prompt_section,
     load_avoid_phrases,
@@ -712,6 +714,21 @@ def length_prompt_section(request: DraftRequest, max_chars: int) -> str:
     )
 
 
+def positioning_context_prompt_text(sections: list[ContextSection]) -> str:
+    if not sections:
+        return ""
+    lines = [f"- Context use: {POSITIONING_SOURCE_PROMPT_GUIDANCE}"]
+    for section in sections:
+        if section.name == POSITIONING_RULES_CONTEXT_NAME:
+            lines.append(
+                f"- {section.kind}/{section.name}: Active positioning rules are listed below; "
+                "use their meaning instead of copying their rule wording."
+            )
+        else:
+            lines.append(f"- {section.kind}/{section.name}: {section.content}")
+    return "\n".join(lines)
+
+
 def natural_voice_prompt_section(bundle: ContextBundle | None = None, anchor: str | None = None) -> str:
     example_line = (
         "- Voice Examples are the calibration set: borrow cadence, bluntness, and specificity, not wording."
@@ -1335,7 +1352,7 @@ def build_generation_prompt(
         if section.name != "gavin_founder_voice_v0"
     ]
     voice = "\n".join(f"- {section.name}: {section.content}" for section in observed_style_sections)
-    context = "\n".join(f"- {section.kind}/{section.name}: {section.content}" for section in bundle.positioning_sections)
+    context = positioning_context_prompt_text(bundle.positioning_sections)
     examples_text = "\n\n".join(_format_example(post, bundle) for post in bundle.examples)
     if not examples_text:
         examples_text = "No examples yet. Lean on saved Facts & Context and write naturally."
@@ -1414,7 +1431,7 @@ def build_strategy_prompt(
     active_rules: dict[str, list[str]] | None = None,
     recent_outputs_section: str = "",
 ) -> str:
-    context = "\n".join(f"- {section.kind}/{section.name}: {section.content}" for section in bundle.positioning_sections)
+    context = positioning_context_prompt_text(bundle.positioning_sections)
     examples_text = "\n\n".join(_format_example(post, bundle) for post in bundle.examples)
     trends_text = "\n\n".join(_format_trend(trend) for trend in trends)
     patterns_text = "\n\n".join(_format_viral_pattern(pattern) for pattern in patterns)
@@ -1512,7 +1529,7 @@ def build_best_writer_prompt(
 ) -> str:
     skill_text = "\n\n".join(f"## {skill.path}\n{skill.content}" for skill in skills)
     examples_text = "\n\n".join(_format_example(post, bundle) for post in bundle.examples)
-    context = "\n".join(f"- {section.kind}/{section.name}: {section.content}" for section in bundle.positioning_sections)
+    context = positioning_context_prompt_text(bundle.positioning_sections)
     trends_text = "\n\n".join(_format_trend(trend) for trend in trends)
     patterns_text = "\n\n".join(_format_viral_pattern(pattern) for pattern in patterns)
     analytics = "\n".join(f"- {hint}" for hint in bundle.analytics_hints)
@@ -2980,7 +2997,11 @@ def build_rule_repair_prompt(
     max_chars: int,
     recent_outputs_section: str = "",
 ) -> str:
-    context = "\n".join(f"- {section.kind}/{section.name}: {section.content}" for section in bundle.positioning_sections)
+    context = positioning_context_prompt_text(bundle.positioning_sections)
+    active_rules_section = active_rules_prompt_section(
+        positioning_rules=(active_rules or {}).get("positioning_rules", []),
+        voice_rules=(active_rules or {}).get("voice_rules", []),
+    )
     length_section = length_prompt_section(request, max_chars)
     anchor = workspace_anchor_name(bundle, active_rules or {})
     natural_voice_section = natural_voice_prompt_section(bundle, anchor=anchor)
@@ -3002,6 +3023,8 @@ Request:
 
 Facts & Context:
 {context or "- No saved facts/context available."}
+
+{active_rules_section}
 
 {natural_voice_section}
 
