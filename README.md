@@ -831,7 +831,8 @@ user's idea and selected context into a structured Post Intent, including the th
 concrete detail, post shape, and evidence boundary. The natural writer drafts from that
 intent, and the evaluator rewrites if the result is generic, unsupported, or too polished.
 Active Writing Rules also repair obvious violations such as missing Leadpoet positioning,
-blocked phrases, formulaic `Leadpoet is...` / `For Leadpoet...` phrasing, or em dashes.
+blocked phrases, formulaic `Leadpoet is...` / `For Leadpoet...` / `Leadpoet should...`
+phrasing, or em dashes.
 The user only reviews the final queued post, not the internal brief.
 
 `Use in Post` on a trend or `Use Pattern` on a pattern opens Create Post with that source preselected. Generated output still enters the review queue; it does not publish automatically.

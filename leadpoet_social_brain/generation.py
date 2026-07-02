@@ -77,6 +77,7 @@ LEADPOET_DEFINITION_PATTERNS = [
     (r"\bleadpoet is built\b", "avoid default 'Leadpoet is built for...' product definition"),
     (r"\bleadpoet is\b", "avoid standalone 'Leadpoet is...' product definition"),
     (r"(?m)(?:^|\n\n)\s*for leadpoet,\s+", "avoid formulaic 'For Leadpoet...' product lead-in"),
+    (r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:should|can|needs?|has\s+to)\b", "avoid formulaic Leadpoet modal lead-in"),
     (r"(?m)(?:^|\n\n)\s*leadpoet(?:'s|’s)?\s+(?:bet|job|role)\b", "avoid formulaic Leadpoet closer"),
     (r"(?m)(?:^|\n\n)\s*the layer worth building\b", "avoid generic 'layer worth building' closer"),
 ]
@@ -1613,6 +1614,12 @@ def deterministic_leadpoet_definition_repair(
         repaired,
         flags=re.I,
     )
+    repaired = re.sub(
+        r"(?m)(^|(?<=[.!?])\s+|\n\n)(\s*)Leadpoet\s+(should|can|needs?|has\s+to)\s+([^.!?\n]*(?:[.!?]|$))",
+        lambda match: leadpoet_modal_leadin_replacement(match, product_lane=product_lane),
+        repaired,
+        flags=re.I,
+    )
     cleaned = clean_generated_text(repaired, max_chars=max_chars)
     if not cleaned or len(cleaned) > max_chars:
         return text
@@ -1657,16 +1664,16 @@ def leadpoet_formulaic_intro_replacement(match: re.Match[str], *, product_lane: 
     lowered_body = body.lower()
     if lowered_body.startswith("the harder question is "):
         tail = body[len("the harder question is "):]
-        return f"{prefix}{indent}Leadpoet has to stay on the harder question: {tail}{ending}"
+        return f"{prefix}{indent}The harder question is {tail}{ending} That is where Leadpoet belongs."
     if lowered_body.startswith("account context has to "):
         tail = body[len("account context has to "):]
-        return f"{prefix}{indent}Leadpoet has to make account context {tail}{ending}"
+        return f"{prefix}{indent}Account context has to {tail}{ending} That is the Leadpoet constraint."
     if lowered_body.startswith("timing means "):
         tail = body[len("timing means "):]
-        return f"{prefix}{indent}Leadpoet makes timing useful when it means {tail}{ending}"
+        return f"{prefix}{indent}Timing is useful when it means {tail}{ending} That is the Leadpoet bar."
     if lowered_body.startswith("buyer timing is "):
         tail = body[len("buyer timing is "):]
-        return f"{prefix}{indent}Leadpoet keeps buyer timing tied to {tail}{ending}"
+        return f"{prefix}{indent}Buyer timing stays tied to {tail}{ending} That is the Leadpoet point."
     if body:
         body = body[0].lower() + body[1:]
     body = f"{body}{ending}" if body else ""
@@ -1685,6 +1692,32 @@ def leadpoet_formulaic_intro_replacement(match: re.Match[str], *, product_lane: 
     else:
         template = lane_templates.get(product_lane, "The useful Leadpoet sentence is the one where {body}")
     replacement = template.format(body=body or "buyer timing changes the account choice.")
+    return f"{prefix}{indent}{replacement}"
+
+
+def leadpoet_modal_leadin_replacement(match: re.Match[str], *, product_lane: str) -> str:
+    prefix = match.group(1) or ""
+    indent = match.group(2) or ""
+    body = " ".join((match.group(4) or "").strip().split())
+    ending = "."
+    if body and body[-1] in ".!?":
+        ending = body[-1]
+        body = body[:-1].strip()
+    body = body[0].lower() + body[1:] if body else "make buyer timing visible"
+    templates = {
+        "mechanism-first": "The mechanism has to {body}. Leadpoet only matters if that becomes usable.",
+        "consequence-first": "That only matters if Leadpoet can {body}.",
+        "quiet embedded name": "The useful Leadpoet sentence is the one that can {body}.",
+        "no-name wedge": "The useful signal has to {body}.",
+        "operator scene": "A rep should feel the account signal when Leadpoet can {body}.",
+        "boundary line": "Verified data is not enough; Leadpoet has to {body}.",
+        "signal language": "The useful Leadpoet signal has to {body}.",
+        "ownership without definition": "The account-timing question carries the Leadpoet point when it can {body}.",
+        "implicit product belief": "The Leadpoet product belief is simple: {body}.",
+    }
+    replacement = templates.get(product_lane, templates["quiet embedded name"]).format(body=body)
+    if ending != "." and replacement.endswith("."):
+        replacement = f"{replacement[:-1]}{ending}"
     return f"{prefix}{indent}{replacement}"
 
 
@@ -2052,6 +2085,7 @@ Rules:
 - Prefer one concrete mechanism or situation over a polished summary.
 - If a violation mentions a product-definition sentence, rewrite that sentence into a mechanism, scene, or consequence instead of another "Leadpoet is..." line.
 - If a violation mentions a formulaic product lead-in, remove the preface and make the product name part of the actual claim.
+- If a violation mentions a formulaic Leadpoet modal lead-in, make Leadpoet the object, mechanism, or constraint inside the sentence instead of the sentence subject.
 - Do not add unsupported claims, anecdotes, proof, metrics, or customer stories.
 - Do not include the exact words "not just".
 - Do not refuse, caveat, or ask for more details. Return a publishable post.

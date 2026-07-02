@@ -2128,7 +2128,7 @@ class SocialBrainTest(unittest.TestCase):
                     length_mode="standard",
                 ),
                 "bad_final": "Here's the thing: Leadpoet is a game changer for seamless account intelligence.",
-                "repair": "Leadpoet has to make account context show up before the sequence starts.",
+                "repair": "The useful Leadpoet signal has to make account context show up before the sequence starts.",
                 "expected_violations": [
                     "stock setup",
                     "avoid phrase: game changer",
@@ -2243,7 +2243,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(
                 draft.text,
                 "Verified data tells an agent who exists.\n\n"
-                "Leadpoet has to stay on the harder question: why this account is worth action now.",
+                "The harder question is why this account is worth action now. That is where Leadpoet belongs.",
             )
             self.assertNotIn("Leadpoet is building", draft.text)
             self.assertNotIn("For Leadpoet", draft.text)
@@ -2286,10 +2286,50 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(
                 draft.text,
                 "Verified data tells an agent who exists.\n\n"
-                "Leadpoet has to stay on the harder question: why this account is worth action now.",
+                "The harder question is why this account is worth action now. That is where Leadpoet belongs.",
             )
             self.assertNotIn("For Leadpoet", draft.text)
             self.assertIn("avoid formulaic 'For Leadpoet...' product lead-in", provider.prompts[-1])
+            self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
+            store.close()
+
+    def test_generation_repairs_formulaic_leadpoet_modal_leadin(self):
+        bad_text = "Static records answer who exists.\n\nLeadpoet should make buyer timing visible."
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = SequentialProvider(
+                [
+                    strategy_json(
+                        thesis="Buyer timing needs account context.",
+                        concrete_detail="buyer timing",
+                        source_bridge="Saved context points to buyer timing.",
+                    ),
+                    "Static records answer who exists.\n\nThe account signal should explain why now.",
+                    "The CRM can be correct and still late.\n\nTiming has to choose the account.",
+                    "More names do not fix judgment.\n\nThe useful signal is the reason now.",
+                    evaluation_json(bad_text),
+                    bad_text,
+                    bad_text,
+                ]
+            )
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle="buyer timing beats generic data",
+                )
+            )[0]
+
+            self.assertEqual(
+                draft.text,
+                "Static records answer who exists.\n\n"
+                "The account-timing question carries the Leadpoet point when it can make buyer timing visible.",
+            )
+            self.assertNotIn("Leadpoet should", draft.text)
+            self.assertIn("avoid formulaic Leadpoet modal lead-in", provider.prompts[-1])
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
             store.close()
 
@@ -2816,9 +2856,9 @@ class SocialBrainTest(unittest.TestCase):
                     return [strategy_json()]
                 if "Write 3 X draft options" in prompt:
                     return [
-                        "Static records answer who exists. Leadpoet should make timing visible.\n\nThe useful question is why now.",
-                        "The CRM can be correct. Leadpoet should make timing visible.\n\nThe useful question is why now.",
-                        "More names do not fix judgment. Leadpoet should make timing visible.\n\nThe useful question is why now.",
+                        "Static records answer who exists. The Leadpoet signal makes timing visible.\n\nThe useful question is why now.",
+                        "The CRM can be correct. The Leadpoet signal makes timing visible.\n\nThe useful question is why now.",
+                        "More names do not fix judgment. The Leadpoet signal makes timing visible.\n\nThe useful question is why now.",
                     ][:variants]
                 if "Choose the best X post" in prompt:
                     first_lines = [
@@ -2830,8 +2870,8 @@ class SocialBrainTest(unittest.TestCase):
                     ]
                     line = first_lines[self.final_count % len(first_lines)]
                     self.final_count += 1
-                    return [evaluation_json(f"{line} Leadpoet should make timing visible.\n\nThe useful question is why now.")]
-                return ["Static records answer who exists. Leadpoet should make timing visible.\n\nThe useful question is why now."]
+                    return [evaluation_json(f"{line} The Leadpoet signal makes timing visible.\n\nThe useful question is why now.")]
+                return ["Static records answer who exists. The Leadpoet signal makes timing visible.\n\nThe useful question is why now."]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -2895,10 +2935,10 @@ class SocialBrainTest(unittest.TestCase):
                     return [
                         evaluation_json(
                             f"{first_lines[index]} Buyer timing should choose the account before copy.\n\n"
-                            f"Leadpoet can make signal {endings[index]} visible."
+                            f"The Leadpoet signal can make signal {endings[index]} visible."
                         )
                     ]
-                return ["Static records answer who exists. Leadpoet can make timing visible."]
+                return ["Static records answer who exists. The Leadpoet signal can make timing visible."]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -3009,9 +3049,9 @@ class SocialBrainTest(unittest.TestCase):
                     return [strategy_json()]
                 if "Write 3 X draft options" in prompt:
                     return [
-                        "Static records answer who exists. Leadpoet should make timing visible.",
-                        "The CRM can be correct. Leadpoet should make timing visible.",
-                        "More names do not fix judgment. Leadpoet should make timing visible.",
+                        "Static records answer who exists. Leadpoet owns the timing question.",
+                        "The CRM can be correct. Leadpoet owns the timing question.",
+                        "More names do not fix judgment. Leadpoet owns the timing question.",
                     ][:variants]
                 if "Choose the best X post" in prompt:
                     first_lines = [
@@ -3023,8 +3063,8 @@ class SocialBrainTest(unittest.TestCase):
                     ]
                     index = self.final_count % len(first_lines)
                     self.final_count += 1
-                    return [evaluation_json(f"{first_lines[index]} Leadpoet should make buyer timing visible.")]
-                return ["Static records answer who exists. Leadpoet should make buyer timing visible."]
+                    return [evaluation_json(f"{first_lines[index]} Leadpoet owns the timing question.")]
+                return ["Static records answer who exists. Leadpoet owns the timing question."]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -3096,22 +3136,22 @@ class SocialBrainTest(unittest.TestCase):
                     return [strategy_json()]
                 if "Write 3 X draft options" in prompt:
                     return [
-                        "Static records answer who exists.\n\nLeadpoet should make timing visible.",
-                        "The CRM record can be correct.\n\nLeadpoet should make timing visible.",
-                        "Account lists can still be late.\n\nLeadpoet should make timing visible.",
+                        "Static records answer who exists.\n\nLeadpoet owns timing.",
+                        "The CRM record can be correct.\n\nLeadpoet owns timing.",
+                        "Account lists can still be late.\n\nLeadpoet owns timing.",
                     ][:variants]
                 if "Choose the best X post" in prompt:
                     texts = [
-                        "Static records answer who exists.\n\nLeadpoet should make timing visible.",
-                        "The CRM record can be correct.\n\nLeadpoet should make timing visible.",
-                        "Account lists can still be late.\n\nLeadpoet should make timing visible.",
-                        "Generic data ages quickly.\n\nLeadpoet should make timing visible.",
-                        "Buyer context changes prioritization.\n\nLeadpoet should make timing visible.",
+                        "Static records answer who exists.\n\nLeadpoet owns timing.",
+                        "The CRM record can be correct.\n\nLeadpoet owns timing.",
+                        "Account lists can still be late.\n\nLeadpoet owns timing.",
+                        "Generic data ages quickly.\n\nLeadpoet owns timing.",
+                        "Buyer context changes prioritization.\n\nLeadpoet owns timing.",
                     ]
                     text = texts[self.final_count % len(texts)]
                     self.final_count += 1
                     return [evaluation_json(text)]
-                return ["Static records answer who exists.\n\nLeadpoet should make timing visible."]
+                return ["Static records answer who exists.\n\nLeadpoet owns timing."]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -3156,9 +3196,9 @@ class SocialBrainTest(unittest.TestCase):
                     return [strategy_json()]
                 if "Write 3 X draft options" in prompt:
                     return [
-                        "Static records answer who exists.\n\nLeadpoet should make timing visible.",
-                        "The CRM can be correct and still late.\n\nLeadpoet should make context actionable.",
-                        "More names do not fix judgment.\n\nLeadpoet should explain why now.",
+                        "Static records answer who exists.\n\nLeadpoet owns the timing question.",
+                        "The CRM can be correct and still late.\n\nLeadpoet owns the timing question.",
+                        "More names do not fix judgment.\n\nLeadpoet owns the timing question.",
                     ][:variants]
                 if "Choose the best X post" in prompt:
                     first_lines = [
@@ -3170,8 +3210,8 @@ class SocialBrainTest(unittest.TestCase):
                     ]
                     line = first_lines[self.final_count % len(first_lines)]
                     self.final_count += 1
-                    return [evaluation_json(f"{line}\n\nLeadpoet should make buyer timing visible.")]
-                return ["Leadpoet should make buyer timing visible."]
+                    return [evaluation_json(f"{line}\n\nLeadpoet owns the timing question.")]
+                return ["Leadpoet owns the timing question."]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -3200,7 +3240,7 @@ class SocialBrainTest(unittest.TestCase):
                 save_drafts=False,
             )
 
-            self.assertEqual(payload["leadpoet_mention_pattern_counts"]["leadpoet_should"], 5)
+            self.assertEqual(payload["leadpoet_mention_pattern_counts"]["leadpoet_owns"], 5)
             self.assertTrue(
                 any("Leadpoet mention phrasing is too concentrated" in warning for warning in payload["warnings"])
             )
@@ -3216,9 +3256,9 @@ class SocialBrainTest(unittest.TestCase):
                     return [strategy_json()]
                 if "Write 3 X draft options" in prompt:
                     return [
-                        "Static records answer who exists.\n\nLeadpoet should make timing visible.",
-                        "The CRM can be correct and still late.\n\nLeadpoet should make context actionable.",
-                        "More names do not fix judgment.\n\nLeadpoet should explain why now.",
+                        "Static records answer who exists.\n\nLeadpoet owns the timing question.",
+                        "The CRM can be correct and still late.\n\nLeadpoet owns the timing question.",
+                        "More names do not fix judgment.\n\nLeadpoet owns the timing question.",
                     ][:variants]
                 if "Choose the best X post" in prompt:
                     first_lines = [
@@ -3230,8 +3270,8 @@ class SocialBrainTest(unittest.TestCase):
                     ]
                     line = first_lines[self.final_count % len(first_lines)]
                     self.final_count += 1
-                    return [evaluation_json(f"{line}\n\nLeadpoet should make buyer timing visible.")]
-                return ["Leadpoet should make buyer timing visible."]
+                    return [evaluation_json(f"{line}\n\nLeadpoet owns the timing question.")]
+                return ["Leadpoet owns the timing question."]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"
