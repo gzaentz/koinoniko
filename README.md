@@ -805,6 +805,19 @@ Generation uses:
 
 Drafts store structured influence metadata instead of relying on one giant prompt as the source of truth.
 
+Naturalness audit for trend-generated posts:
+
+```bash
+python3 -m leadpoet_social_brain.cli audit-naturalness-x \
+  --count 20 \
+  --trend-status unused \
+  --fail-on-warning
+```
+
+By default, `audit-naturalness-x` loads all matching current trends (`--trend-limit 0`) and generates 20 reviewed posts against them. It reports bad phrase counts for cookie-cutter Leadpoet definitions, first-line variety, first structure option counts, first product mention lane counts, Leadpoet mention pattern counts, and trend coverage. If there are more loaded trends than generated posts, the audit warns; raise `--count` to cover every current trend. Use `--json` when you want the full rows and generated text for manual review.
+
+This command uses the configured LLM provider, so a live audit sends the selected trends, saved context, and generation prompts to that provider. Run it only in an environment where that is acceptable.
+
 In the web UI, `Create Post` includes:
 
 - topic and post type combo inputs
