@@ -1783,7 +1783,9 @@ class SocialBrainTest(unittest.TestCase):
         banned_meta_patterns = [
             r"\binside\s+leadpoet\b",
             r"\bleadpoet\s+(?:mention|line|sentence|constraint|side|part|lane)\b",
+            r"\bleadpoet\s+enters\b",
             r"\bkeep\s+the\s+leadpoet\b",
+            r"\bproduct\s+name\b",
         ]
         bad_inputs = [
             "Leadpoet is building the intent layer for sales AI.",
@@ -3291,10 +3293,11 @@ class SocialBrainTest(unittest.TestCase):
                 draft.text,
                 "Verified data tells an agent who exists.\n\n"
                 "The harder question is why this account is worth action now. "
-                "In Leadpoet, that account-timing point has to be concrete before copy.",
+                "That answer should be concrete in Leadpoet before copy.",
             )
             self.assertNotIn("Leadpoet is building", draft.text)
             self.assertNotIn("For Leadpoet", draft.text)
+            self.assertNotIn("In Leadpoet, that account-timing point", draft.text)
             self.assertNotIn("By the time Leadpoet appears", draft.text)
             self.assertTrue(any("avoid product name followed by 'is building'" in prompt for prompt in provider.prompts))
             self.assertIn("avoid formulaic 'For Leadpoet...' product lead-in", provider.prompts[-1])
@@ -3334,9 +3337,10 @@ class SocialBrainTest(unittest.TestCase):
                 draft.text,
                 "Verified data tells an agent who exists.\n\n"
                 "The harder question is why this account is worth action now. "
-                "In Leadpoet, that account-timing point has to be concrete before copy.",
+                "That answer should be concrete in Leadpoet before copy.",
             )
             self.assertNotIn("For Leadpoet", draft.text)
+            self.assertNotIn("In Leadpoet, that account-timing point", draft.text)
             self.assertNotIn("By the time Leadpoet appears", draft.text)
             self.assertIn("avoid formulaic 'For Leadpoet...' product lead-in", provider.prompts[-1])
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
@@ -3709,6 +3713,54 @@ class SocialBrainTest(unittest.TestCase):
             if leadpoet_mention_pattern(text) != "no_leadpoet"
         ]
         self.assertLessEqual(max(mention_patterns.count(pattern) for pattern in set(mention_patterns)), 2)
+        templates = [
+            leadpoet_sentence_template(text)
+            for text in outputs_by_lane.values()
+            if leadpoet_sentence_template(text) != "no_leadpoet"
+        ]
+        self.assertEqual(len(templates), len(set(templates)))
+
+    def test_deterministic_leadpoet_formulaic_intro_repairs_vary_by_lane(self):
+        outputs_by_lane = {}
+        for index in range(120):
+            trend = TrendItem(
+                id=f"intro_repair_trend_{index}",
+                title=f"Intro repair trend {index}",
+                source_type="web",
+                topic="sales AI",
+                summary="Context layer",
+                why_it_matters="It proves context matters.",
+                leadpoet_angle="Buyer timing beats generic data.",
+                date=utc_now(),
+            )
+            request = DraftRequest(
+                platform="x",
+                topic="sales AI",
+                post_type="founder_insight",
+                angle="buyer timing beats generic data",
+                trend_ids=[trend.id],
+            )
+            lane = primary_product_mention_lane(request, [trend])[0]
+            outputs_by_lane.setdefault(
+                lane,
+                deterministic_leadpoet_definition_repair(
+                    "For Leadpoet, useful sales AI starts with knowing which account is moving now.",
+                    request=request,
+                    trends=[trend],
+                    max_chars=280,
+                ),
+            )
+
+        self.assertEqual(len(outputs_by_lane), 11)
+        self.assertEqual(len(set(outputs_by_lane.values())), 11)
+        combined = "\n".join(outputs_by_lane.values()).lower()
+        self.assertNotIn("for leadpoet", combined)
+        self.assertNotIn("in leadpoet,", combined)
+        self.assertNotIn("product name", combined)
+        self.assertFalse(any(leadpoet_bad_phrase_counts(combined).values()), combined)
+        mention_patterns = [leadpoet_mention_pattern(text) for text in outputs_by_lane.values()]
+        self.assertIn("no_leadpoet", mention_patterns)
+        self.assertGreaterEqual(len(set(mention_patterns)), 5)
         templates = [
             leadpoet_sentence_template(text)
             for text in outputs_by_lane.values()

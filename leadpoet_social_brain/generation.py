@@ -2544,35 +2544,39 @@ def leadpoet_formulaic_intro_replacement(match: re.Match[str], *, product_lane: 
     lowered_body = body.lower()
     if lowered_body.startswith("the harder question is "):
         tail = body[len("the harder question is "):]
-        return f"{prefix}{indent}The harder question is {tail}{ending} In Leadpoet, that account-timing point has to be concrete before copy."
+        return f"{prefix}{indent}The harder question is {tail}{ending} That answer should be concrete in Leadpoet before copy."
     if lowered_body.startswith("account context has to "):
         tail = body[len("account context has to "):]
         return f"{prefix}{indent}Account context has to {tail}{ending} That is the practical work before copy starts."
     if lowered_body.startswith("timing means "):
         tail = body[len("timing means "):]
-        return f"{prefix}{indent}Timing is useful when it means {tail}{ending} That is the bar before the product name has a job."
+        return f"{prefix}{indent}Timing is useful when it means {tail}{ending} That is the bar before copy starts."
     if lowered_body.startswith("buyer timing is "):
         tail = body[len("buyer timing is "):]
-        return f"{prefix}{indent}Buyer timing stays tied to {tail}{ending} The account reason has to be clear before Leadpoet gets named."
+        return f"{prefix}{indent}Buyer timing stays tied to {tail}{ending} The account reason should stand on its own before copy starts."
     if body:
         body = body[0].lower() + body[1:]
     body = f"{body}{ending}" if body else ""
     lane_templates = {
-        "mechanism-first": "The mechanism comes first: {body} In Leadpoet, the account reason should show up after that.",
+        "mechanism-first": "The mechanism comes first: {body} The account reason should become usable in Leadpoet after that.",
         "consequence-first": "That only matters if it changes action before copy: {body}",
-        "quiet embedded name": "Fold the product name into the account reason itself: {body}",
+        "quiet embedded name": "The account reason can carry Leadpoet quietly: {body}",
         "mechanism carries it": "Let the mechanism carry the claim: {body}",
         "operator scene": "When a rep opens Leadpoet, the account signal should be felt before copy: {body}",
-        "boundary line": "In Leadpoet, that boundary has to stay concrete: {body}",
-        "signal language": "In Leadpoet, the signal has to make this plain before copy: {body}",
-        "ownership without definition": "The account-timing question can include Leadpoet without turning into a definition: {body}",
-        "implicit product belief": "The practical belief is simple before any Leadpoet reference: {body}",
-        "context-only wedge": "Keep the wedge in the account context itself: {body}",
+        "boundary line": "The boundary should stay concrete in Leadpoet: {body}",
+        "signal language": "Use Leadpoet as the pressure test before copy: {body}",
+        "ownership without definition": "The account-timing question should stay concrete in Leadpoet: {body}",
+        "implicit product belief": "That belief stays practical in Leadpoet: {body}",
+        "context-only wedge": "Account context can carry this on its own: {body}",
     }
     if product_lane_omits_name(product_lane):
-        template = "Buyer timing should stay concrete: {body}"
+        template = {
+            "no-name wedge": "Buyer timing should stay concrete: {body}",
+            "mechanism carries it": "Let the mechanism carry the claim: {body}",
+            "context-only wedge": "Account context can carry this on its own: {body}",
+        }.get(product_lane, "Buyer timing should stay concrete: {body}")
     else:
-        template = lane_templates.get(product_lane, "Fold Leadpoet into the account reason itself: {body}")
+        template = lane_templates.get(product_lane, "The account reason can carry Leadpoet quietly: {body}")
     replacement = template.format(body=body or "buyer timing changes the account choice.")
     return f"{prefix}{indent}{replacement}"
 
