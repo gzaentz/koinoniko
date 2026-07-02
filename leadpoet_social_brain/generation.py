@@ -796,6 +796,7 @@ def product_mention_prompt_section(
         "- Do not make the product mention the same final paragraph every time.\n"
         f"- Avoid standalone sentences beginning \"{product_label} is...\", \"{product_label} is building...\", or \"{product_label}'s bet...\".\n"
         f"- Avoid letting every product sentence use the same grammar, especially direct \"{product_label} owns/can/makes/starts...\" lead-ins.\n"
+        f"- Avoid product-subject helper/tagline lead-ins like \"{product_label} helps...\", \"{product_label} enables...\", \"{product_label} unlocks...\", or \"{product_label} provides...\"; let the mechanism, account change, or consequence lead instead.\n"
         "- Prefer varied human phrasing: \"the part we care about...\", \"the mechanism has to start before copy...\", "
         f"\"the timing signal {example_prefix} cares about is...\", or no product name if the saved-context mechanism is already clear.\n"
         "- If the post needs the name for positioning, embed it in a concrete sentence rather than defining the company.\n"

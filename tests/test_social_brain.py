@@ -1197,6 +1197,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Primary product mention placement target for this request:", prompt)
             self.assertIn("Product mention lanes for this request:", prompt)
             self.assertIn("Product mention placement targets for this request:", prompt)
+            self.assertIn("Avoid product-subject helper/tagline lead-ins like \"Leadpoet helps...\"", prompt)
             store.close()
 
     def test_generation_prompt_is_example_first_not_label_heavy(self):
@@ -3285,6 +3286,10 @@ class SocialBrainTest(unittest.TestCase):
             writer_prompt = provider.prompts[1]
             evaluator_prompt = provider.prompts[2]
             repair_prompt = provider.prompts[-1]
+            product_helper_guidance = "Avoid product-subject helper/tagline lead-ins like \"Leadpoet helps...\""
+            self.assertIn(product_helper_guidance, writer_prompt)
+            self.assertIn(product_helper_guidance, evaluator_prompt)
+            self.assertIn(product_helper_guidance, repair_prompt)
             for prefix in [
                 "Primary structure for this request:",
                 "Primary layout target for this request:",
