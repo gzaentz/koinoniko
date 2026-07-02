@@ -1461,7 +1461,12 @@ def draft_rule_violations(
     anchor = workspace_anchor_name(bundle, active_rules)
     if anchor and re.search(rf"\b(i do not|i don't) know enough about {re.escape(anchor.lower())}\b", lowered):
         violations.append(f"remove model uncertainty about {anchor}; use saved context or make a narrower claim")
-    if anchor and should_require_anchor(request, trends) and anchor.lower() not in lowered:
+    if (
+        anchor
+        and should_require_anchor(request, trends)
+        and not product_lane_allows_omitting_anchor(request, trends)
+        and anchor.lower() not in lowered
+    ):
         violations.append(f"anchor the point to {anchor} as the source of the core wedge")
     return dedupe_preserve_order(violations)
 
@@ -1612,7 +1617,12 @@ def anchor_draft_to_workspace(
     max_chars: int,
 ) -> str:
     anchor = workspace_anchor_name(bundle, active_rules)
-    if not anchor or not should_require_anchor(request, trends) or anchor.lower() in text.lower():
+    if (
+        not anchor
+        or not should_require_anchor(request, trends)
+        or product_lane_allows_omitting_anchor(request, trends)
+        or anchor.lower() in text.lower()
+    ):
         return text
     anchor_line = workspace_anchor_line(anchor, request, bundle, trends=trends, active_rules=active_rules)
     candidates = [
@@ -1698,6 +1708,10 @@ def should_require_anchor(request: DraftRequest, trends: list[TrendItem]) -> boo
             "technical",
         ]
     )
+
+
+def product_lane_allows_omitting_anchor(request: DraftRequest, trends: list[TrendItem]) -> bool:
+    return primary_product_mention_lane(request, trends)[0] == "no-name wedge"
 
 
 def build_rule_repair_prompt(

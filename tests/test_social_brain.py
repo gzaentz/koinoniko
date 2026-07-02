@@ -2233,6 +2233,55 @@ class SocialBrainTest(unittest.TestCase):
             )
             store.close()
 
+    def test_no_name_product_lane_can_omit_leadpoet_anchor(self):
+        class NoNameProvider:
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [
+                        strategy_json(
+                            thesis="Buyer timing should choose the account before copy.",
+                            concrete_detail="buyer timing",
+                            source_bridge="The trend points to buyer timing.",
+                        )
+                    ]
+                if "Write 3 X draft options" in prompt:
+                    return ["Buyer timing should choose the account before copy writes the email."][:variants]
+                if "Choose the best X post" in prompt:
+                    return [evaluation_json("Buyer timing should choose the account before copy writes the email.")]
+                return ["Buyer timing should choose the account before copy writes the email."]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            trend = store.save_trend_item(
+                TrendItem(
+                    id="no_name_trend_2",
+                    title="Buyer timing becomes the account selection layer",
+                    source_type="web",
+                    topic="sales AI",
+                    summary="Context matters before generated copy.",
+                    why_it_matters="It proves account timing matters.",
+                    leadpoet_angle="Buyer timing beats generic data.",
+                    date=utc_now(),
+                )
+            )
+            request = DraftRequest(
+                platform="x",
+                topic="sales AI",
+                post_type="founder_insight",
+                angle="buyer timing beats generic data",
+                use_trends=True,
+                trend_ids=[trend.id],
+            )
+            self.assertEqual(primary_product_mention_lane(request, [trend])[0], "no-name wedge")
+
+            draft = SocialBrainGenerator(store, provider=NoNameProvider()).generate(request, save=False)[0]
+
+            self.assertEqual(draft.text, "Buyer timing should choose the account before copy writes the email.")
+            self.assertNotIn("Leadpoet", draft.text)
+            self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
+            store.close()
+
     def test_generation_repairs_cookie_cutter_leadpoet_mentions_across_current_trend_batch(self):
         class CookieCutterTrendProvider:
             def __init__(self):
