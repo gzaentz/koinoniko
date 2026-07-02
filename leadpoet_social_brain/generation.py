@@ -119,6 +119,37 @@ POST_STRUCTURE_SHAPES = [
     ),
 ]
 
+POST_LAYOUT_TARGETS = [
+    (
+        "single compact paragraph",
+        "Write one compact paragraph with no blank line; keep the product mention embedded inside the flow.",
+    ),
+    (
+        "two short paragraphs",
+        "Use two short paragraphs. The second paragraph should add consequence, not repeat the first.",
+    ),
+    (
+        "question opener",
+        "Open with one plain question, then answer it in one short paragraph.",
+    ),
+    (
+        "micro-list turn",
+        "Use 2-3 very short list-like lines or fragments, then one turn that makes the point.",
+    ),
+    (
+        "three clipped lines",
+        "Use three short lines with no long setup; each line should move the argument forward.",
+    ),
+    (
+        "colon hinge",
+        "Use a colon in the first line to set up the specific mechanism, then land the implication.",
+    ),
+    (
+        "longer observation",
+        "Use one slightly longer observation followed by a short final sentence. Do not make it a tidy slogan.",
+    ),
+]
+
 PRODUCT_MENTION_LANES = [
     (
         "mechanism-first",
@@ -515,13 +546,16 @@ def natural_voice_prompt_section(bundle: ContextBundle | None = None, anchor: st
 def structure_variation_prompt_section(request: DraftRequest, trends: list[TrendItem]) -> str:
     selected = selected_structure_shapes(request, trends, count=4)
     primary_name, primary_guidance = selected[0]
+    layout_name, layout_guidance = primary_layout_target(request, trends)
     options = "\n".join(f"- {name}: {guidance}" for name, guidance in selected)
     return (
         "Structure Variation:\n"
         "Avoid the default template: trend recap -> generic product definition -> tidy closer.\n"
         f"Primary structure for this request: {primary_name}: {primary_guidance}\n"
+        f"Primary layout target for this request: {layout_name}: {layout_guidance}\n"
         "Use the primary structure unless another listed shape clearly fits the idea better. "
-        "In multi-option prompts, option 1 should use the primary structure and each option must use a different shape.\n"
+        "Use the primary layout target unless it would make the post worse. "
+        "In multi-option prompts, option 1 should use the primary structure/layout and each option must use a different shape.\n"
         f"{options}"
     )
 
@@ -585,6 +619,24 @@ def selected_structure_shapes(
 
 def primary_structure_shape(request: DraftRequest, trends: list[TrendItem]) -> tuple[str, str]:
     return selected_structure_shapes(request, trends, count=1)[0]
+
+
+def selected_layout_targets(
+    request: DraftRequest,
+    trends: list[TrendItem],
+    *,
+    count: int,
+) -> list[tuple[str, str]]:
+    digest = hashlib.sha256(f"layout-target|{variation_seed_source(request, trends)}".encode("utf-8")).hexdigest()
+    start = int(digest[:8], 16) % len(POST_LAYOUT_TARGETS)
+    return [
+        POST_LAYOUT_TARGETS[(start + offset) % len(POST_LAYOUT_TARGETS)]
+        for offset in range(min(count, len(POST_LAYOUT_TARGETS)))
+    ]
+
+
+def primary_layout_target(request: DraftRequest, trends: list[TrendItem]) -> tuple[str, str]:
+    return selected_layout_targets(request, trends, count=1)[0]
 
 
 def variation_seed_source(request: DraftRequest, trends: list[TrendItem]) -> str:
@@ -984,6 +1036,7 @@ def build_context_snapshot(
         )
     primary_structure = primary_structure_shape(request, trends)
     primary_product_lane = primary_product_mention_lane(request, trends)
+    primary_layout = primary_layout_target(request, trends)
     return {
         "workspace_id": bundle.workspace_id,
         "request": request.__dict__,
@@ -1010,9 +1063,17 @@ def build_context_snapshot(
             "name": primary_product_lane[0],
             "guidance": primary_product_lane[1],
         },
+        "primary_layout_target": {
+            "name": primary_layout[0],
+            "guidance": primary_layout[1],
+        },
         "structure_variation_options": [
             {"name": name, "guidance": guidance}
             for name, guidance in selected_structure_shapes(request, trends, count=4)
+        ],
+        "layout_target_options": [
+            {"name": name, "guidance": guidance}
+            for name, guidance in selected_layout_targets(request, trends, count=4)
         ],
         "product_mention_options": [
             {"name": name, "guidance": guidance}
