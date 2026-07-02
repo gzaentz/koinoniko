@@ -2504,6 +2504,39 @@ def deterministic_leadpoet_definition_repair(
         repaired,
         flags=re.I,
     )
+    repaired = re.sub(
+        r"(?m)(^|(?<=[.!?])\s+|\n\n)(\s*)That\s+is\s+the\s+Leadpoet\s+(job|bar|point|constraint|product belief)([^.!?\n]*(?:[.!?]|$))",
+        lambda match: leadpoet_formulaic_closer_replacement(
+            match,
+            product_lane=product_lane,
+            label_group=3,
+            body_group=4,
+        ),
+        repaired,
+        flags=re.I,
+    )
+    repaired = re.sub(
+        r"(?m)(^|\n\n)(\s*)Leadpoet(?:'s|’s)?\s+(bet|job|role)\s+([^.!?\n]*(?:[.!?]|$))",
+        lambda match: leadpoet_formulaic_closer_replacement(
+            match,
+            product_lane=product_lane,
+            label_group=3,
+            body_group=4,
+        ),
+        repaired,
+        flags=re.I,
+    )
+    repaired = re.sub(
+        r"(?m)(^|\n\n)(\s*)The\s+layer\s+worth\s+building\s+([^.!?\n]*(?:[.!?]|$))",
+        lambda match: leadpoet_formulaic_closer_replacement(
+            match,
+            product_lane=product_lane,
+            label_group=None,
+            body_group=3,
+        ),
+        repaired,
+        flags=re.I,
+    )
     cleaned = clean_generated_text(repaired, max_chars=max_chars)
     if not cleaned or len(cleaned) > max_chars:
         return text
@@ -2858,6 +2891,66 @@ def leadpoet_where_focus_replacement(detail: str, *, product_lane: str) -> str:
     }
     template = templates.get(product_lane, templates["quiet embedded name"])
     return template.format(detail=detail_text, leadpoet_detail=leadpoet_detail)
+
+
+def leadpoet_formulaic_closer_replacement(
+    match: re.Match[str],
+    *,
+    product_lane: str,
+    label_group: int | None,
+    body_group: int,
+) -> str:
+    prefix = match.group(1) or ""
+    indent = match.group(2) or ""
+    label = (match.group(label_group) if label_group else "") or ""
+    body = match.group(body_group) or ""
+    detail = leadpoet_formulaic_closer_detail(body, label=label)
+    leadpoet_detail = re.sub(r"\bbefore\s+copy\b", "ahead of copy", detail, flags=re.I)
+    leadpoet_detail = re.sub(r"\bbefore\s+sequence\s+copy\b", "ahead of sequence copy", leadpoet_detail, flags=re.I)
+    templates = {
+        "mechanism-first": "The mechanism should come first: {detail}. Leadpoet comes after the account reason is clear.",
+        "consequence-first": "That only matters when it changes the next account choice in Leadpoet: {leadpoet_detail}.",
+        "quiet embedded name": "The account reason can carry Leadpoet quietly: {leadpoet_detail}.",
+        "no-name wedge": "Buyer timing should stay concrete: {detail}.",
+        "mechanism carries it": "Let the mechanism carry the claim: {detail}.",
+        "operator scene": "When a rep opens Leadpoet, the account signal should already make this obvious: {leadpoet_detail}.",
+        "boundary line": "Around Leadpoet, the sharper boundary is this: {leadpoet_detail}.",
+        "signal language": "A signal near Leadpoet has one job: {leadpoet_detail}.",
+        "ownership without definition": "Use Leadpoet as the pressure test for the account-timing question: {leadpoet_detail}.",
+        "implicit product belief": "That belief stays practical through Leadpoet: {leadpoet_detail}.",
+        "context-only wedge": "Account context can carry this on its own: {detail}.",
+    }
+    template = templates.get(product_lane, templates["quiet embedded name"])
+    if product_lane_omits_name(product_lane):
+        template = {
+            "no-name wedge": "Buyer timing should stay concrete: {detail}.",
+            "mechanism carries it": "Let the mechanism carry the claim: {detail}.",
+            "context-only wedge": "Account context can carry this on its own: {detail}.",
+        }.get(product_lane, "Buyer timing should stay concrete: {detail}.")
+    return f"{prefix}{indent}{template.format(detail=detail, leadpoet_detail=leadpoet_detail)}"
+
+
+def leadpoet_formulaic_closer_detail(body: str, *, label: str) -> str:
+    detail = " ".join(str(body or "").strip().split())
+    if detail and detail[-1] in ".!?":
+        detail = detail[:-1].strip()
+    detail = detail.strip(" :-")
+    detail = re.sub(r"^(?:is|are|means?)\s+", "", detail, flags=re.I).strip()
+    if detail.lower().startswith("starts "):
+        detail = f"account timing {detail}"
+    elif detail.lower().startswith("comes "):
+        detail = f"the account reason {detail}"
+    elif detail.lower().startswith("sits "):
+        detail = f"the account reason {detail}"
+    if not detail:
+        label_lower = label.lower()
+        if label_lower in {"bar", "constraint"}:
+            detail = "timing should choose the account before copy"
+        elif label_lower in {"bet", "role", "job"}:
+            detail = "account timing should be concrete before copy"
+        else:
+            detail = "the account reason should be concrete before copy"
+    return detail[0].lower() + detail[1:] if detail else "account timing should be concrete before copy"
 
 
 def draft_rule_violations(

@@ -3943,6 +3943,63 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("timing becomes visible enough to change the account choice", visible_repair)
         self.assertNotIn("timing is visible changes", visible_repair)
 
+    def test_deterministic_leadpoet_closer_repairs_cover_detector_patterns(self):
+        sources = [
+            "That is the Leadpoet point.",
+            "Leadpoet's bet starts before sequence copy.",
+            "The layer worth building starts before sequence copy.",
+        ]
+        for source in sources:
+            outputs_by_lane = {}
+            for index in range(120):
+                trend = TrendItem(
+                    id=f"closer_repair_trend_{index}",
+                    title=f"Closer repair trend {index}",
+                    source_type="web",
+                    topic="sales AI",
+                    summary="Context layer",
+                    why_it_matters="It proves context matters.",
+                    leadpoet_angle="Buyer timing beats generic data.",
+                    date=utc_now(),
+                )
+                request = DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle="buyer timing beats generic data",
+                    trend_ids=[trend.id],
+                )
+                lane = primary_product_mention_lane(request, [trend])[0]
+                outputs_by_lane.setdefault(
+                    lane,
+                    deterministic_leadpoet_definition_repair(
+                        source,
+                        request=request,
+                        trends=[trend],
+                        max_chars=280,
+                    ),
+                )
+
+            with self.subTest(source=source):
+                self.assertEqual(len(outputs_by_lane), 11)
+                self.assertEqual(len(set(outputs_by_lane.values())), 11)
+                combined = "\n".join(outputs_by_lane.values()).lower()
+                self.assertNotIn("that is the leadpoet", combined)
+                self.assertNotIn("leadpoet's bet", combined)
+                self.assertNotIn("leadpoet bet", combined)
+                self.assertNotIn("leadpoet's job", combined)
+                self.assertNotIn("the layer worth building", combined)
+                self.assertFalse(any(leadpoet_bad_phrase_counts(combined).values()), combined)
+                mention_patterns = [leadpoet_mention_pattern(text) for text in outputs_by_lane.values()]
+                self.assertEqual(mention_patterns.count("no_leadpoet"), 3)
+                self.assertGreaterEqual(len(set(mention_patterns)), 5)
+                templates = [
+                    leadpoet_sentence_template(text)
+                    for text in outputs_by_lane.values()
+                    if leadpoet_sentence_template(text) != "no_leadpoet"
+                ]
+                self.assertEqual(len(templates), len(set(templates)))
+
     def test_deterministic_leadpoet_subject_verb_repairs_vary_by_syntax_target(self):
         outputs_by_syntax = {}
         for index in range(180):
