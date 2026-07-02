@@ -7735,12 +7735,14 @@ class SocialBrainTest(unittest.TestCase):
             rules_text = "\n".join(rules)
 
             self.assertTrue(any("Keep the Leadpoet wedge concrete" in rule for rule in rules))
-            self.assertIn("buyer timing and proprietary context inside Leadpoet", rules_text)
+            self.assertIn("buyer timing, proprietary context, and the account reason before copy or outreach", rules_text)
             self.assertIn("not the mechanism to copy", rules_text)
             self.assertNotIn("Leadpoet owns the intent wedge", rules_text)
             self.assertNotRegex(rules_text, r"\bLeadpoet\s+(?:owns|is|should|can|needs?|has\s+to|starts)\b")
+            self.assertNotIn("inside Leadpoet", rules_text)
             self.assertNotIn("Leadpoet is the core intent layer", rules_text)
             self.assertIn("Keep the Leadpoet wedge concrete", prompt)
+            self.assertNotIn("inside Leadpoet", prompt)
             self.assertNotIn("Leadpoet owns the intent wedge", prompt)
             self.assertNotIn("Leadpoet is the core intent layer", prompt)
             store.close()
@@ -7754,6 +7756,7 @@ class SocialBrainTest(unittest.TestCase):
                     "Leadpoet owns the intent wedge: proprietary buyer context, timing signals, and account-level intent.",
                     "Other tools, agents, and case studies are market proof that intent matters, not the source of Leadpoet's unique wedge.",
                     "When referencing another product, validate the market shift, then pull the point back to Leadpoet owning buyer timing and proprietary context.",
+                    "When referencing another product, validate the market shift, then bring the point back to buyer timing and proprietary context inside Leadpoet.",
                     "Custom rule: Leadpoet owns buyer timing when the user explicitly says it that way.",
                 ],
             )
@@ -7762,7 +7765,8 @@ class SocialBrainTest(unittest.TestCase):
             rules_text = "\n".join(rules)
 
             self.assertIn("Keep the Leadpoet wedge concrete", rules_text)
-            self.assertIn("buyer timing and proprietary context inside Leadpoet", rules_text)
+            self.assertIn("buyer timing, proprietary context, and the account reason before copy or outreach", rules_text)
+            self.assertNotIn("inside Leadpoet", rules_text)
             self.assertNotIn("Leadpoet owns the intent wedge", rules_text)
             self.assertNotIn("Leadpoet owning buyer timing", rules_text)
             self.assertIn("Custom rule: Leadpoet owns buyer timing", rules_text)

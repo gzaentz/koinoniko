@@ -39,13 +39,14 @@ DEFAULT_AVOID_PHRASES = [
 DEFAULT_WORKSPACE_POSITIONING_RULES = [
     "Keep the Leadpoet wedge concrete: proprietary buyer context, timing signals, and account-level intent.",
     "Other tools, agents, and case studies are market proof that intent matters, not the mechanism to copy.",
-    "When referencing another product, validate the market shift, then bring the point back to buyer timing and proprietary context inside Leadpoet.",
+    "When referencing another product, validate the market shift, then bring the point back to buyer timing, proprietary context, and the account reason before copy or outreach.",
 ]
 
 LEGACY_WORKSPACE_POSITIONING_REPLACEMENTS = {
     "Leadpoet owns the intent wedge: proprietary buyer context, timing signals, and account-level intent.": DEFAULT_WORKSPACE_POSITIONING_RULES[0],
     "Other tools, agents, and case studies are market proof that intent matters, not the source of Leadpoet's unique wedge.": DEFAULT_WORKSPACE_POSITIONING_RULES[1],
     "When referencing another product, validate the market shift, then pull the point back to Leadpoet owning buyer timing and proprietary context.": DEFAULT_WORKSPACE_POSITIONING_RULES[2],
+    "When referencing another product, validate the market shift, then bring the point back to buyer timing and proprietary context inside Leadpoet.": DEFAULT_WORKSPACE_POSITIONING_RULES[2],
 }
 
 UNIVERSAL_POSITIONING_RULES = [
