@@ -26,7 +26,7 @@ from leadpoet_social_brain.content_queue import create_post_x, plan_week_x, post
 from leadpoet_social_brain.cli import build_naturalness_audit, build_parser as build_cli_parser, main as cli_main
 from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.core.models import ContentQueueItem, ContextSection, DraftRequest, EngagementMetrics, Pattern, PostNote, SocialPost, SyncMetadata, TrendItem, utc_now
-from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator, clean_generated_text, selected_structure_shapes
+from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator, clean_generated_text, selected_product_mention_lanes, selected_structure_shapes
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
 from leadpoet_social_brain.openrouter_provider import OpenRouterProvider, create_provider
 from leadpoet_social_brain.pattern_scout import (
@@ -1146,6 +1146,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Sound like one specific founder noticing a real thing", prompt)
             self.assertIn("Structure Variation:", prompt)
             self.assertIn("Dynamic Product Mention:", prompt)
+            self.assertIn("Product mention lanes for this request:", prompt)
             store.close()
 
     def test_generation_prompt_is_example_first_not_label_heavy(self):
@@ -1229,6 +1230,49 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(len(structures_a), 4)
         self.assertEqual(len(set(structures_a)), 4)
         self.assertNotEqual(structures_a[0], structures_b[0])
+
+    def test_product_mention_lanes_rotate_across_trends(self):
+        request_a = DraftRequest(
+            platform="x",
+            topic="sales AI",
+            post_type="founder_insight",
+            angle="buyer timing beats generic data",
+            trend_ids=["trend_a"],
+        )
+        request_b = DraftRequest(
+            platform="x",
+            topic="sales AI",
+            post_type="founder_insight",
+            angle="buyer timing beats generic data",
+            trend_ids=["trend_b"],
+        )
+        trend_a = TrendItem(
+            id="trend_a",
+            title="ZoomInfo context layer",
+            source_type="web",
+            topic="sales AI",
+            summary="Context layer",
+            why_it_matters="It proves context matters.",
+            leadpoet_angle="Buyer timing beats generic data.",
+            date=utc_now(),
+        )
+        trend_b = TrendItem(
+            id="trend_b",
+            title="Close launches AI agent",
+            source_type="web",
+            topic="sales AI",
+            summary="AI agent",
+            why_it_matters="It proves agents need better timing.",
+            leadpoet_angle="Account context should decide action.",
+            date=utc_now(),
+        )
+
+        lanes_a = [name for name, _ in selected_product_mention_lanes(request_a, [trend_a], count=4)]
+        lanes_b = [name for name, _ in selected_product_mention_lanes(request_b, [trend_b], count=4)]
+
+        self.assertEqual(len(lanes_a), 4)
+        self.assertEqual(len(set(lanes_a)), 4)
+        self.assertNotEqual(lanes_a[0], lanes_b[0])
 
     def test_ingest_x_post_stores_metrics_and_notes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1336,6 +1380,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("selected_patterns", saved_draft.context_snapshot)
             self.assertIn("selected_context_sections", saved_draft.context_snapshot)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["structure_variation_options"]), 1)
+            self.assertGreaterEqual(len(saved_draft.context_snapshot["product_mention_options"]), 1)
             self.assertIn("skills", saved_draft.context_snapshot)
             skill_paths = {skill["path"] for skill in saved_draft.context_snapshot["skills"]}
             self.assertIn("skills/global_voice.md", skill_paths)
@@ -2031,6 +2076,10 @@ class SocialBrainTest(unittest.TestCase):
             self.assertGreaterEqual(len({text.split("\n\n", 1)[0] for text in texts}), 5)
             self.assertGreaterEqual(
                 len({draft.context_snapshot["structure_variation_options"][0]["name"] for draft in drafts}),
+                5,
+            )
+            self.assertGreaterEqual(
+                len({draft.context_snapshot["product_mention_options"][0]["name"] for draft in drafts}),
                 5,
             )
             store.close()

@@ -119,6 +119,45 @@ POST_STRUCTURE_SHAPES = [
     ),
 ]
 
+PRODUCT_MENTION_LANES = [
+    (
+        "mechanism-first",
+        "Name the mechanism before the product. The product appears as the place that mechanism has to become usable.",
+    ),
+    (
+        "consequence-first",
+        "State the practical consequence first, then mention the product as the thing that makes the consequence actionable.",
+    ),
+    (
+        "quiet embedded name",
+        "Use the product name inside a sentence, not as the subject of a definition or final standalone line.",
+    ),
+    (
+        "no-name wedge",
+        "Skip the product name if the saved-context wedge is already clear; make the proprietary timing/context point carry it.",
+    ),
+    (
+        "operator scene",
+        "Mention the product through a rep, founder, or buyer situation rather than a category claim.",
+    ),
+    (
+        "boundary line",
+        "Draw the boundary around what the trend does not solve, then place the product on the sharper side of that boundary.",
+    ),
+    (
+        "signal language",
+        "Talk about the specific signal, timing, or account context the product cares about before naming the product.",
+    ),
+    (
+        "ownership without definition",
+        "Use ownership verbs like owns, focuses on, starts with, or has to prove; avoid 'is', 'is building', and tidy taglines.",
+    ),
+    (
+        "implicit product belief",
+        "Make a product belief from saved context without sounding like a product description.",
+    ),
+]
+
 
 class SocialBrainGenerator:
     def __init__(self, store: SQLiteStore, provider: DraftProvider | None = None):
@@ -483,17 +522,41 @@ def structure_variation_prompt_section(request: DraftRequest, trends: list[Trend
     )
 
 
-def product_mention_prompt_section(anchor: str | None = None) -> str:
+def product_mention_prompt_section(
+    anchor: str | None = None,
+    request: DraftRequest | None = None,
+    trends: list[TrendItem] | None = None,
+) -> str:
     product_label = anchor or "the product"
     example_prefix = anchor or "the product"
+    selected = selected_product_mention_lanes(request, trends or [], count=4) if request else PRODUCT_MENTION_LANES[:4]
+    lane_options = "\n".join(f"- {name}: {guidance}" for name, guidance in selected)
     return (
         "Dynamic Product Mention:\n"
         "- Do not make the product mention the same final paragraph every time.\n"
         f"- Avoid standalone sentences beginning \"{product_label} is...\", \"{product_label} is building...\", or \"{product_label}'s bet...\".\n"
         "- Prefer varied human phrasing: \"the part we care about...\", \"that is where the product has to start...\", "
         f"\"for {example_prefix}, the useful signal is...\", or no product name if the saved-context mechanism is already clear.\n"
-        "- If the post needs the name for positioning, embed it in a concrete sentence rather than defining the company."
+        "- If the post needs the name for positioning, embed it in a concrete sentence rather than defining the company.\n"
+        "Product mention lanes for this request:\n"
+        f"{lane_options}\n"
+        "- In multi-option prompts, each option should use a different product mention lane."
     )
+
+
+def selected_product_mention_lanes(
+    request: DraftRequest,
+    trends: list[TrendItem],
+    *,
+    count: int,
+) -> list[tuple[str, str]]:
+    seed_source = variation_seed_source(request, trends)
+    digest = hashlib.sha256(f"product-mention|{seed_source}".encode("utf-8")).hexdigest()
+    start = int(digest[:8], 16) % len(PRODUCT_MENTION_LANES)
+    return [
+        PRODUCT_MENTION_LANES[(start + offset) % len(PRODUCT_MENTION_LANES)]
+        for offset in range(min(count, len(PRODUCT_MENTION_LANES)))
+    ]
 
 
 def selected_structure_shapes(
@@ -502,7 +565,16 @@ def selected_structure_shapes(
     *,
     count: int,
 ) -> list[tuple[str, str]]:
-    seed_source = "|".join(
+    digest = hashlib.sha256(variation_seed_source(request, trends).encode("utf-8")).hexdigest()
+    start = int(digest[:8], 16) % len(POST_STRUCTURE_SHAPES)
+    return [
+        POST_STRUCTURE_SHAPES[(start + offset) % len(POST_STRUCTURE_SHAPES)]
+        for offset in range(min(count, len(POST_STRUCTURE_SHAPES)))
+    ]
+
+
+def variation_seed_source(request: DraftRequest, trends: list[TrendItem]) -> str:
+    return "|".join(
         [
             request.platform,
             request.topic,
@@ -512,12 +584,6 @@ def selected_structure_shapes(
             ",".join(trend.id for trend in trends),
         ]
     )
-    digest = hashlib.sha256(seed_source.encode("utf-8")).hexdigest()
-    start = int(digest[:8], 16) % len(POST_STRUCTURE_SHAPES)
-    return [
-        POST_STRUCTURE_SHAPES[(start + offset) % len(POST_STRUCTURE_SHAPES)]
-        for offset in range(min(count, len(POST_STRUCTURE_SHAPES)))
-    ]
 
 
 def build_generation_prompt(
@@ -558,7 +624,7 @@ def build_generation_prompt(
     anchor = workspace_anchor_name(bundle, active_rules or {})
     natural_voice_section = natural_voice_prompt_section(bundle, anchor=anchor)
     structure_section = structure_variation_prompt_section(request, trends)
-    product_mention_section = product_mention_prompt_section(anchor)
+    product_mention_section = product_mention_prompt_section(anchor, request=request, trends=trends)
     length_section = length_prompt_section(request, max_chars)
     return f"""Write {request.platform.upper()} posts for this workspace.
 
@@ -628,7 +694,7 @@ def build_strategy_prompt(
     anchor = workspace_anchor_name(bundle, active_rules or {})
     natural_voice_section = natural_voice_prompt_section(bundle, anchor=anchor)
     structure_section = structure_variation_prompt_section(request, trends)
-    product_mention_section = product_mention_prompt_section(anchor)
+    product_mention_section = product_mention_prompt_section(anchor, request=request, trends=trends)
     return f"""You are the hidden content strategist for this workspace's posts.
 
 Do not write the post yet. Produce the structured Post Intent that the natural writer will use.
@@ -718,7 +784,7 @@ def build_best_writer_prompt(
     anchor = workspace_anchor_name(bundle, active_rules or {})
     natural_voice_section = natural_voice_prompt_section(bundle, anchor=anchor)
     structure_section = structure_variation_prompt_section(request, trends)
-    product_mention_section = product_mention_prompt_section(anchor)
+    product_mention_section = product_mention_prompt_section(anchor, request=request, trends=trends)
     return f"""Write 3 X draft options for this workspace.
 
 Prioritize exact Voice Examples, worked-reason notes, and the writing skills below over generic marketing instincts.
@@ -803,7 +869,7 @@ def build_evaluation_prompt(
     anchor = workspace_anchor_from_active_rules(active_rules or {})
     natural_voice_section = natural_voice_prompt_section(anchor=anchor)
     structure_section = structure_variation_prompt_section(request, [])
-    product_mention_section = product_mention_prompt_section(anchor)
+    product_mention_section = product_mention_prompt_section(anchor, request=request, trends=[])
     return f"""Choose the best X post for this workspace and clean it up lightly.
 
 Original request:
@@ -922,6 +988,10 @@ def build_context_snapshot(
         "structure_variation_options": [
             {"name": name, "guidance": guidance}
             for name, guidance in selected_structure_shapes(request, trends, count=4)
+        ],
+        "product_mention_options": [
+            {"name": name, "guidance": guidance}
+            for name, guidance in selected_product_mention_lanes(request, trends, count=4)
         ],
         "avoid_phrases": avoid_phrases or [],
         "active_writing_rules": active_rules or {},
@@ -1429,7 +1499,7 @@ def build_rule_repair_prompt(
     length_section = length_prompt_section(request, max_chars)
     anchor = workspace_anchor_name(bundle, active_rules or {})
     natural_voice_section = natural_voice_prompt_section(bundle, anchor=anchor)
-    product_mention_section = product_mention_prompt_section(anchor)
+    product_mention_section = product_mention_prompt_section(anchor, request=request, trends=[])
     structure_section = structure_variation_prompt_section(request, [])
     return f"""Repair this X post so it follows the active Voice and context rules.
 
