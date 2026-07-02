@@ -3124,27 +3124,27 @@ def workspace_anchor_line(
 
 def leadpoet_anchor_line(product_lane: str, product_syntax: str | None = None) -> str:
     syntax_lines = {
-        "product as object": "The account-change check should be clear enough in Leadpoet to guide the next step.",
-        "prepositional tuck-in": "In Leadpoet, the account reason should already be specific.",
-        "possessive modifier": "The constraint stays concrete in Leadpoet: why this account deserves action now.",
+        "product as object": "Use Leadpoet as the destination for the account-change check, not the opening claim.",
+        "prepositional tuck-in": "The account reason should already be specific in Leadpoet.",
+        "possessive modifier": "The timing question stays concrete in Leadpoet: why this account now.",
         "name omitted": "Buyer timing should answer why this account deserves action now.",
-        "handoff point": "At the handoff into Leadpoet, the signal has to explain why this account is worth action.",
-        "question-adjacent": "At the handoff to Leadpoet, ask it plainly: why this account, this week?",
-        "earned late noun": "The account reason has to stand on its own first. The final noun can be Leadpoet.",
+        "handoff point": "At the handoff into Leadpoet, the signal should already say why this account is worth action.",
+        "question-adjacent": "Near Leadpoet, ask the plain question: why this account, this week?",
+        "earned late noun": "First name the account reason. The late noun can be Leadpoet.",
     }
     if product_syntax in syntax_lines:
         return syntax_lines[product_syntax]
     lines = {
-        "mechanism-first": "Buyer timing has to become visible before a sequence starts; in Leadpoet, the account-change check should be clear.",
+        "mechanism-first": "The account-change check should become usable in Leadpoet before copy starts.",
         "consequence-first": "The account choice gets better when the why-now reason shows up in Leadpoet before copy.",
-        "quiet embedded name": "In Leadpoet, the account reason should already be concrete.",
-        "no-name wedge": "The account reason can carry the post; the last line does not need Leadpoet as a tagline.",
-        "mechanism carries it": "The timing mechanism can carry the post without turning the last line into a product mention.",
-        "operator scene": "A rep should see the changed account before the generated email; the Leadpoet handoff comes after that.",
+        "quiet embedded name": "The account reason should be concrete in Leadpoet: what changed, why now, what action follows.",
+        "no-name wedge": "Buyer timing should answer why this account deserves action now.",
+        "mechanism carries it": "The timing mechanism can carry the post: what changed, why now, what action follows.",
+        "operator scene": "When a rep opens Leadpoet, the changed account should be obvious before the generated email.",
         "boundary line": "Verified data can say who exists; the sharper side, before Leadpoet, asks who is worth action now.",
-        "signal language": "The account signal ties timing, context, and the next account before Leadpoet enters the copy.",
+        "signal language": "The account signal should tie timing, context, and the next account before copy starts in Leadpoet.",
         "ownership without definition": "Before outbound gets louder, make the account-timing question clear enough in Leadpoet.",
-        "implicit product belief": "In Leadpoet, the belief stays practical: timing should pick the account before copy writes the email.",
+        "implicit product belief": "Timing should pick the account before copy writes the email; that belief stays practical in Leadpoet.",
         "context-only wedge": "Account context can carry the post when it names what changed, why now, and what action follows.",
     }
     return lines.get(product_lane, lines["signal language"])

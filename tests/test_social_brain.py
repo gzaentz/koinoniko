@@ -1630,6 +1630,43 @@ class SocialBrainTest(unittest.TestCase):
                 self.assertFalse(leadpoet_starts_sentence(line), line)
                 self.assertNotRegex(line, r"\bLeadpoet\s+(?:owns|starts|can|needs?|should|has\s+to|makes?|keeps?|turns?|focuses)\b")
 
+    def test_leadpoet_anchor_lines_vary_mention_shape(self):
+        lanes = [
+            "mechanism-first",
+            "consequence-first",
+            "quiet embedded name",
+            "no-name wedge",
+            "mechanism carries it",
+            "operator scene",
+            "boundary line",
+            "signal language",
+            "ownership without definition",
+            "implicit product belief",
+            "context-only wedge",
+        ]
+        syntax_names = [
+            "product as object",
+            "prepositional tuck-in",
+            "possessive modifier",
+            "name omitted",
+            "handoff point",
+            "question-adjacent",
+            "earned late noun",
+        ]
+        lines = [leadpoet_anchor_line(lane) for lane in lanes]
+        lines.extend(leadpoet_anchor_line("mechanism-first", product_syntax=syntax) for syntax in syntax_names)
+
+        mention_patterns = [leadpoet_mention_pattern(line) for line in lines]
+        self.assertIn("no_leadpoet", mention_patterns)
+        self.assertGreaterEqual(len(set(mention_patterns)), 6)
+        templates = [
+            leadpoet_sentence_template(line)
+            for line in lines
+            if leadpoet_sentence_template(line) != "no_leadpoet"
+        ]
+        self.assertGreaterEqual(len(set(templates)), 10)
+        self.assertLessEqual(max(templates.count(template) for template in set(templates)), 2)
+
     def test_deterministic_fallbacks_avoid_useful_wedge_language(self):
         outputs = [
             *leadpoet_name_omission_replacements("Leadpoet should explain why now."),
