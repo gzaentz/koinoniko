@@ -861,6 +861,9 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
     print("Primary closing target counts:")
     for key, value in sorted(payload["primary_closing_target_counts"].items()):
         print(f"- {key}: {value}")
+    print("Primary human rhythm target counts:")
+    for key, value in sorted(payload["primary_human_rhythm_target_counts"].items()):
+        print(f"- {key}: {value}")
     print("Leadpoet mention pattern counts:")
     for key, value in sorted(payload["leadpoet_mention_pattern_counts"].items()):
         print(f"- {key}: {value}")
@@ -957,6 +960,14 @@ def build_naturalness_audit(
         )
         if isinstance(closing_option, dict):
             primary_closing_target = str(closing_option.get("name") or "")
+        primary_human_rhythm_target = ""
+        rhythm_option = (
+            draft.context_snapshot.get("primary_human_rhythm_target")
+            if isinstance(draft.context_snapshot, dict)
+            else None
+        )
+        if isinstance(rhythm_option, dict):
+            primary_human_rhythm_target = str(rhythm_option.get("name") or "")
         rows.append(
             {
                 "index": index + 1,
@@ -975,6 +986,7 @@ def build_naturalness_audit(
                 "first_product_mention_lane": first_product_lane,
                 "primary_layout_target": primary_layout_target,
                 "primary_closing_target": primary_closing_target,
+                "primary_human_rhythm_target": primary_human_rhythm_target,
             }
         )
     text_blob = "\n\n".join(str(row["text"]) for row in rows).lower()
@@ -1010,6 +1022,11 @@ def build_naturalness_audit(
     primary_closing_target_counts = Counter(str(row["primary_closing_target"]) for row in rows if row["primary_closing_target"])
     if len(primary_closing_target_counts) < min(4, len(trends), count):
         warnings.append("Closing target guidance did not vary enough across trends.")
+    primary_human_rhythm_target_counts = Counter(
+        str(row["primary_human_rhythm_target"]) for row in rows if row["primary_human_rhythm_target"]
+    )
+    if len(primary_human_rhythm_target_counts) < min(4, len(trends), count):
+        warnings.append("Human rhythm guidance did not vary enough across trends.")
     covered_trend_ids = {str(row["trend_id"]) for row in rows if row["trend_id"]}
     uncovered_trend_count = max(0, len(trends) - len(covered_trend_ids))
     if uncovered_trend_count:
@@ -1049,6 +1066,7 @@ def build_naturalness_audit(
         "primary_product_mention_lane_counts": dict(primary_product_lane_counts),
         "primary_layout_target_counts": dict(primary_layout_target_counts),
         "primary_closing_target_counts": dict(primary_closing_target_counts),
+        "primary_human_rhythm_target_counts": dict(primary_human_rhythm_target_counts),
         "first_structure_option_counts": dict(first_structure_counts or primary_structure_counts),
         "first_product_mention_lane_counts": dict(first_product_lane_counts or primary_product_lane_counts),
         "leadpoet_mention_pattern_counts": dict(mention_pattern_counts),

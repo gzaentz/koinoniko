@@ -181,6 +181,37 @@ POST_CLOSING_TARGETS = [
     ),
 ]
 
+POST_HUMAN_RHYTHM_TARGETS = [
+    (
+        "founder aside",
+        "Use one plain founder-belief sentence like 'I think...' or 'The mistake I keep seeing...' without inventing evidence.",
+    ),
+    (
+        "clipped operator note",
+        "Make it feel like an operator note: short, concrete sentences with one useful fragment allowed.",
+    ),
+    (
+        "scene without anecdote",
+        "Open on a generic rep, buyer, or founder moment. Do not pretend it happened personally.",
+    ),
+    (
+        "specific noun pressure",
+        "Lean on concrete nouns close together, such as CRM record, timing signal, account change, or sequence copy.",
+    ),
+    (
+        "quiet disagreement",
+        "Disagree with the market default in a calm, specific way. Avoid symmetrical X-but-Y phrasing.",
+    ),
+    (
+        "rough edge",
+        "Leave one sentence slightly blunt or unfinished-feeling instead of smoothing it into a slogan.",
+    ),
+    (
+        "questionable assumption",
+        "Name the assumption behind the trend, then test it against the saved context.",
+    ),
+]
+
 PRODUCT_MENTION_LANES = [
     (
         "mechanism-first",
@@ -574,6 +605,20 @@ def natural_voice_prompt_section(bundle: ContextBundle | None = None, anchor: st
     )
 
 
+def human_rhythm_prompt_section(request: DraftRequest, trends: list[TrendItem]) -> str:
+    selected = selected_human_rhythm_targets(request, trends, count=4)
+    primary_name, primary_guidance = selected[0]
+    options = "\n".join(f"- {name}: {guidance}" for name, guidance in selected)
+    return (
+        "Human Rhythm Variation:\n"
+        "The post should not sound machine-even. Vary sentence rhythm, opener texture, and how the product name enters.\n"
+        f"Primary human rhythm target for this request: {primary_name}: {primary_guidance}\n"
+        "Use the primary rhythm target unless it would make the post worse. "
+        "In multi-option prompts, option 1 should use the primary rhythm and each option should feel rhythmically distinct.\n"
+        f"{options}"
+    )
+
+
 def structure_variation_prompt_section(request: DraftRequest, trends: list[TrendItem]) -> str:
     selected = selected_structure_shapes(request, trends, count=4)
     primary_name, primary_guidance = selected[0]
@@ -691,6 +736,24 @@ def primary_closing_target(request: DraftRequest, trends: list[TrendItem]) -> tu
     return selected_closing_targets(request, trends, count=1)[0]
 
 
+def selected_human_rhythm_targets(
+    request: DraftRequest,
+    trends: list[TrendItem],
+    *,
+    count: int,
+) -> list[tuple[str, str]]:
+    digest = hashlib.sha256(f"human-rhythm|{variation_seed_source(request, trends)}".encode("utf-8")).hexdigest()
+    start = int(digest[:8], 16) % len(POST_HUMAN_RHYTHM_TARGETS)
+    return [
+        POST_HUMAN_RHYTHM_TARGETS[(start + offset) % len(POST_HUMAN_RHYTHM_TARGETS)]
+        for offset in range(min(count, len(POST_HUMAN_RHYTHM_TARGETS)))
+    ]
+
+
+def primary_human_rhythm_target(request: DraftRequest, trends: list[TrendItem]) -> tuple[str, str]:
+    return selected_human_rhythm_targets(request, trends, count=1)[0]
+
+
 def variation_seed_source(request: DraftRequest, trends: list[TrendItem]) -> str:
     return "|".join(
         [
@@ -741,6 +804,7 @@ def build_generation_prompt(
     )
     anchor = workspace_anchor_name(bundle, active_rules or {})
     natural_voice_section = natural_voice_prompt_section(bundle, anchor=anchor)
+    human_rhythm_section = human_rhythm_prompt_section(request, trends)
     structure_section = structure_variation_prompt_section(request, trends)
     product_mention_section = product_mention_prompt_section(anchor, request=request, trends=trends)
     length_section = length_prompt_section(request, max_chars)
@@ -756,6 +820,8 @@ Voice profile:
 {voice or "- No saved Voice profile yet."}
 
 {natural_voice_section}
+
+{human_rhythm_section}
 
 {structure_section}
 
@@ -811,6 +877,7 @@ def build_strategy_prompt(
     length_section = length_prompt_section(request, max_chars)
     anchor = workspace_anchor_name(bundle, active_rules or {})
     natural_voice_section = natural_voice_prompt_section(bundle, anchor=anchor)
+    human_rhythm_section = human_rhythm_prompt_section(request, trends)
     structure_section = structure_variation_prompt_section(request, trends)
     product_mention_section = product_mention_prompt_section(anchor, request=request, trends=trends)
     return f"""You are the hidden content strategist for this workspace's posts.
@@ -842,6 +909,8 @@ Facts & Context:
 {active_rules_section}
 
 {natural_voice_section}
+
+{human_rhythm_section}
 
 {structure_section}
 
@@ -901,6 +970,7 @@ def build_best_writer_prompt(
     length_section = length_prompt_section(request, max_chars)
     anchor = workspace_anchor_name(bundle, active_rules or {})
     natural_voice_section = natural_voice_prompt_section(bundle, anchor=anchor)
+    human_rhythm_section = human_rhythm_prompt_section(request, trends)
     structure_section = structure_variation_prompt_section(request, trends)
     product_mention_section = product_mention_prompt_section(anchor, request=request, trends=trends)
     return f"""Write 3 X draft options for this workspace.
@@ -929,6 +999,8 @@ Facts & Context:
 {active_rules_section}
 
 {natural_voice_section}
+
+{human_rhythm_section}
 
 {structure_section}
 
@@ -987,6 +1059,7 @@ def build_evaluation_prompt(
     length_section = length_prompt_section(request, max_chars)
     anchor = workspace_anchor_from_active_rules(active_rules or {})
     natural_voice_section = natural_voice_prompt_section(anchor=anchor)
+    human_rhythm_section = human_rhythm_prompt_section(request, trends)
     structure_section = structure_variation_prompt_section(request, trends)
     product_mention_section = product_mention_prompt_section(anchor, request=request, trends=trends)
     return f"""Choose the best X post for this workspace and clean it up lightly.
@@ -1010,6 +1083,8 @@ Voice and review rules:
 {active_rules_section}
 
 {natural_voice_section}
+
+{human_rhythm_section}
 
 {structure_section}
 
@@ -1090,6 +1165,7 @@ def build_context_snapshot(
     primary_product_lane = primary_product_mention_lane(request, trends)
     primary_layout = primary_layout_target(request, trends)
     primary_closing = primary_closing_target(request, trends)
+    primary_rhythm = primary_human_rhythm_target(request, trends)
     return {
         "workspace_id": bundle.workspace_id,
         "request": request.__dict__,
@@ -1124,6 +1200,10 @@ def build_context_snapshot(
             "name": primary_closing[0],
             "guidance": primary_closing[1],
         },
+        "primary_human_rhythm_target": {
+            "name": primary_rhythm[0],
+            "guidance": primary_rhythm[1],
+        },
         "structure_variation_options": [
             {"name": name, "guidance": guidance}
             for name, guidance in selected_structure_shapes(request, trends, count=4)
@@ -1135,6 +1215,10 @@ def build_context_snapshot(
         "closing_target_options": [
             {"name": name, "guidance": guidance}
             for name, guidance in selected_closing_targets(request, trends, count=4)
+        ],
+        "human_rhythm_options": [
+            {"name": name, "guidance": guidance}
+            for name, guidance in selected_human_rhythm_targets(request, trends, count=4)
         ],
         "product_mention_options": [
             {"name": name, "guidance": guidance}
@@ -1789,6 +1873,7 @@ def build_rule_repair_prompt(
     length_section = length_prompt_section(request, max_chars)
     anchor = workspace_anchor_name(bundle, active_rules or {})
     natural_voice_section = natural_voice_prompt_section(bundle, anchor=anchor)
+    human_rhythm_section = human_rhythm_prompt_section(request, trends)
     product_mention_section = product_mention_prompt_section(anchor, request=request, trends=trends)
     structure_section = structure_variation_prompt_section(request, trends)
     return f"""Repair this X post so it follows the active Voice and context rules.
@@ -1808,6 +1893,8 @@ Facts & Context:
 {context or "- No saved facts/context available."}
 
 {natural_voice_section}
+
+{human_rhythm_section}
 
 {structure_section}
 
