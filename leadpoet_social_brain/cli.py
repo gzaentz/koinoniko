@@ -33,6 +33,7 @@ from leadpoet_social_brain.core.models import (
 from leadpoet_social_brain.generation import (
     MISSING_PROVIDER_MESSAGE,
     SocialBrainGenerator,
+    leadpoet_sentence_grammar_fingerprint,
     primary_closing_target,
     primary_human_rhythm_target,
     primary_layout_target,
@@ -922,6 +923,9 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
         print("Leadpoet actual syntax counts:")
         for key, value in sorted(payload["leadpoet_actual_syntax_counts"].items()):
             print(f"- {key}: {value}")
+        print("Leadpoet grammar fingerprint counts:")
+        for key, value in sorted(payload["leadpoet_grammar_fingerprint_counts"].items()):
+            print(f"- {key}: {value}")
         print("Leadpoet paragraph position counts:")
         for key, value in sorted(payload["leadpoet_paragraph_position_counts"].items()):
             print(f"- {key}: {value}")
@@ -1199,6 +1203,7 @@ def build_naturalness_audit(
                 "leadpoet_shape": leadpoet_mention_shape(draft.text),
                 "leadpoet_mention_pattern": leadpoet_mention_pattern(draft.text),
                 "leadpoet_actual_syntax": leadpoet_actual_syntax(draft.text),
+                "leadpoet_grammar_fingerprint": leadpoet_grammar_fingerprint_for_text(draft.text),
                 "leadpoet_paragraph_position": leadpoet_text_position(draft.text),
                 "leadpoet_in_final_line": bool(re.search(r"\bleadpoet\b", last_nonempty_line(draft.text), flags=re.I)),
                 "leadpoet_sentence_position": leadpoet_sentence_position(draft.text),
@@ -1305,6 +1310,22 @@ def build_naturalness_audit(
     elif actual_syntax_counts and actual_syntax_counts.most_common(1)[0][1] >= max(3, (sum(actual_syntax_counts.values()) + 1) // 2):
         syntax, syntax_count = actual_syntax_counts.most_common(1)[0]
         warnings.append(f"Leadpoet mention syntax is too concentrated: {syntax} appears {syntax_count}/{sum(actual_syntax_counts.values())} times.")
+    leadpoet_grammar_fingerprint_counts = Counter(
+        str(row["leadpoet_grammar_fingerprint"])
+        for row in rows
+        if row["leadpoet_grammar_fingerprint"] and row["leadpoet_grammar_fingerprint"] != "no_leadpoet"
+    )
+    if leadpoet_grammar_fingerprint_counts and len(leadpoet_grammar_fingerprint_counts) < min(
+        3, sum(leadpoet_grammar_fingerprint_counts.values())
+    ):
+        warnings.append("Leadpoet grammar fingerprints are not varied enough.")
+    elif leadpoet_grammar_fingerprint_counts and leadpoet_grammar_fingerprint_counts.most_common(1)[0][1] >= max(
+        3, (sum(leadpoet_grammar_fingerprint_counts.values()) + 1) // 2
+    ):
+        grammar, grammar_count = leadpoet_grammar_fingerprint_counts.most_common(1)[0]
+        warnings.append(
+            f"Leadpoet grammar fingerprints are too concentrated: {grammar} appears {grammar_count}/{sum(leadpoet_grammar_fingerprint_counts.values())} times."
+        )
     leadpoet_position_counts = Counter(
         str(row["leadpoet_paragraph_position"])
         for row in rows
@@ -1377,6 +1398,7 @@ def build_naturalness_audit(
         "first_product_mention_lane_counts": dict(first_product_lane_counts or primary_product_lane_counts),
         "leadpoet_mention_pattern_counts": dict(mention_pattern_counts),
         "leadpoet_actual_syntax_counts": dict(actual_syntax_counts),
+        "leadpoet_grammar_fingerprint_counts": dict(leadpoet_grammar_fingerprint_counts),
         "leadpoet_paragraph_position_counts": dict(leadpoet_position_counts),
         "leadpoet_sentence_position_counts": dict(leadpoet_sentence_position_counts),
         "leadpoet_final_line_mentions": leadpoet_final_line_mentions,
@@ -1455,6 +1477,14 @@ def leadpoet_actual_syntax(text: str) -> str:
     if re.search(r"(?m)^\s*leadpoet\b", cleaned, flags=re.I):
         return "product_line_start"
     return "contextual"
+
+
+def leadpoet_grammar_fingerprint_for_text(text: str) -> str:
+    sentence = next(
+        (sentence for sentence in text_sentences(text) if re.search(r"\bleadpoet\b", sentence, flags=re.I)),
+        "",
+    )
+    return leadpoet_sentence_grammar_fingerprint(sentence) or "no_leadpoet"
 
 
 def text_sentences(text: str) -> list[str]:

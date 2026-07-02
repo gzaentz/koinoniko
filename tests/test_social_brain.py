@@ -1812,6 +1812,80 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(rows[0]["leadpoet_grammar"], "product_modifier")
             store.close()
 
+    def test_generation_repairs_saturated_batch_leadpoet_grammar_outside_recent_rows(self):
+        class SaturatedBatchGrammarProvider:
+            def __init__(self):
+                self.repair_count = 0
+                self.repair_prompts: list[str] = []
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "Static records answer who exists.\n\nThe useful Leadpoet signal has to explain why now.",
+                        "The CRM can be right and still late.\n\nTiming has to explain why now before the account reaches Leadpoet.",
+                        "More names do not fix account judgment.\n\nThe sequence is downstream.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    return [
+                        evaluation_json(
+                            "Static records answer who exists.\n\n"
+                            "The useful Leadpoet signal has to explain why now."
+                        )
+                    ]
+                if "Repair this X post" in prompt:
+                    self.repair_count += 1
+                    self.repair_prompts.append(prompt)
+                    return [
+                        "A correct contact record can still be late.\n\n"
+                        "The account reason reaches Leadpoet when timing changes."
+                    ]
+                return ["A correct contact record can still be late."]
+
+        batch_outputs = [
+            "Static records answer who exists.\n\nThe useful Leadpoet question is why this account now.",
+            "The CRM can be correct.\n\nThe useful Leadpoet signal explains the account change.",
+            "More names do not fix judgment.\n\nThe useful Leadpoet constraint is timing before copy.",
+            "A rep needs the reason first.\n\nTiming becomes useful before the account reaches Leadpoet.",
+            "Context only matters when it changes action.\n\nInside Leadpoet, the account reason gets specific.",
+            "The signal has to move before copy.\n\nPut Leadpoet behind the account-change check.",
+            "The record can be true and still late.\n\nThat account reason gets specific inside Leadpoet.",
+            "A sales agent needs timing before copy.\n\nLeadpoet, in that handoff, belongs near the account reason.",
+            "Outbound volume is easy.\n\nThe account-timing question keeps Leadpoet grounded.",
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = SaturatedBatchGrammarProvider()
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle="account timing beats more generated email",
+                ),
+                variants=1,
+                recent_output_texts=batch_outputs,
+            )[0]
+
+            self.assertEqual(provider.repair_count, 1)
+            self.assertIn("Batch Leadpoet grammar counts: product_modifier=3", provider.repair_prompts[0])
+            self.assertIn("change saturated batch Leadpoet grammar: product_modifier", provider.repair_prompts[0])
+            self.assertEqual(
+                draft.text,
+                "A correct contact record can still be late.\n\n"
+                "The account reason reaches Leadpoet when timing changes.",
+            )
+            self.assertEqual(
+                draft.context_snapshot["recent_output_batch_summary"]["leadpoet_grammar_counts"]["product_modifier"],
+                3,
+            )
+            self.assertNotIn("The useful Leadpoet signal", draft.text)
+            store.close()
+
     def test_generator_includes_cross_topic_recent_output_anti_sameness_context(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -3450,6 +3524,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertGreaterEqual(len(payload["first_product_mention_lane_counts"]), 5)
             self.assertGreaterEqual(len(payload["leadpoet_mention_pattern_counts"]), 5)
             self.assertGreaterEqual(len(payload["leadpoet_actual_syntax_counts"]), 3)
+            self.assertGreaterEqual(len(payload["leadpoet_grammar_fingerprint_counts"]), 3)
             self.assertGreaterEqual(len(payload["leadpoet_paragraph_position_counts"]), 3)
             self.assertGreaterEqual(len(payload["leadpoet_sentence_position_counts"]), 3)
             self.assertLess(payload["leadpoet_final_line_mentions"], 10)
@@ -3521,6 +3596,8 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotIn("source=batch", strategy_prompts[0])
             self.assertIn("source=batch", strategy_prompts[1])
             self.assertIn("The useful Leadpoet question is why this account now.", strategy_prompts[1])
+            self.assertIn("Batch outputs so far: 1", strategy_prompts[1])
+            self.assertIn("Batch Leadpoet grammar counts: product_modifier=1", strategy_prompts[1])
             store.close()
 
     def test_audit_naturalness_x_plan_only_reports_variation_without_provider(self):

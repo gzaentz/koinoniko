@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections import Counter
 from dataclasses import replace
 
 from leadpoet_social_brain.context import ContextManager
@@ -481,6 +482,7 @@ class SocialBrainGenerator:
             model=model_routing.natural_writer,
             recent_outputs_section=recent_output_context["section"],
             recent_output_rows=recent_output_context["rows"],
+            recent_output_batch_summary=recent_output_context["batch_summary"],
         )
         repaired_successfully = text != final_text and not rule_warnings
         if rule_warnings:
@@ -506,6 +508,7 @@ class SocialBrainGenerator:
             active_rules=active_rules,
             repaired_successfully=repaired_successfully,
             recent_output_rows=recent_output_context["rows"],
+            recent_output_batch_summary=recent_output_context["batch_summary"],
         )
         adapter.validate_text(text, max_chars=max_chars)
         notes = quality_notes or build_quality_notes(request, bundle, trends=trends)
@@ -936,9 +939,10 @@ def build_recent_output_context(
     limit: int = 6,
     extra_texts: list[str] | None = None,
 ) -> dict[str, object]:
+    batch_summary = batch_recent_output_summary(extra_texts or [])
     rows = recent_output_rows(store, request, limit=limit, extra_texts=extra_texts)
     if not rows:
-        return {"section": "", "rows": []}
+        return {"section": "", "rows": [], "batch_summary": batch_summary}
     lines = [
         "Recent Output Anti-Sameness:",
         "These recent or queued posts are not examples to copy. Use them to avoid repeated openings, closings, layouts, and Leadpoet grammar.",
@@ -958,13 +962,45 @@ def build_recent_output_context(
         if row["leadpoet_grammar"]:
             details.append(f"leadpoet_grammar={row['leadpoet_grammar']}")
         lines.append(f"- {'; '.join(details)}")
+    if batch_summary["post_count"]:
+        grammar_counts = batch_summary.get("leadpoet_grammar_counts", {})
+        layout_counts = batch_summary.get("layout_counts", {})
+        lines.append(f"Batch outputs so far: {batch_summary['post_count']}")
+        if isinstance(grammar_counts, dict) and grammar_counts:
+            lines.append(f"Batch Leadpoet grammar counts: {recent_output_count_summary(grammar_counts)}")
+        if isinstance(layout_counts, dict) and layout_counts:
+            lines.append(f"Batch layout counts: {recent_output_count_summary(layout_counts)}")
     lines.extend(
         [
             "Avoid repeating those first-line shapes, final-line moves, and Leadpoet grammar fingerprints.",
+            "Treat any Leadpoet grammar fingerprint used 3+ times in this batch as saturated; choose a different product role or omit the name if the point still works.",
             "If Leadpoet appears, change its sentence role, placement, and neighboring words from the recent examples.",
         ]
     )
-    return {"section": "\n".join(lines), "rows": rows}
+    return {"section": "\n".join(lines), "rows": rows, "batch_summary": batch_summary}
+
+
+def batch_recent_output_summary(texts: list[str]) -> dict[str, object]:
+    rows = [
+        recent_output_row(text, source="batch", topic_scope="batch")
+        for text in texts
+        if clean_recent_output_text(text)
+    ]
+    grammar_counts = Counter(row["leadpoet_grammar"] for row in rows if row["leadpoet_grammar"])
+    layout_counts = Counter(row["layout"] for row in rows if row["layout"])
+    return {
+        "post_count": len(rows),
+        "leadpoet_grammar_counts": dict(grammar_counts),
+        "layout_counts": dict(layout_counts),
+    }
+
+
+def recent_output_count_summary(counts: dict[str, object]) -> str:
+    items = sorted(
+        ((str(key), int(value)) for key, value in counts.items() if str(key).strip()),
+        key=lambda item: (-item[1], item[0]),
+    )
+    return ", ".join(f"{key}={value}" for key, value in items)
 
 
 def recent_output_rows(
@@ -1570,6 +1606,11 @@ def build_context_snapshot(
             if isinstance(recent_output_context, dict)
             else []
         ),
+        "recent_output_batch_summary": (
+            recent_output_context.get("batch_summary", {})
+            if isinstance(recent_output_context, dict)
+            else {}
+        ),
         "primary_structure_option": {
             "name": primary_structure[0],
             "guidance": primary_structure[1],
@@ -1764,6 +1805,7 @@ def clean_evaluation_warnings_after_final_text(
     active_rules: dict[str, list[str]],
     repaired_successfully: bool,
     recent_output_rows: list[dict[str, str]] | None = None,
+    recent_output_batch_summary: dict[str, object] | None = None,
 ) -> dict[str, object]:
     warnings = evaluation.get("warnings")
     if not isinstance(warnings, list):
@@ -1777,6 +1819,7 @@ def clean_evaluation_warnings_after_final_text(
         avoid_phrases=avoid_phrases,
         active_rules=active_rules,
         recent_output_rows=recent_output_rows,
+        recent_output_batch_summary=recent_output_batch_summary,
     )
     cleaned: list[object] = []
     for warning in warnings:
@@ -1816,6 +1859,7 @@ def repair_draft_against_rules(
     model: str | None,
     recent_outputs_section: str = "",
     recent_output_rows: list[dict[str, str]] | None = None,
+    recent_output_batch_summary: dict[str, object] | None = None,
 ) -> tuple[str, list[str]]:
     violations = draft_rule_violations(
         text,
@@ -1825,6 +1869,7 @@ def repair_draft_against_rules(
         avoid_phrases=avoid_phrases,
         active_rules=active_rules,
         recent_output_rows=recent_output_rows,
+        recent_output_batch_summary=recent_output_batch_summary,
     )
     repaired = text
     for _ in range(2):
@@ -1852,6 +1897,7 @@ def repair_draft_against_rules(
                 max_chars=max_chars,
                 previous_violations=violations,
                 recent_output_rows=recent_output_rows,
+                recent_output_batch_summary=recent_output_batch_summary,
             )
         repaired_raw = repair_options[0]
         repaired = fit_generated_text_to_limit(
@@ -1869,6 +1915,7 @@ def repair_draft_against_rules(
             avoid_phrases=avoid_phrases,
             active_rules=active_rules,
             recent_output_rows=recent_output_rows,
+            recent_output_batch_summary=recent_output_batch_summary,
         )
     repaired, violations = apply_deterministic_rule_repair(
         repaired,
@@ -1880,6 +1927,7 @@ def repair_draft_against_rules(
         max_chars=max_chars,
         previous_violations=violations,
         recent_output_rows=recent_output_rows,
+        recent_output_batch_summary=recent_output_batch_summary,
     )
     anchored = anchor_draft_to_workspace(
         repaired,
@@ -1898,6 +1946,7 @@ def repair_draft_against_rules(
             avoid_phrases=avoid_phrases,
             active_rules=active_rules,
             recent_output_rows=recent_output_rows,
+            recent_output_batch_summary=recent_output_batch_summary,
         )
         return anchored, violations
     return repaired, violations
@@ -1914,6 +1963,7 @@ def apply_deterministic_rule_repair(
     max_chars: int,
     previous_violations: list[str],
     recent_output_rows: list[dict[str, str]] | None = None,
+    recent_output_batch_summary: dict[str, object] | None = None,
 ) -> tuple[str, list[str]]:
     repaired = deterministic_leadpoet_definition_repair(
         text,
@@ -1931,6 +1981,7 @@ def apply_deterministic_rule_repair(
         avoid_phrases=avoid_phrases,
         active_rules=active_rules,
         recent_output_rows=recent_output_rows,
+        recent_output_batch_summary=recent_output_batch_summary,
     )
     if len(violations) <= len(previous_violations):
         return repaired, violations
@@ -2211,6 +2262,7 @@ def draft_rule_violations(
     avoid_phrases: list[str],
     active_rules: dict[str, list[str]],
     recent_output_rows: list[dict[str, str]] | None = None,
+    recent_output_batch_summary: dict[str, object] | None = None,
 ) -> list[str]:
     lowered = text.lower()
     violations: list[str] = []
@@ -2229,7 +2281,7 @@ def draft_rule_violations(
     if re.search(r"\b(cannot proceed|no product update supplied|provide:|provide more details|need more details|to write this post)\b", lowered):
         violations.append("return a publishable post, not a refusal, caveat, or request for more details")
     violations.extend(natural_voice_violations(text, request))
-    violations.extend(recent_output_repetition_violations(text, recent_output_rows))
+    violations.extend(recent_output_repetition_violations(text, recent_output_rows, recent_output_batch_summary))
     anchor = workspace_anchor_name(bundle, active_rules)
     if anchor and re.search(rf"\b(i do not|i don't) know enough about {re.escape(anchor.lower())}\b", lowered):
         violations.append(f"remove model uncertainty about {anchor}; use saved context or make a narrower claim")
@@ -2246,16 +2298,15 @@ def draft_rule_violations(
 def recent_output_repetition_violations(
     text: str,
     recent_output_rows: list[dict[str, str]] | None,
+    recent_output_batch_summary: dict[str, object] | None = None,
 ) -> list[str]:
-    if not recent_output_rows:
-        return []
     cleaned = clean_recent_output_text(text)
     first = normalize_recent_output_fragment(first_sentence_or_line(cleaned))
     last = normalize_recent_output_fragment(last_nonempty_text_line(cleaned))
     leadpoet_sentence = normalize_recent_output_fragment(first_sentence_with_word(cleaned, "Leadpoet"))
     leadpoet_grammar = leadpoet_sentence_grammar_fingerprint(first_sentence_with_word(cleaned, "Leadpoet"))
     violations: list[str] = []
-    for row in recent_output_rows:
+    for row in recent_output_rows or []:
         row_first = normalize_recent_output_fragment(row.get("first_line", ""))
         row_last = normalize_recent_output_fragment(row.get("last_line", ""))
         row_leadpoet = normalize_recent_output_fragment(row.get("leadpoet_sentence", ""))
@@ -2268,6 +2319,10 @@ def recent_output_repetition_violations(
             violations.append("change repeated recent Leadpoet sentence")
         if leadpoet_grammar and row_leadpoet_grammar and leadpoet_grammar == row_leadpoet_grammar:
             violations.append(f"change repeated recent Leadpoet grammar: {leadpoet_grammar}")
+    if leadpoet_grammar and recent_output_batch_summary:
+        grammar_counts = recent_output_batch_summary.get("leadpoet_grammar_counts", {})
+        if isinstance(grammar_counts, dict) and int(grammar_counts.get(leadpoet_grammar, 0) or 0) >= 3:
+            violations.append(f"change saturated batch Leadpoet grammar: {leadpoet_grammar}")
     return dedupe_preserve_order(violations)
 
 
