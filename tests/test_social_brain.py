@@ -1884,6 +1884,71 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotIn("The useful Leadpoet signal", draft.text)
             store.close()
 
+    def test_generation_deterministically_repairs_saturated_batch_leadpoet_grammar_without_provider_repair(self):
+        class IgnoredBatchGrammarRepairProvider:
+            def __init__(self):
+                self.repair_count = 0
+                self.repair_prompts: list[str] = []
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "Static records answer who exists.\n\nThe useful Leadpoet signal has to explain why now.",
+                        "The CRM can be right and still late.\n\nTiming has to explain why now before the account reaches Leadpoet.",
+                        "More names do not fix account judgment.\n\nThe sequence is downstream.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    return [
+                        evaluation_json(
+                            "Static records answer who exists.\n\n"
+                            "The useful Leadpoet signal has to explain why now."
+                        )
+                    ]
+                if "Repair this X post" in prompt:
+                    self.repair_count += 1
+                    self.repair_prompts.append(prompt)
+                    return []
+                return ["A correct contact record can still be late."]
+
+        batch_outputs = [
+            "Static records answer who exists.\n\nThe useful Leadpoet question is why this account now.",
+            "The CRM can be correct. The useful Leadpoet signal explains the account change.",
+            "More names do not fix judgment.\n\nThe useful Leadpoet constraint is timing before copy.\n\nThe sequence is downstream.",
+            "A rep needs the reason first.\nTiming becomes useful before the account reaches Leadpoet.",
+            "Context only matters when it changes action.\n\nInside Leadpoet, the account reason gets specific.",
+            "The signal has to move before copy.\n\nPut Leadpoet behind the account-change check.\n\nThen copy follows.",
+            "The record can be true and still late.\nThat account reason gets specific inside Leadpoet.\nThe sequence follows.",
+            "A sales agent needs timing before copy.\n\nLeadpoet, in that handoff, belongs near the account reason.",
+            "Outbound volume is easy.\n\nTiming is the first filter.\n\nThe account-timing question keeps Leadpoet grounded.",
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = IgnoredBatchGrammarRepairProvider()
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle="account timing beats more generated email",
+                ),
+                variants=1,
+                recent_output_texts=batch_outputs,
+            )[0]
+
+            self.assertEqual(provider.repair_count, 1)
+            self.assertIn("change saturated batch Leadpoet grammar: product_modifier", provider.repair_prompts[0])
+            self.assertEqual(
+                draft.text,
+                "Static records answer who exists. The account reason reaches Leadpoet when timing explains why now.",
+            )
+            self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
+            store.close()
+
     def test_generation_repairs_saturated_batch_layout_outside_recent_rows(self):
         class SaturatedBatchLayoutProvider:
             def __init__(self):
@@ -4235,7 +4300,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(any("Leadpoet appears in the final line too often" in warning for warning in payload["warnings"]))
             store.close()
 
-    def test_audit_naturalness_x_warns_when_leadpoet_starts_product_sentence(self):
+    def test_audit_naturalness_x_repairs_when_leadpoet_starts_product_sentence(self):
         class SentenceStartProvider:
             def __init__(self):
                 self.final_count = 0
@@ -4289,8 +4354,8 @@ class SocialBrainTest(unittest.TestCase):
                 save_drafts=False,
             )
 
-            self.assertEqual(payload["leadpoet_sentence_start_mentions"], 5)
-            self.assertTrue(
+            self.assertLess(payload["leadpoet_sentence_start_mentions"], 5)
+            self.assertFalse(
                 any("Leadpoet starts the product sentence too often" in warning for warning in payload["warnings"])
             )
             store.close()
@@ -4438,7 +4503,7 @@ class SocialBrainTest(unittest.TestCase):
             )
             store.close()
 
-    def test_audit_naturalness_x_warns_on_repeated_leadpoet_mention_pattern(self):
+    def test_audit_naturalness_x_repairs_repeated_leadpoet_mention_pattern(self):
         class RepetitiveMentionProvider:
             def __init__(self):
                 self.final_count = 0
@@ -4492,13 +4557,13 @@ class SocialBrainTest(unittest.TestCase):
                 save_drafts=False,
             )
 
-            self.assertEqual(payload["leadpoet_mention_pattern_counts"]["leadpoet_signal"], 5)
-            self.assertTrue(
+            self.assertLess(payload["leadpoet_mention_pattern_counts"].get("leadpoet_signal", 0), 5)
+            self.assertFalse(
                 any("Leadpoet mention phrasing is too concentrated" in warning for warning in payload["warnings"])
             )
             store.close()
 
-    def test_audit_naturalness_x_warns_on_repeated_leadpoet_actual_syntax(self):
+    def test_audit_naturalness_x_repairs_repeated_leadpoet_actual_syntax(self):
         class RepetitiveSyntaxProvider:
             def __init__(self):
                 self.final_count = 0
@@ -4559,8 +4624,8 @@ class SocialBrainTest(unittest.TestCase):
                 save_drafts=False,
             )
 
-            self.assertEqual(payload["leadpoet_actual_syntax_counts"]["product_modifier"], 5)
-            self.assertTrue(
+            self.assertLess(payload["leadpoet_actual_syntax_counts"].get("product_modifier", 0), 5)
+            self.assertFalse(
                 any("Leadpoet mention syntax" in warning for warning in payload["warnings"])
             )
             store.close()

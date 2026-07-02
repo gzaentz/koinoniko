@@ -1572,6 +1572,8 @@ def leadpoet_mention_pattern(text: str) -> str:
         return "leadpoet_lane"
     if re.search(r"\bleadpoet\s+signal\b|\bleadpoet's\s+signal\b|\bleadpoet’s\s+signal\b", text, flags=re.I):
         return "leadpoet_signal"
+    if re.search(r"\bleadpoet\s+constraint\b|\bleadpoet's\s+constraint\b|\bleadpoet’s\s+constraint\b", text, flags=re.I):
+        return "leadpoet_constraint"
     if re.search(r"\bleadpoet\s+has\s+to\b", text, flags=re.I):
         return "leadpoet_has_to"
     if re.search(r"\bleadpoet\s+should\b", text, flags=re.I):
@@ -1592,6 +1594,12 @@ def leadpoet_mention_pattern(text: str) -> str:
         return "where_leadpoet_enters"
     if re.search(r"\bbefore\s+leadpoet\s+earns\b", text, flags=re.I):
         return "before_leadpoet_earns"
+    if re.search(r"\bleadpoet\s+earns\b", text, flags=re.I):
+        return "leadpoet_earns"
+    if re.search(r"\b(?:put|place|keep|carry|bring|move|tuck|embed|mention|name|use)\b[^.!?]{0,80}\bleadpoet\b", text, flags=re.I):
+        return "leadpoet_as_object"
+    if re.search(r"\breaches\s+leadpoet\b|\bleadpoet\b[^.!?]{0,80}\b(?:before|after|when|where|if|because|as)\b", text, flags=re.I):
+        return "leadpoet_clause_embedded"
     if re.search(r"(?m)^\s*leadpoet\b", text, flags=re.I):
         return "leadpoet_starts_line"
     if re.search(r"\bleadpoet(?:'s|’s)\s+\w+", text, flags=re.I):

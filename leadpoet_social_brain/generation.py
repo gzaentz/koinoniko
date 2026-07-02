@@ -961,19 +961,25 @@ def build_recent_output_context(
             details.append(f"leadpoet={row['leadpoet_sentence']}")
         if row["leadpoet_grammar"]:
             details.append(f"leadpoet_grammar={row['leadpoet_grammar']}")
+        if row["leadpoet_phrase_pattern"]:
+            details.append(f"leadpoet_pattern={row['leadpoet_phrase_pattern']}")
         lines.append(f"- {'; '.join(details)}")
     if batch_summary["post_count"]:
         grammar_counts = batch_summary.get("leadpoet_grammar_counts", {})
+        phrase_counts = batch_summary.get("leadpoet_phrase_pattern_counts", {})
         layout_counts = batch_summary.get("layout_counts", {})
         lines.append(f"Batch outputs so far: {batch_summary['post_count']}")
         if isinstance(grammar_counts, dict) and grammar_counts:
             lines.append(f"Batch Leadpoet grammar counts: {recent_output_count_summary(grammar_counts)}")
+        if isinstance(phrase_counts, dict) and phrase_counts:
+            lines.append(f"Batch Leadpoet phrase pattern counts: {recent_output_count_summary(phrase_counts)}")
         if isinstance(layout_counts, dict) and layout_counts:
             lines.append(f"Batch layout counts: {recent_output_count_summary(layout_counts)}")
     lines.extend(
         [
             "Avoid repeating those first-line shapes, final-line moves, and Leadpoet grammar fingerprints.",
             "Treat any Leadpoet grammar fingerprint used 3+ times in this batch as saturated; choose a different product role or omit the name if the point still works.",
+            "Treat any Leadpoet phrase pattern used 3+ times in this batch as saturated; choose a different way the name enters the sentence.",
             "Treat any layout fingerprint used 3+ times in this batch as saturated; change paragraph count, line breaks, or where the product name appears.",
             "If Leadpoet appears, change its sentence role, placement, and neighboring words from the recent examples.",
         ]
@@ -988,10 +994,12 @@ def batch_recent_output_summary(texts: list[str]) -> dict[str, object]:
         if clean_recent_output_text(text)
     ]
     grammar_counts = Counter(row["leadpoet_grammar"] for row in rows if row["leadpoet_grammar"])
+    phrase_counts = Counter(row["leadpoet_phrase_pattern"] for row in rows if row["leadpoet_phrase_pattern"])
     layout_counts = Counter(row["layout"] for row in rows if row["layout"])
     return {
         "post_count": len(rows),
         "leadpoet_grammar_counts": dict(grammar_counts),
+        "leadpoet_phrase_pattern_counts": dict(phrase_counts),
         "layout_counts": dict(layout_counts),
     }
 
@@ -1080,8 +1088,9 @@ def recent_output_row(text: str, *, source: str, topic_scope: str = "same_topic"
     last = truncate_for_prompt(last_nonempty_text_line(cleaned), 110)
     leadpoet_sentence = truncate_for_prompt(first_sentence_with_word(cleaned, "Leadpoet"), 130)
     leadpoet_grammar = leadpoet_sentence_grammar_fingerprint(leadpoet_sentence)
+    leadpoet_phrase_pattern = leadpoet_phrase_pattern_fingerprint(leadpoet_sentence)
     layout = recent_output_layout(cleaned)
-    fingerprint = "|".join([first.lower(), last.lower(), leadpoet_sentence.lower(), leadpoet_grammar, layout])
+    fingerprint = "|".join([first.lower(), last.lower(), leadpoet_sentence.lower(), leadpoet_grammar, leadpoet_phrase_pattern, layout])
     return {
         "source": source,
         "topic_scope": topic_scope,
@@ -1089,6 +1098,7 @@ def recent_output_row(text: str, *, source: str, topic_scope: str = "same_topic"
         "last_line": last,
         "leadpoet_sentence": leadpoet_sentence,
         "leadpoet_grammar": leadpoet_grammar,
+        "leadpoet_phrase_pattern": leadpoet_phrase_pattern,
         "layout": layout,
         "fingerprint": fingerprint,
     }
@@ -1157,6 +1167,41 @@ def leadpoet_sentence_grammar_fingerprint(sentence: str) -> str:
     if re.match(r"leadpoet\b", lowered):
         return "leadpoet_line_start"
     return "contextual"
+
+
+def leadpoet_phrase_pattern_fingerprint(sentence: str) -> str:
+    if not re.search(r"\bleadpoet\b", sentence, flags=re.I):
+        return ""
+    lowered = " ".join(sentence.lower().replace("’", "'").split())
+    if re.search(r"\bleadpoet\s+is\s+building\b", lowered):
+        return "leadpoet_is_building"
+    if re.search(r"\bleadpoet\s+is\b", lowered):
+        return "leadpoet_is"
+    if re.search(r"\bfor\s+leadpoet\b", lowered):
+        return "for_leadpoet"
+    if re.search(r"\b(?:that|this)\s+is\s+where\s+leadpoet\b|\bthat's\s+where\s+leadpoet\b", lowered):
+        return "that_is_where_leadpoet"
+    if re.search(r"\bwhere\s+leadpoet\s+enters\b", lowered):
+        return "where_leadpoet_enters"
+    if re.search(r"\bbefore\s+leadpoet\s+earns\b", lowered):
+        return "before_leadpoet_earns"
+    if re.search(r"\binside\s+leadpoet\b", lowered):
+        return "inside_leadpoet"
+    if re.search(r"\bleadpoet\s+signal\b|\bleadpoet's\s+signal\b", lowered):
+        return "leadpoet_signal"
+    if re.search(r"\bleadpoet\s+lane\b|\bleadpoet's\s+lane\b", lowered):
+        return "leadpoet_lane"
+    if re.search(r"\b(?:put|place|keep|carry|bring|move|tuck|embed|mention|name|use)\b[^.!?]{0,80}\bleadpoet\b", lowered):
+        return "product_as_object"
+    if re.search(r"\bleadpoet\b[^.!?]{0,80}\b(?:before|after|when|where|if|because|as)\b", lowered):
+        return "clause_embedded"
+    if re.search(r"\bleadpoet\s+(?:owns?|can|gets?|makes?|starts?|keeps?|turns?|focuses|needs?|should|has\s+to|belongs|must|only\s+matters)\b", lowered):
+        return "leadpoet_subject_verb"
+    if re.search(r"\bleadpoet(?:'s)?\s+\w+", lowered):
+        return "leadpoet_modifier"
+    if re.match(r"leadpoet\b", lowered):
+        return "leadpoet_line_start"
+    return "leadpoet_contextual"
 
 
 def recent_output_layout(text: str) -> str:
@@ -1991,11 +2036,16 @@ def apply_deterministic_rule_repair(
             max_chars=max_chars,
         )
     ]
+    if any("leadpoet grammar" in violation.lower() for violation in previous_violations):
+        candidates.extend(deterministic_leadpoet_grammar_saturation_repair_candidates(text, max_chars=max_chars))
     if any("saturated batch layout" in violation.lower() for violation in previous_violations):
-        candidates.extend(deterministic_layout_saturation_repair_candidates(text, max_chars=max_chars))
+        layout_bases = [text, *candidates]
+        for base in layout_bases:
+            candidates.extend(deterministic_layout_saturation_repair_candidates(base, max_chars=max_chars))
 
     best_text = text
     best_violations = previous_violations
+    best_score = deterministic_repair_candidate_score(best_text, best_violations, recent_output_batch_summary)
     for candidate in dedupe_preserve_order([candidate for candidate in candidates if candidate and candidate != text]):
         violations = draft_rule_violations(
             candidate,
@@ -2007,10 +2057,101 @@ def apply_deterministic_rule_repair(
             recent_output_rows=recent_output_rows,
             recent_output_batch_summary=recent_output_batch_summary,
         )
-        if len(violations) < len(best_violations):
+        score = deterministic_repair_candidate_score(candidate, violations, recent_output_batch_summary)
+        if score < best_score:
             best_text = candidate
             best_violations = violations
+            best_score = score
     return best_text, best_violations
+
+
+def deterministic_repair_candidate_score(
+    text: str,
+    violations: list[str],
+    recent_output_batch_summary: dict[str, object] | None,
+) -> tuple[int, int, int, int, int]:
+    grammar = leadpoet_sentence_grammar_fingerprint(first_sentence_with_word(text, "Leadpoet"))
+    phrase_pattern = leadpoet_phrase_pattern_fingerprint(first_sentence_with_word(text, "Leadpoet"))
+    layout = recent_output_layout(clean_recent_output_text(text))
+    grammar_count = batch_summary_count(recent_output_batch_summary, "leadpoet_grammar_counts", grammar)
+    phrase_count = batch_summary_count(recent_output_batch_summary, "leadpoet_phrase_pattern_counts", phrase_pattern)
+    layout_count = batch_summary_count(recent_output_batch_summary, "layout_counts", layout)
+    return (len(violations), phrase_count, grammar_count, layout_count, len(text))
+
+
+def batch_summary_count(summary: dict[str, object] | None, key: str, value: str) -> int:
+    if not summary or not value:
+        return 0
+    counts = summary.get(key, {})
+    if not isinstance(counts, dict):
+        return 0
+    return int(counts.get(value, 0) or 0)
+
+
+def deterministic_leadpoet_grammar_saturation_repair_candidates(text: str, *, max_chars: int) -> list[str]:
+    cleaned = clean_generated_text(text, max_chars=max_chars)
+    if not cleaned:
+        return []
+    leadpoet_sentence = first_sentence_with_word(cleaned, "Leadpoet")
+    if not leadpoet_sentence:
+        return []
+    replacement_options = leadpoet_grammar_saturation_replacements(leadpoet_sentence)
+    candidates = [
+        replace_first_sentence_with_word(cleaned, "Leadpoet", replacement)
+        for replacement in replacement_options
+    ]
+    return [
+        candidate
+        for candidate in (clean_generated_text(candidate, max_chars=max_chars) for candidate in candidates)
+        if candidate and candidate != cleaned and len(candidate) <= max_chars
+    ]
+
+
+def leadpoet_grammar_saturation_replacements(sentence: str) -> list[str]:
+    lowered = " ".join(sentence.lower().replace("’", "'").split())
+    if "explain why now" in lowered:
+        return [
+            "Timing has to explain why now before the account reaches Leadpoet.",
+            "Put Leadpoet behind the account-change check: timing has to explain why now.",
+            "Inside Leadpoet, timing only matters when it explains why now.",
+            "The handoff is where Leadpoet enters: timing has to explain why now.",
+            "Timing changes before Leadpoet earns the mention.",
+            "The account reason reaches Leadpoet when timing explains why now.",
+        ]
+    if "account reason" in lowered:
+        return [
+            "The account reason should be clear before it reaches Leadpoet.",
+            "Put Leadpoet after the account reason, not before it.",
+            "Inside Leadpoet, the account reason only matters when timing is clear.",
+            "The handoff is where Leadpoet enters after the account reason is clear.",
+            "The account reason changes before Leadpoet earns the mention.",
+            "Timing reaches Leadpoet only after the account reason is clear.",
+        ]
+    if "timing" in lowered:
+        return [
+            "Timing should become useful before the account reaches Leadpoet.",
+            "Put Leadpoet where timing turns into the next account choice.",
+            "Inside Leadpoet, timing has to change the account choice.",
+            "The handoff is where Leadpoet enters after timing is clear.",
+            "Timing changes before Leadpoet earns the mention.",
+            "The account change reaches Leadpoet after timing is clear.",
+        ]
+    return [
+        "The account reason should reach Leadpoet only after the timing signal is clear.",
+        "Put Leadpoet behind the account-change check, not in the category line.",
+        "Inside Leadpoet, the timing signal has to stay concrete.",
+        "The handoff is where Leadpoet enters after timing is clear.",
+        "Timing changes before Leadpoet earns the mention.",
+        "Timing becomes useful before the account reaches Leadpoet.",
+    ]
+
+
+def replace_first_sentence_with_word(text: str, word: str, replacement: str) -> str:
+    pattern = re.compile(rf"[^.!?\n]*\b{re.escape(word)}\b[^.!?\n]*(?:[.!?]|$)", flags=re.I)
+    match = pattern.search(text)
+    if not match:
+        return text
+    return f"{text[:match.start()]}{replacement}{text[match.end():]}"
 
 
 def deterministic_layout_saturation_repair_candidates(text: str, *, max_chars: int) -> list[str]:
@@ -2360,6 +2501,7 @@ def recent_output_repetition_violations(
     last = normalize_recent_output_fragment(last_nonempty_text_line(cleaned))
     leadpoet_sentence = normalize_recent_output_fragment(first_sentence_with_word(cleaned, "Leadpoet"))
     leadpoet_grammar = leadpoet_sentence_grammar_fingerprint(first_sentence_with_word(cleaned, "Leadpoet"))
+    leadpoet_phrase_pattern = leadpoet_phrase_pattern_fingerprint(first_sentence_with_word(cleaned, "Leadpoet"))
     layout = recent_output_layout(cleaned)
     violations: list[str] = []
     for row in recent_output_rows or []:
@@ -2379,6 +2521,10 @@ def recent_output_repetition_violations(
         grammar_counts = recent_output_batch_summary.get("leadpoet_grammar_counts", {})
         if isinstance(grammar_counts, dict) and int(grammar_counts.get(leadpoet_grammar, 0) or 0) >= 3:
             violations.append(f"change saturated batch Leadpoet grammar: {leadpoet_grammar}")
+    if leadpoet_phrase_pattern and recent_output_batch_summary:
+        phrase_counts = recent_output_batch_summary.get("leadpoet_phrase_pattern_counts", {})
+        if isinstance(phrase_counts, dict) and int(phrase_counts.get(leadpoet_phrase_pattern, 0) or 0) >= 3:
+            violations.append(f"change saturated batch Leadpoet phrase pattern: {leadpoet_phrase_pattern}")
     if layout and recent_output_batch_summary:
         layout_counts = recent_output_batch_summary.get("layout_counts", {})
         if isinstance(layout_counts, dict) and int(layout_counts.get(layout, 0) or 0) >= 3:
