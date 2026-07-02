@@ -4355,7 +4355,46 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(payload["primary_layout_target_counts"])
             self.assertIn("primary_structure_option", payload["rows"][0])
             self.assertIn("primary_product_mention_syntax_target", payload["rows"][0])
+            self.assertEqual(payload["prompt_seed_violations"], [])
             self.assertTrue(any("were not covered" in warning for warning in payload["warnings"]))
+            store.close()
+
+    def test_audit_naturalness_x_plan_only_warns_on_formulaic_prompt_seed_text(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            store.save_context_section(
+                ContextSection(
+                    kind="positioning",
+                    name="Risky positioning note",
+                    content="Leadpoet is building the intent layer for buyer timing.",
+                )
+            )
+            store.save_trend_item(
+                TrendItem(
+                    title="HubSpot Adds Buyer Intent Signals",
+                    source_type="web",
+                    topic="sales AI",
+                    summary="A trend about CRM intent.",
+                    why_it_matters="It shows timing matters.",
+                    leadpoet_angle="Buyer timing needs proprietary account context.",
+                    date=utc_now(),
+                )
+            )
+
+            payload = build_naturalness_plan_audit(
+                store,
+                count=1,
+                trend_limit=0,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+            )
+
+            self.assertTrue(payload["prompt_seed_violations"])
+            self.assertEqual(payload["prompt_seed_violations"][0]["section"], "facts_context")
+            self.assertEqual(payload["prompt_seed_violations"][0]["label"], "leadpoet is building")
+            self.assertTrue(any("Prompt seed scan found" in warning for warning in payload["warnings"]))
             store.close()
 
     def test_generic_trend_angles_are_made_specific_for_generation_and_audit(self):

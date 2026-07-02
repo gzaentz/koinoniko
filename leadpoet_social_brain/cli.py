@@ -128,6 +128,23 @@ LEADPOET_AUDIT_BAD_PATTERNS = [
     ("the layer worth building", r"(?m)(?:^|\n\n)\s*the\s+layer\s+worth\s+building\b"),
 ]
 
+PROMPT_SEED_BAD_PATTERNS = [
+    *LEADPOET_AUDIT_BAD_PATTERNS,
+    ("leadpoet modifier-is-built", r"\bleadpoet(?:'s|’s)?\s+\w+\s+is\s+built\b"),
+    ("generic lead-generation hook", r"\blead generation is becoming a timing problem, not just a volume problem\b"),
+    ("generic sales-ai hook", r"\bthe sales ai debate is really a context debate\b"),
+    ("generic ai hook", r"\bthe ai trend that matters is the one that changes buyer behavior\b"),
+    ("generic saved-positioning angle", r"\buse this to talk about .+ through the lens of .+ saved positioning\b"),
+]
+
+PROMPT_SEED_SECTION_SPECS = [
+    ("voice_examples", "Study these selected Voice Examples first:", ["\n\nFacts & Context:"]),
+    ("facts_context", "Facts & Context:", ["\n\nVoice profile:"]),
+    ("voice_profile", "Voice profile:", ["\n\nNatural Voice Calibration:"]),
+    ("recent_outputs", "Recent Output Anti-Sameness:", ["\n\nActive Writing Rules:"]),
+    ("market_context", "Timely market context:", ["\n\n\nUseful performance guidance:", "\n\nRequest:"]),
+]
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
@@ -923,6 +940,13 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
     print("Request angle counts:")
     for key, value in sorted(payload["request_angle_counts"].items()):
         print(f"- {key}: {value}")
+    if payload.get("prompt_seed_violations"):
+        print("Prompt seed scan:")
+        for violation in payload["prompt_seed_violations"][:10]:
+            print(
+                f"- post {violation['index']} {violation['section']} {violation['label']}: "
+                f"{violation['excerpt']}"
+            )
     if payload.get("mode") != "plan_only":
         print("Leadpoet mention pattern counts:")
         for key, value in sorted(payload["leadpoet_mention_pattern_counts"].items()):
@@ -986,6 +1010,8 @@ def build_naturalness_plan_audit(
         length_mode=length_mode,
     )
     rows: list[dict[str, object]] = []
+    prompt_seed_violations: list[dict[str, object]] = []
+    prompt_builder = SocialBrainGenerator(store)
     for index, trend, request, assignment in audit_plan:
         rows.append(
             {
@@ -997,6 +1023,16 @@ def build_naturalness_plan_audit(
                 **assignment,
             }
         )
+        prompt = prompt_builder.build_prompt(request)
+        for violation in prompt_seed_violations_for_prompt(prompt):
+            prompt_seed_violations.append(
+                {
+                    "index": index + 1,
+                    "trend_id": trend.id,
+                    "trend_title": trend.title,
+                    **violation,
+                }
+            )
     covered_trend_ids = {str(row["trend_id"]) for row in rows if row["trend_id"]}
     uncovered_trend_count = max(0, len(trends) - len(covered_trend_ids))
     primary_structure_counts = Counter(str(row["primary_structure_option"]) for row in rows)
@@ -1051,6 +1087,12 @@ def build_naturalness_plan_audit(
     append_plan_concentration_warning(warnings, "Human rhythm guidance", primary_human_rhythm_target_counts, len(rows))
     if len(covered_trend_ids) > 1:
         append_plan_concentration_warning(warnings, "Request angle guidance", request_angle_counts, len(rows))
+    if prompt_seed_violations:
+        first = prompt_seed_violations[0]
+        warnings.append(
+            "Prompt seed scan found formulaic or generic source text before provider generation: "
+            f"{len(prompt_seed_violations)} issue(s), first={first['label']} in {first['section']}."
+        )
     if uncovered_trend_count:
         warnings.append(
             f"{uncovered_trend_count} loaded trend(s) were not covered; raise --count or lower --trend-limit for full coverage."
@@ -1074,9 +1116,58 @@ def build_naturalness_plan_audit(
         "primary_layout_target_counts": dict(primary_layout_target_counts),
         "primary_closing_target_counts": dict(primary_closing_target_counts),
         "primary_human_rhythm_target_counts": dict(primary_human_rhythm_target_counts),
+        "prompt_seed_violations": prompt_seed_violations,
         "warnings": warnings,
         "rows": rows,
     }
+
+
+def prompt_seed_violations_for_prompt(prompt: str) -> list[dict[str, str]]:
+    violations: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for section, text in prompt_seed_sections(prompt):
+        for label, pattern in PROMPT_SEED_BAD_PATTERNS:
+            for match in re.finditer(pattern, text, flags=re.I):
+                excerpt = prompt_seed_excerpt(text, match.start(), match.end())
+                key = (section, label, excerpt.lower())
+                if key in seen:
+                    continue
+                seen.add(key)
+                violations.append(
+                    {
+                        "section": section,
+                        "label": label,
+                        "excerpt": excerpt,
+                    }
+                )
+    return violations
+
+
+def prompt_seed_sections(prompt: str) -> list[tuple[str, str]]:
+    sections: list[tuple[str, str]] = []
+    for name, start_marker, end_markers in PROMPT_SEED_SECTION_SPECS:
+        start = prompt.find(start_marker)
+        if start < 0:
+            continue
+        start += len(start_marker)
+        ends = [prompt.find(marker, start) for marker in end_markers]
+        ends = [end for end in ends if end >= 0]
+        end = min(ends) if ends else len(prompt)
+        section = prompt[start:end].strip()
+        if section:
+            sections.append((name, section))
+    return sections
+
+
+def prompt_seed_excerpt(text: str, start: int, end: int, *, window: int = 80) -> str:
+    prefix_start = max(0, start - window)
+    suffix_end = min(len(text), end + window)
+    excerpt = " ".join(text[prefix_start:suffix_end].split())
+    if prefix_start > 0:
+        excerpt = f"...{excerpt}"
+    if suffix_end < len(text):
+        excerpt = f"{excerpt}..."
+    return excerpt[:220]
 
 
 def append_plan_concentration_warning(
