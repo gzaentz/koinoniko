@@ -1772,6 +1772,43 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(all(skill.get("sha256") for skill in saved_draft.context_snapshot["skills"]))
             store.close()
 
+    def test_generator_includes_recent_output_anti_sameness_context(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            store.save_content_queue_item(
+                ContentQueueItem(
+                    text=(
+                        "Static records answer who exists.\n\n"
+                        "The useful Leadpoet question is why this account now."
+                    ),
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-07-03T10:00:00+00:00",
+                )
+            )
+            provider = FakeProvider()
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="context beats generic automation",
+                ),
+                variants=1,
+            )[0]
+
+            for prompt in provider.prompts[:3]:
+                self.assertIn("Recent Output Anti-Sameness:", prompt)
+                self.assertIn("The useful Leadpoet question is why this account now.", prompt)
+                self.assertIn("Avoid repeating those first-line shapes", prompt)
+            rows = draft.context_snapshot["recent_output_anti_sameness"]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["source"], "queue:needs_review")
+            self.assertEqual(rows[0]["leadpoet_sentence"], "The useful Leadpoet question is why this account now.")
+            store.close()
+
     def test_generation_retries_when_writer_options_are_unusable(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -3711,7 +3748,7 @@ class SocialBrainTest(unittest.TestCase):
                     )
 
             self.assertEqual(exit_code, 1)
-            self.assertIn("Leadpoet mention phrasing is too concentrated", output.getvalue())
+            self.assertIn("Leadpoet mention syntax is not varied enough", output.getvalue())
 
     def test_audit_naturalness_x_warns_when_not_all_loaded_trends_are_covered(self):
         class CoverageProvider:

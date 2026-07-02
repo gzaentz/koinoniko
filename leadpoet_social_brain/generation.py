@@ -379,6 +379,7 @@ class SocialBrainGenerator:
     ) -> list[GeneratedDraft]:
         assert self.provider is not None
         adapter = self._adapter_for(request.platform)
+        recent_output_context = build_recent_output_context(self.store, request)
         strategy_prompt = build_strategy_prompt(
             request,
             bundle,
@@ -386,6 +387,7 @@ class SocialBrainGenerator:
             patterns=patterns,
             avoid_phrases=avoid_phrases,
             active_rules=active_rules,
+            recent_outputs_section=recent_output_context["section"],
         )
         strategy_raw = generate_with_provider(
             self.provider,
@@ -404,6 +406,7 @@ class SocialBrainGenerator:
             active_rules=active_rules,
             strategy_summary=strategy_summary,
             max_chars=max_chars,
+            recent_outputs_section=recent_output_context["section"],
         )
         draft_options = generate_with_provider(
             self.provider,
@@ -447,6 +450,7 @@ class SocialBrainGenerator:
             avoid_phrases=avoid_phrases,
             active_rules=active_rules,
             max_chars=max_chars,
+            recent_outputs_section=recent_output_context["section"],
         )
         evaluation_raw = generate_with_provider(
             self.provider,
@@ -472,6 +476,7 @@ class SocialBrainGenerator:
             active_rules=active_rules,
             max_chars=max_chars,
             model=model_routing.natural_writer,
+            recent_outputs_section=recent_output_context["section"],
         )
         repaired_successfully = text != final_text and not rule_warnings
         if rule_warnings:
@@ -524,6 +529,7 @@ class SocialBrainGenerator:
                 },
                 strategy_summary=strategy_summary,
                 evaluation=evaluation,
+                recent_output_context=recent_output_context,
             ),
         )
         if save:
@@ -544,6 +550,7 @@ class SocialBrainGenerator:
         skills = generation_skills(platform=request.platform, post_type=request.post_type)
         active_rules = active_writing_rules_for_prompt(self.store, skills)
         skills = skills_with_review_rules(skills, active_rules["review_rules"])
+        recent_output_context = build_recent_output_context(self.store, request)
         return build_generation_prompt(
             request,
             bundle,
@@ -553,6 +560,7 @@ class SocialBrainGenerator:
             avoid_phrases=avoid_phrases,
             active_rules=active_rules,
             max_chars=max_chars,
+            recent_outputs_section=recent_output_context["section"],
         )
 
     def _adapter_for(self, platform: str):
@@ -916,6 +924,120 @@ def variation_seed_source(request: DraftRequest, trends: list[TrendItem]) -> str
     )
 
 
+def build_recent_output_context(store: SQLiteStore, request: DraftRequest, *, limit: int = 6) -> dict[str, object]:
+    rows = recent_output_rows(store, request, limit=limit)
+    if not rows:
+        return {"section": "", "rows": []}
+    lines = [
+        "Recent Output Anti-Sameness:",
+        "These recent or queued posts are not examples to copy. Use them to avoid repeated openings, closings, layouts, and Leadpoet grammar.",
+    ]
+    for row in rows:
+        details = [
+            f"source={row['source']}",
+            f"layout={row['layout']}",
+        ]
+        if row["first_line"]:
+            details.append(f"first={row['first_line']}")
+        if row["last_line"] and row["last_line"] != row["first_line"]:
+            details.append(f"last={row['last_line']}")
+        if row["leadpoet_sentence"]:
+            details.append(f"leadpoet={row['leadpoet_sentence']}")
+        lines.append(f"- {'; '.join(details)}")
+    lines.extend(
+        [
+            "Avoid repeating those first-line shapes, final-line moves, and Leadpoet sentence grammar.",
+            "If Leadpoet appears, change its sentence role, placement, and neighboring words from the recent examples.",
+        ]
+    )
+    return {"section": "\n".join(lines), "rows": rows}
+
+
+def recent_output_rows(store: SQLiteStore, request: DraftRequest, *, limit: int) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in store.list_content_queue(platform=request.platform, limit=50):
+        if request.topic and item.topic and item.topic != request.topic:
+            continue
+        row = recent_output_row(item.text, source=f"queue:{item.status}")
+        if row["fingerprint"] in seen:
+            continue
+        rows.append(row)
+        seen.add(row["fingerprint"])
+        if len(rows) >= limit:
+            return rows
+    for post in store.list_posts(platform=request.platform, topic=request.topic or None, limit=limit * 2):
+        row = recent_output_row(post.text, source="published")
+        if row["fingerprint"] in seen:
+            continue
+        rows.append(row)
+        seen.add(row["fingerprint"])
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def recent_output_row(text: str, *, source: str) -> dict[str, str]:
+    cleaned = clean_recent_output_text(text)
+    first = truncate_for_prompt(first_sentence_or_line(cleaned), 110)
+    last = truncate_for_prompt(last_nonempty_text_line(cleaned), 110)
+    leadpoet_sentence = truncate_for_prompt(first_sentence_with_word(cleaned, "Leadpoet"), 130)
+    layout = recent_output_layout(cleaned)
+    fingerprint = "|".join([source, first.lower(), last.lower(), leadpoet_sentence.lower(), layout])
+    return {
+        "source": source,
+        "first_line": first,
+        "last_line": last,
+        "leadpoet_sentence": leadpoet_sentence,
+        "layout": layout,
+        "fingerprint": fingerprint,
+    }
+
+
+def clean_recent_output_text(text: str) -> str:
+    return "\n".join(line.strip() for line in str(text or "").strip().splitlines() if line.strip())
+
+
+def last_nonempty_text_line(text: str) -> str:
+    for line in reversed(text.splitlines()):
+        cleaned = line.strip()
+        if cleaned:
+            return cleaned
+    return ""
+
+
+def first_sentence_with_word(text: str, word: str) -> str:
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", text.strip()):
+        if re.search(rf"\b{re.escape(word)}\b", sentence, flags=re.I):
+            return " ".join(sentence.split())
+    return ""
+
+
+def recent_output_layout(text: str) -> str:
+    paragraphs = [paragraph for paragraph in re.split(r"\n\s*\n+", text.strip()) if paragraph.strip()]
+    lines = [line for line in text.splitlines() if line.strip()]
+    leadpoet_position = "none"
+    for index, paragraph in enumerate(paragraphs):
+        if re.search(r"\bleadpoet\b", paragraph, flags=re.I):
+            if len(paragraphs) == 1:
+                leadpoet_position = "single"
+            elif index == 0:
+                leadpoet_position = "first"
+            elif index == len(paragraphs) - 1:
+                leadpoet_position = "last"
+            else:
+                leadpoet_position = "middle"
+            break
+    return f"p{min(len(paragraphs), 4)}|l{min(len(lines), 4)}|leadpoet_{leadpoet_position}"
+
+
+def truncate_for_prompt(text: str, limit: int) -> str:
+    cleaned = " ".join(str(text or "").split())
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: max(0, limit - 3)].rstrip() + "..."
+
+
 def build_generation_prompt(
     request: DraftRequest,
     bundle: ContextBundle,
@@ -926,6 +1048,7 @@ def build_generation_prompt(
     max_chars: int,
     avoid_phrases: list[str] | None = None,
     active_rules: dict[str, list[str]] | None = None,
+    recent_outputs_section: str = "",
 ) -> str:
     skill_text = "\n\n".join(
         f"## {skill.path}\n{skill.content}"
@@ -976,6 +1099,8 @@ Voice profile:
 
 {product_mention_section}
 
+{recent_outputs_section}
+
 {active_rules_section}
 {trend_section}
 {pattern_section}
@@ -1011,6 +1136,7 @@ def build_strategy_prompt(
     patterns: list[ViralPattern],
     avoid_phrases: list[str] | None = None,
     active_rules: dict[str, list[str]] | None = None,
+    recent_outputs_section: str = "",
 ) -> str:
     context = "\n".join(f"- {section.kind}/{section.name}: {section.content}" for section in bundle.positioning_sections)
     examples_text = "\n\n".join(_format_example(post, bundle) for post in bundle.examples)
@@ -1065,6 +1191,8 @@ Facts & Context:
 
 {product_mention_section}
 
+{recent_outputs_section}
+
 Voice Examples and worked-reason notes:
 {examples_text or "No examples selected."}
 
@@ -1104,6 +1232,7 @@ def build_best_writer_prompt(
     max_chars: int,
     avoid_phrases: list[str] | None = None,
     active_rules: dict[str, list[str]] | None = None,
+    recent_outputs_section: str = "",
 ) -> str:
     skill_text = "\n\n".join(f"## {skill.path}\n{skill.content}" for skill in skills)
     examples_text = "\n\n".join(_format_example(post, bundle) for post in bundle.examples)
@@ -1158,6 +1287,8 @@ Facts & Context:
 
 {option_variation_section}
 
+{recent_outputs_section}
+
 Trend context:
 {trends_text or "No timely trends selected."}
 
@@ -1200,6 +1331,7 @@ def build_evaluation_prompt(
     max_chars: int,
     avoid_phrases: list[str] | None = None,
     active_rules: dict[str, list[str]] | None = None,
+    recent_outputs_section: str = "",
 ) -> str:
     skill_text = "\n\n".join(f"## {skill.path}\n{skill.content}" for skill in skills)
     options = "\n\n".join(f"Draft {index}:\n{text}" for index, text in enumerate(draft_options, start=1))
@@ -1241,6 +1373,8 @@ Voice and review rules:
 {structure_section}
 
 {product_mention_section}
+
+{recent_outputs_section}
 
 {avoid_section}
 
@@ -1291,6 +1425,7 @@ def build_context_snapshot(
     models_used: dict[str, str | None],
     strategy_summary: dict[str, object] | None = None,
     evaluation: dict[str, object] | None = None,
+    recent_output_context: dict[str, object] | None = None,
 ) -> dict[str, object]:
     examples = []
     for post in bundle.examples:
@@ -1338,6 +1473,11 @@ def build_context_snapshot(
         "strategy_summary": strategy_summary,
         "evaluation": evaluation,
         "quality_notes": quality_notes,
+        "recent_output_anti_sameness": (
+            recent_output_context.get("rows", [])
+            if isinstance(recent_output_context, dict)
+            else []
+        ),
         "primary_structure_option": {
             "name": primary_structure[0],
             "guidance": primary_structure[1],
@@ -1580,6 +1720,7 @@ def repair_draft_against_rules(
     active_rules: dict[str, list[str]],
     max_chars: int,
     model: str | None,
+    recent_outputs_section: str = "",
 ) -> tuple[str, list[str]]:
     violations = draft_rule_violations(
         text,
@@ -1601,6 +1742,7 @@ def repair_draft_against_rules(
             trends=trends,
             active_rules=active_rules,
             max_chars=max_chars,
+            recent_outputs_section=recent_outputs_section,
         )
         repair_options = generate_with_provider(provider, repair_prompt, variants=1, model=model)
         if not repair_options:
@@ -2297,6 +2439,7 @@ def build_rule_repair_prompt(
     trends: list[TrendItem],
     active_rules: dict[str, list[str]] | None = None,
     max_chars: int,
+    recent_outputs_section: str = "",
 ) -> str:
     context = "\n".join(f"- {section.kind}/{section.name}: {section.content}" for section in bundle.positioning_sections)
     length_section = length_prompt_section(request, max_chars)
@@ -2328,6 +2471,8 @@ Facts & Context:
 {structure_section}
 
 {product_mention_section}
+
+{recent_outputs_section}
 
 Rules:
 - Keep the same core point.
