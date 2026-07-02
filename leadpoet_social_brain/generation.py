@@ -1702,6 +1702,7 @@ def deterministic_leadpoet_definition_repair(
 ) -> str:
     repaired = text
     product_lane = primary_product_mention_lane(request, trends)[0]
+    product_syntax = primary_product_mention_syntax_target(request, trends)[0]
     for pattern in [
         r"\bLeadpoet\s+is\s+building[^.!?\n]*(?:[.!?]|$)",
         r"\bLeadpoet\s+is\s+built[^.!?\n]*(?:[.!?]|$)",
@@ -1729,7 +1730,7 @@ def deterministic_leadpoet_definition_repair(
     )
     repaired = re.sub(
         r"(?m)(^|(?<=[.!?])\s+|\n\n)(\s*)Leadpoet\s+(owns?|makes?|starts?|keeps?|turns?|focuses)\s+([^.!?\n]*(?:[.!?]|$))",
-        lambda match: leadpoet_subject_verb_replacement(match, product_lane=product_lane),
+        lambda match: leadpoet_subject_verb_replacement(match, product_lane=product_lane, product_syntax=product_syntax),
         repaired,
         flags=re.I,
     )
@@ -1846,7 +1847,7 @@ def leadpoet_modal_leadin_replacement(match: re.Match[str], *, product_lane: str
     return f"{prefix}{indent}{replacement}"
 
 
-def leadpoet_subject_verb_replacement(match: re.Match[str], *, product_lane: str) -> str:
+def leadpoet_subject_verb_replacement(match: re.Match[str], *, product_lane: str, product_syntax: str) -> str:
     prefix = match.group(1) or ""
     indent = match.group(2) or ""
     verb = (match.group(3) or "").lower()
@@ -1857,8 +1858,23 @@ def leadpoet_subject_verb_replacement(match: re.Match[str], *, product_lane: str
         body = body[:-1].strip()
     body = body or "buyer timing visible"
     lowered_body = body.lower()
+    action = leadpoet_subject_verb_action(body)
     if product_lane == "no-name wedge":
-        replacement = f"The useful wedge is buyer timing: {body[0].lower() + body[1:]}{ending}"
+        replacement = f"The useful wedge is buyer timing: {action}."
+    elif product_syntax == "product as object":
+        replacement = f"Put Leadpoet behind the account-change check: {action}."
+    elif product_syntax == "prepositional tuck-in":
+        replacement = f"That account reason gets specific inside Leadpoet: {action}."
+    elif product_syntax == "possessive modifier":
+        replacement = f"The useful Leadpoet constraint stays concrete: {action}."
+    elif product_syntax == "name omitted":
+        replacement = f"The useful signal has to {action}."
+    elif product_syntax == "handoff point":
+        replacement = f"At the handoff into Leadpoet, the account reason has to {action}."
+    elif product_syntax == "question-adjacent":
+        replacement = f"Inside Leadpoet, ask it plainly: can this {action}?"
+    elif product_syntax == "earned late noun":
+        replacement = f"First {action}. Then Leadpoet earns the mention."
     elif verb.startswith("own"):
         if "timing" in lowered_body or "account" in lowered_body:
             replacement = "The account-timing question gets specific inside Leadpoet."
@@ -1892,6 +1908,17 @@ def leadpoet_subject_verb_replacement(match: re.Match[str], *, product_lane: str
     if ending != "." and replacement.endswith("."):
         replacement = f"{replacement[:-1]}{ending}"
     return f"{prefix}{indent}{replacement}"
+
+
+def leadpoet_subject_verb_action(body: str) -> str:
+    phrase = body[0].lower() + body[1:] if body else "buyer timing visible"
+    if re.match(r"(?:the|a|an|this|that)\b", phrase, flags=re.I):
+        return f"keep {phrase} concrete"
+    if phrase.startswith("with "):
+        return f"start {phrase}"
+    if phrase.startswith(("make ", "keep ", "turn ", "start ", "focus ")):
+        return phrase
+    return f"make {phrase}"
 
 
 def leadpoet_where_leadin_replacement(match: re.Match[str], *, product_lane: str) -> str:

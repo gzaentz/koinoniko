@@ -2464,7 +2464,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(
                 draft.text,
                 "Static records answer who exists.\n\n"
-                "The account-timing question gets specific inside Leadpoet.",
+                "Inside Leadpoet, ask it plainly: can this keep the account-timing question concrete?",
             )
             self.assertNotIn("Leadpoet owns", draft.text)
             self.assertFalse(any(leadpoet_bad_phrase_counts(draft.text).values()), draft.text)
@@ -2692,6 +2692,46 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("Put Leadpoet inside that account-change check", combined)
         self.assertIn("before Leadpoet earns the line", combined)
         self.assertIn("Inside Leadpoet, that belief beats another volume claim", combined)
+
+    def test_deterministic_leadpoet_subject_verb_repairs_vary_by_syntax_target(self):
+        outputs_by_syntax = {}
+        for index in range(180):
+            trend = TrendItem(
+                id=f"syntax_repair_trend_{index}",
+                title=f"Syntax repair trend {index}",
+                source_type="web",
+                topic="sales AI",
+                summary="Context layer",
+                why_it_matters="It proves context matters.",
+                leadpoet_angle="Buyer timing beats generic data.",
+                date=utc_now(),
+            )
+            request = DraftRequest(
+                platform="x",
+                topic="sales AI",
+                post_type="founder_insight",
+                angle="buyer timing beats generic data",
+                trend_ids=[trend.id],
+            )
+            syntax = primary_product_mention_syntax_target(request, [trend])[0]
+            lane = primary_product_mention_lane(request, [trend])[0]
+            if lane == "no-name wedge":
+                continue
+            outputs_by_syntax.setdefault(
+                syntax,
+                deterministic_leadpoet_definition_repair(
+                    "Leadpoet makes timing useful when an account has a reason to listen.",
+                    request=request,
+                    trends=[trend],
+                    max_chars=280,
+                ),
+            )
+
+        self.assertGreaterEqual(len(outputs_by_syntax), 5)
+        self.assertGreaterEqual(len(set(outputs_by_syntax.values())), 5)
+        combined = "\n".join(outputs_by_syntax.values()).lower()
+        self.assertNotRegex(combined, r"\bleadpoet\s+(?:owns?|makes?|starts?|keeps?|turns?|focuses)\b")
+        self.assertTrue(all(not any(leadpoet_bad_phrase_counts(text).values()) for text in outputs_by_syntax.values()))
 
     def test_missing_anchor_fallback_varies_leadpoet_line_by_trend(self):
         class NoAnchorProvider:
