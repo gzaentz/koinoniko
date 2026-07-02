@@ -2508,16 +2508,16 @@ def leadpoet_definition_replacement(match: re.Match[str], *, product_lane: str) 
     original = " ".join(match.group(0).strip().split())
     lowered = original.lower()
     lane_replacements = {
-        "mechanism-first": "The hard part is turning context into the next account worth working. In Leadpoet, that timing reason has to be visible before copy.",
-        "consequence-first": "A rep should know why this account, this week. When they open Leadpoet, that answer should already be clear.",
-        "quiet embedded name": "In Leadpoet, the account reason should already name what changed, why now, and why copy comes after that.",
+        "mechanism-first": "Context only matters when it chooses the next account. The account-change check should become usable in Leadpoet before copy starts.",
+        "consequence-first": "A rep should know why this account, this week. When a rep opens Leadpoet, that answer should already be clear.",
+        "quiet embedded name": "The account reason can carry Leadpoet quietly: changed account, reason now, next action.",
         "no-name wedge": "Buyer timing should answer why this account deserves action now.",
         "mechanism carries it": "The mechanism can carry the point: timing decides which account deserves action now.",
         "operator scene": "When a rep opens Leadpoet, they should see what changed at the account before a sequence asks for copy.",
-        "boundary line": "Verified data can say who exists; in Leadpoet, the sharper boundary is who is worth action now.",
-        "signal language": "The signal has to explain why now, not only who fits. In Leadpoet, that reason needs to be visible before copy.",
+        "boundary line": "Verified data can say who exists; before Leadpoet, the sharper question is who is worth action now.",
+        "signal language": "The signal has to explain why now, not only who fits. Use Leadpoet as the place that reason turns into action.",
         "ownership without definition": "Before louder outbound, the account-timing question has to be clear enough in Leadpoet.",
-        "implicit product belief": "Timing should choose the account before copy writes the email. In Leadpoet, that belief stays practical.",
+        "implicit product belief": "Timing should choose the account before copy writes the email; that belief stays practical in Leadpoet.",
         "context-only wedge": "Account context has to name what changed, why now, and what action follows.",
     }
     if product_lane in lane_replacements:

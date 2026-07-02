@@ -3696,9 +3696,10 @@ class SocialBrainTest(unittest.TestCase):
         combined = "\n".join(outputs_by_lane.values())
         for banned in ["Leadpoet is", "Leadpoet is building", "For Leadpoet", "Leadpoet should"]:
             self.assertNotIn(banned.lower(), combined.lower())
-        self.assertIn("In Leadpoet, that timing reason has to be visible before copy", combined)
-        self.assertIn("When they open Leadpoet, that answer should already be clear", combined)
-        self.assertIn("In Leadpoet, that belief stays practical", combined)
+        self.assertNotIn("In Leadpoet,", combined)
+        self.assertIn("The account-change check should become usable in Leadpoet before copy starts.", combined)
+        self.assertIn("When a rep opens Leadpoet, that answer should already be clear.", combined)
+        self.assertIn("that belief stays practical in Leadpoet", combined)
         self.assertNotRegex(combined, r"\bbring\s+Leadpoet\s+in\b")
         self.assertNotRegex(combined, r"\b(?:reaches?|reach)\s+Leadpoet\b")
         self.assertNotRegex(combined, r"\bby the time\b[^.!?\n]*\bLeadpoet\b")
