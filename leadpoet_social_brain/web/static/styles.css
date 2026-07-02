@@ -444,11 +444,21 @@ main {
 }
 
 .message {
-  margin: var(--page-block-pad) var(--page-inline-pad) 0;
+  position: fixed;
+  top: var(--page-block-pad);
+  right: var(--page-inline-pad);
+  left: calc(var(--sidebar-width) + var(--page-inline-pad));
+  z-index: 90;
+  margin: 0;
   padding: 11px 13px;
   border: 1px solid var(--line);
   background: var(--soft);
   border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
+}
+
+.sidebar-collapsed .message {
+  left: calc(var(--sidebar-rail-width) + var(--page-inline-pad));
 }
 
 .message.error {
@@ -868,6 +878,10 @@ main {
   min-height: 32px;
   padding: 6px 10px;
   font-size: 13px;
+}
+
+.pattern-save-button {
+  min-width: 72px;
 }
 
 .trend-row strong,
@@ -2759,7 +2773,9 @@ main {
   }
 
   .message {
-    margin: 18px 20px 0;
+    top: 18px;
+    right: 20px;
+    left: 20px;
   }
 
   .compact-meta-row {

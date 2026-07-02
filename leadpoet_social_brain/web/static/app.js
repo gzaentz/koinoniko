@@ -1106,6 +1106,48 @@ function renderDashboardPatterns() {
     : `<p class="muted">No ${escapeHtml(state.selectedPatternWindow)} patterns yet. Add patterns manually or refresh Pattern Scout.</p>`;
 }
 
+function renderDashboardPatternsPreservingScroll() {
+  const list = $("patternList");
+  const scrollTop = list?.scrollTop || 0;
+  renderDashboardPatterns();
+  if (list) list.scrollTop = scrollTop;
+}
+
+function updateDashboardPattern(pattern) {
+  if (!pattern?.id || !state.dashboard) return;
+  const groups = state.dashboard.pattern_groups || {};
+  ["weekly", "monthly"].forEach((windowName) => {
+    groups[windowName] = replacePatternInList(groups[windowName] || [], pattern);
+  });
+
+  const savedPatterns = state.dashboard.saved_patterns || [];
+  const savedIndex = savedPatterns.findIndex((item) => item.id === pattern.id);
+  if (pattern.status === "saved") {
+    if (savedIndex >= 0) {
+      savedPatterns[savedIndex] = { ...savedPatterns[savedIndex], ...pattern };
+    } else {
+      savedPatterns.unshift(pattern);
+    }
+  } else if (savedIndex >= 0) {
+    savedPatterns.splice(savedIndex, 1);
+  }
+  state.dashboard.saved_patterns = savedPatterns;
+
+  if (state.patternDetail?.id === pattern.id) {
+    state.patternDetail = { ...state.patternDetail, ...pattern };
+  }
+  if (state.selectedPatternForCreate?.id === pattern.id) {
+    state.selectedPatternForCreate = { ...state.selectedPatternForCreate, ...pattern };
+    renderCreatePostPatternHint();
+  }
+}
+
+function replacePatternInList(patterns, updatedPattern) {
+  return patterns.map((pattern) => (
+    pattern.id === updatedPattern.id ? { ...pattern, ...updatedPattern } : pattern
+  ));
+}
+
 function patternCard(pattern) {
   const summary = patternCardSummary(pattern);
   return `
@@ -1134,9 +1176,9 @@ function patternCardSummary(pattern) {
 
 function patternSaveButton(pattern) {
   if (pattern.status === "saved") {
-    return `<button class="secondary" type="button" onclick='unsavePattern(event, ${jsArg(pattern.id)})'>Unsave</button>`;
+    return `<button class="secondary pattern-save-button" type="button" onclick='unsavePattern(event, ${jsArg(pattern.id)})'>Unsave</button>`;
   }
-  return `<button class="secondary" type="button" onclick='savePattern(event, ${jsArg(pattern.id)})'>Save</button>`;
+  return `<button class="secondary pattern-save-button" type="button" onclick='savePattern(event, ${jsArg(pattern.id)})'>Save</button>`;
 }
 
 window.openTrendDetailsFromKey = (event, id) => {
@@ -1415,17 +1457,20 @@ window.unsavePattern = (event, id) => updatePatternStatus(event, id, "unsave");
 function updatePatternStatus(event, id, action) {
   event.preventDefault();
   event.stopPropagation();
-  runButton(event.currentTarget, "Saving...", async () => {
-    await api(`/api/patterns/${encodeURIComponent(id)}/${action}`, { method: "POST", body: "{}" });
-    if (!["save", "unsave"].includes(action)) {
+  const isSaveToggle = ["save", "unsave"].includes(action);
+  runButton(event.currentTarget, isSaveToggle ? event.currentTarget?.textContent || "Saving..." : "Saving...", async () => {
+    const payload = await api(`/api/patterns/${encodeURIComponent(id)}/${action}`, { method: "POST", body: "{}" });
+    if (isSaveToggle && payload.pattern) {
+      updateDashboardPattern(payload.pattern);
+      renderDashboardPatternsPreservingScroll();
+      if (state.patternDetail?.id === id) {
+        renderPatternModal();
+      }
+    } else {
       closeModal("patternModal");
+      await refresh();
     }
     showMessage(patternStatusMessage(action));
-    await refresh();
-    if (["save", "unsave"].includes(action) && state.patternDetail?.id === id) {
-      state.patternDetail = findPatternItem(id) || state.patternDetail;
-      renderPatternModal();
-    }
   });
 }
 
