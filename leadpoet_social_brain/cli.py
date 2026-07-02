@@ -873,7 +873,11 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
     print("Leadpoet paragraph position counts:")
     for key, value in sorted(payload["leadpoet_paragraph_position_counts"].items()):
         print(f"- {key}: {value}")
+    print("Leadpoet sentence position counts:")
+    for key, value in sorted(payload["leadpoet_sentence_position_counts"].items()):
+        print(f"- {key}: {value}")
     print(f"Leadpoet final-line mentions: {payload['leadpoet_final_line_mentions']}")
+    print(f"Leadpoet sentence-start mentions: {payload['leadpoet_sentence_start_mentions']}")
     print("Generated layout fingerprint counts:")
     for key, value in sorted(payload["layout_fingerprint_counts"].items()):
         print(f"- {key}: {value}")
@@ -994,6 +998,8 @@ def build_naturalness_audit(
                 "leadpoet_mention_pattern": leadpoet_mention_pattern(draft.text),
                 "leadpoet_paragraph_position": leadpoet_text_position(draft.text),
                 "leadpoet_in_final_line": bool(re.search(r"\bleadpoet\b", last_nonempty_line(draft.text), flags=re.I)),
+                "leadpoet_sentence_position": leadpoet_sentence_position(draft.text),
+                "leadpoet_starts_sentence": leadpoet_starts_sentence(draft.text),
                 "layout_fingerprint": post_layout_fingerprint(draft.text),
                 "first_line": first_nonempty_line(draft.text),
                 "last_line": last_nonempty_line(draft.text),
@@ -1084,6 +1090,26 @@ def build_naturalness_audit(
         warnings.append(
             f"Leadpoet appears in the final line too often: {leadpoet_final_line_mentions}/{leadpoet_mentioned_count} mention(s)."
         )
+    leadpoet_sentence_position_counts = Counter(
+        str(row["leadpoet_sentence_position"])
+        for row in rows
+        if row["leadpoet_sentence_position"] and row["leadpoet_sentence_position"] != "none"
+    )
+    leadpoet_sentence_mentions = sum(leadpoet_sentence_position_counts.values())
+    if leadpoet_sentence_position_counts and len(leadpoet_sentence_position_counts) < min(3, leadpoet_sentence_mentions):
+        warnings.append("Leadpoet sentence placement is not varied enough.")
+    elif leadpoet_sentence_position_counts and leadpoet_sentence_position_counts.most_common(1)[0][1] > max(
+        3, leadpoet_sentence_mentions // 2
+    ):
+        sentence_position, sentence_position_count = leadpoet_sentence_position_counts.most_common(1)[0]
+        warnings.append(
+            f"Leadpoet sentence placement is too concentrated: {sentence_position} appears {sentence_position_count}/{leadpoet_sentence_mentions} times."
+        )
+    leadpoet_sentence_start_mentions = sum(1 for row in rows if row["leadpoet_starts_sentence"])
+    if leadpoet_sentence_mentions and leadpoet_sentence_start_mentions > max(3, leadpoet_sentence_mentions // 2):
+        warnings.append(
+            f"Leadpoet starts the product sentence too often: {leadpoet_sentence_start_mentions}/{leadpoet_sentence_mentions} mention(s)."
+        )
     layout_counts = Counter(str(row["layout_fingerprint"]) for row in rows if row["layout_fingerprint"])
     if len(layout_counts) < min(4, len(rows)):
         warnings.append("Generated post layouts are not varied enough.")
@@ -1115,7 +1141,9 @@ def build_naturalness_audit(
         "first_product_mention_lane_counts": dict(first_product_lane_counts or primary_product_lane_counts),
         "leadpoet_mention_pattern_counts": dict(mention_pattern_counts),
         "leadpoet_paragraph_position_counts": dict(leadpoet_position_counts),
+        "leadpoet_sentence_position_counts": dict(leadpoet_sentence_position_counts),
         "leadpoet_final_line_mentions": leadpoet_final_line_mentions,
+        "leadpoet_sentence_start_mentions": leadpoet_sentence_start_mentions,
         "layout_fingerprint_counts": dict(layout_counts),
         "repeated_phrase_counts": repeated_phrase_counts,
         "warnings": warnings,
@@ -1135,6 +1163,36 @@ def post_layout_fingerprint(text: str) -> str:
 def leadpoet_text_position(text: str) -> str:
     paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\s*\n+", text.strip()) if paragraph.strip()]
     return leadpoet_paragraph_position(paragraphs)
+
+
+def leadpoet_sentence_position(text: str) -> str:
+    sentences = text_sentences(text)
+    leadpoet_indexes = [
+        index for index, sentence in enumerate(sentences)
+        if re.search(r"\bleadpoet\b", sentence, flags=re.I)
+    ]
+    if not leadpoet_indexes:
+        return "none"
+    if len(sentences) == 1:
+        return "single_sentence"
+    first_index = leadpoet_indexes[0]
+    if first_index == 0:
+        return "first_sentence"
+    if first_index == len(sentences) - 1:
+        return "last_sentence"
+    return "middle_sentence"
+
+
+def leadpoet_starts_sentence(text: str) -> bool:
+    for sentence in text_sentences(text):
+        cleaned = re.sub(r"^(?:[-*•]\s+|\d+[.)]\s+)", "", sentence.strip())
+        if re.match(r"leadpoet\b", cleaned, flags=re.I):
+            return True
+    return False
+
+
+def text_sentences(text: str) -> list[str]:
+    return [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", text.strip()) if part.strip()]
 
 
 def bucket_count(count: int, prefix: str) -> str:

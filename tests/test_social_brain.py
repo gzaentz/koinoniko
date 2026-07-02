@@ -27,6 +27,8 @@ from leadpoet_social_brain.cli import (
     build_naturalness_audit,
     build_parser as build_cli_parser,
     leadpoet_mention_pattern,
+    leadpoet_sentence_position,
+    leadpoet_starts_sentence,
     main as cli_main,
 )
 from leadpoet_social_brain.context import ContextManager
@@ -2588,12 +2590,12 @@ class SocialBrainTest(unittest.TestCase):
                 if "Repair this X post" in prompt:
                     self.repair_count += 1
                     repairs = [
-                        "Static records answer who exists. Leadpoet can explain why this account is worth action now.",
+                        "Static records answer who exists. The Leadpoet signal can explain why this account is worth action now.",
                         "Buyer timing is where the Leadpoet signal starts.\n\nThe email is downstream.",
                         "A rep does not need another prettier list.\n\nThe account-change moment is Leadpoet's lane.\n\nThat is when copy becomes useful.",
                         "- Signal\n- Context\n- A reason now\n\nThe account should be worth action before the sequence starts.",
-                        "Leadpoet owns the account-timing question before sequence volume.\n\nThe contact record is only the start.",
-                        "What changes when context is real?\n\nCopy comes later.\n\nLeadpoet has to make the answer pick the account.",
+                        "Before sequence volume, Leadpoet owns the account-timing question.\n\nThe contact record is only the start.",
+                        "What changes when context is real?\n\nCopy comes later.\n\nThe answer is what Leadpoet has to make choose the account.",
                         "The CRM record can be perfect.\n\nTiming changes the account choice before Leadpoet earns the mention.\n\nStill too late is still too late.",
                     ]
                     return [repairs[(self.repair_count - 1) % len(repairs)]]
@@ -2715,12 +2717,12 @@ class SocialBrainTest(unittest.TestCase):
                 if "Repair this X post" in prompt:
                     self.repair_count += 1
                     repairs = [
-                        "Static records answer who exists. Leadpoet can explain why this account is worth action now.",
+                        "Static records answer who exists. The Leadpoet signal can explain why this account is worth action now.",
                         "Buyer timing is where the Leadpoet signal starts.\n\nThe email is downstream.",
                         "A rep does not need another prettier list.\n\nThe account-change moment is Leadpoet's lane.\n\nThat is when copy becomes useful.",
                         "- Signal\n- Context\n- A reason now\n\nThe account should be worth action before the sequence starts.",
-                        "Leadpoet owns the account-timing question before sequence volume.\n\nThe contact record is only the start.",
-                        "What changes when context is real?\n\nCopy comes later.\n\nLeadpoet has to make the answer pick the account.",
+                        "Before sequence volume, Leadpoet owns the account-timing question.\n\nThe contact record is only the start.",
+                        "What changes when context is real?\n\nCopy comes later.\n\nThe answer is what Leadpoet has to make choose the account.",
                         "The CRM record can be perfect.\n\nTiming changes the account choice before Leadpoet earns the mention.\n\nStill too late is still too late.",
                     ]
                     return [repairs[(self.repair_count - 1) % len(repairs)]]
@@ -2794,7 +2796,9 @@ class SocialBrainTest(unittest.TestCase):
             self.assertGreaterEqual(len(payload["first_product_mention_lane_counts"]), 5)
             self.assertGreaterEqual(len(payload["leadpoet_mention_pattern_counts"]), 5)
             self.assertGreaterEqual(len(payload["leadpoet_paragraph_position_counts"]), 3)
+            self.assertGreaterEqual(len(payload["leadpoet_sentence_position_counts"]), 3)
             self.assertLess(payload["leadpoet_final_line_mentions"], 10)
+            self.assertLess(payload["leadpoet_sentence_start_mentions"], 10)
             self.assertGreaterEqual(len(payload["layout_fingerprint_counts"]), 4)
             self.assertLess(max(payload["leadpoet_mention_pattern_counts"].values()), 10)
             self.assertNotIn("leadpoet_is_building", payload["leadpoet_shapes"])
@@ -2995,6 +2999,66 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(any("Leadpoet appears in the final line too often" in warning for warning in payload["warnings"]))
             store.close()
 
+    def test_audit_naturalness_x_warns_when_leadpoet_starts_product_sentence(self):
+        class SentenceStartProvider:
+            def __init__(self):
+                self.final_count = 0
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "Static records answer who exists. Leadpoet should make timing visible.",
+                        "The CRM can be correct. Leadpoet should make timing visible.",
+                        "More names do not fix judgment. Leadpoet should make timing visible.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    first_lines = [
+                        "Static records answer who exists.",
+                        "The CRM can be correct.",
+                        "More names do not fix judgment.",
+                        "Context only matters when it changes action.",
+                        "A sales agent needs timing before copy.",
+                    ]
+                    index = self.final_count % len(first_lines)
+                    self.final_count += 1
+                    return [evaluation_json(f"{first_lines[index]} Leadpoet should make buyer timing visible.")]
+                return ["Static records answer who exists. Leadpoet should make buyer timing visible."]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            for index in range(5):
+                store.save_trend_item(
+                    TrendItem(
+                        title=f"Trend {index}",
+                        source_type="web",
+                        topic="sales AI",
+                        summary="A trend about GTM context.",
+                        why_it_matters="It shows timing matters.",
+                        leadpoet_angle="Buyer timing needs proprietary account context.",
+                        date=utc_now(),
+                    )
+                )
+
+            payload = build_naturalness_audit(
+                store,
+                SocialBrainGenerator(store, provider=SentenceStartProvider()),
+                count=5,
+                trend_limit=5,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+                save_drafts=False,
+            )
+
+            self.assertEqual(payload["leadpoet_sentence_start_mentions"], 5)
+            self.assertTrue(
+                any("Leadpoet starts the product sentence too often" in warning for warning in payload["warnings"])
+            )
+            store.close()
+
     def test_leadpoet_mention_pattern_classifies_common_dynamic_verbs(self):
         cases = {
             "Leadpoet should explain why now.": "leadpoet_should",
@@ -3007,6 +3071,20 @@ class SocialBrainTest(unittest.TestCase):
         for text, expected in cases.items():
             with self.subTest(text=text):
                 self.assertEqual(leadpoet_mention_pattern(text), expected)
+
+    def test_leadpoet_sentence_position_tracks_actual_sentence_slot(self):
+        cases = {
+            "Leadpoet owns the timing question. Copy comes later.": ("first_sentence", True),
+            "Buyer timing comes first. The useful Leadpoet question is why now.": ("last_sentence", False),
+            "Buyer timing comes first. Leadpoet owns that part. Copy comes later.": ("middle_sentence", True),
+            "Buyer timing is where the Leadpoet signal starts.": ("single_sentence", False),
+            "Buyer timing comes first.": ("none", False),
+        }
+
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(leadpoet_sentence_position(text), expected[0])
+                self.assertEqual(leadpoet_starts_sentence(text), expected[1])
 
     def test_audit_naturalness_x_warns_on_repeated_generated_layout(self):
         class RepeatedLayoutProvider:
