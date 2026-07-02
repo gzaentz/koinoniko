@@ -4641,6 +4641,22 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(type_counts["product_update"], 0)
             self.assertIn("product update examples", coverage["recommendation"])
 
+    def test_default_positioning_rules_do_not_seed_leadpoet_is_definition(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+
+            rules = load_positioning_rules(store)
+            prompt = SocialBrainGenerator(store).build_prompt(
+                DraftRequest(platform="x", topic="sales LLMs", post_type="founder_insight")
+            )
+
+            self.assertTrue(any("Leadpoet owns the intent wedge" in rule for rule in rules))
+            self.assertNotIn("Leadpoet is the core intent layer", "\n".join(rules))
+            self.assertIn("Leadpoet owns the intent wedge", prompt)
+            self.assertNotIn("Leadpoet is the core intent layer", prompt)
+            store.close()
+
     def test_voice_rules_endpoint_groups_positioning_voice_filters_and_guardrails(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"
