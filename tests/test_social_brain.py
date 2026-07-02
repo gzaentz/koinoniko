@@ -4373,6 +4373,49 @@ class SocialBrainTest(unittest.TestCase):
             self.assertFalse(any("Request angle" in warning for warning in payload["warnings"]))
             store.close()
 
+    def test_formulaic_trend_angles_are_made_specific_before_prompting(self):
+        formulaic_angle = "Leadpoet should explain why timing beats generated email volume."
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            trend = store.save_trend_item(
+                TrendItem(
+                    id="formulaic-angle-trend",
+                    title="Salesforce Adds Prospecting Agent",
+                    source_type="web",
+                    topic="sales AI",
+                    summary="A trend about AI prospecting.",
+                    why_it_matters="It shows timing moving into sales workflows.",
+                    leadpoet_angle=formulaic_angle,
+                    date=utc_now(),
+                )
+            )
+
+            prompt = SocialBrainGenerator(store).build_prompt(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    use_trends=True,
+                    trend_ids=[trend.id],
+                )
+            )
+            payload = build_naturalness_plan_audit(
+                store,
+                count=1,
+                trend_limit=0,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+                cover_all_trends=True,
+            )
+
+            self.assertNotEqual(trend_angle_for_generation(trend), formulaic_angle)
+            self.assertIn("Use Salesforce Adds Prospecting Agent as market proof", prompt)
+            self.assertNotIn(formulaic_angle, prompt)
+            self.assertNotIn("Leadpoet should", payload["rows"][0]["request_angle"])
+            store.close()
+
     def test_audit_naturalness_x_cover_all_trends_expands_plan_count(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)

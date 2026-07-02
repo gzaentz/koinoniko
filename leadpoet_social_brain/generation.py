@@ -3509,9 +3509,13 @@ GENERIC_TREND_ANGLE_TEXTS = {
 
 def trend_angle_for_generation(trend: TrendItem) -> str:
     angle = " ".join(str(trend.leadpoet_angle or "").split())
-    if angle and angle.lower() not in GENERIC_TREND_ANGLE_TEXTS:
+    if angle and angle.lower() not in GENERIC_TREND_ANGLE_TEXTS and not trend_angle_is_formulaic(angle):
         return angle
     return trend_specific_generation_angle(trend)
+
+
+def trend_angle_is_formulaic(angle: str) -> bool:
+    return any(re.search(pattern, angle, flags=re.I) for pattern, _label in LEADPOET_DEFINITION_PATTERNS)
 
 
 def trend_specific_generation_angle(trend: TrendItem) -> str:
