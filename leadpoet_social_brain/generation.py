@@ -2451,16 +2451,16 @@ def leadpoet_definition_replacement(match: re.Match[str], *, product_lane: str) 
     original = " ".join(match.group(0).strip().split())
     lowered = original.lower()
     lane_replacements = {
-        "mechanism-first": "The hard part is turning context into the next account worth working. That account-change check is where Leadpoet enters, not a category line.",
-        "consequence-first": "A rep should know why this account, this week. That answer has to change the next action before Leadpoet earns the line.",
-        "quiet embedded name": "The account reason should carry Leadpoet quietly: what changed, why now, and why copy comes after that.",
+        "mechanism-first": "The hard part is turning context into the next account worth working. Bring Leadpoet in after the timing reason is clear.",
+        "consequence-first": "A rep should know why this account, this week. That answer should reach Leadpoet before any copy gets written.",
+        "quiet embedded name": "The account reason should already be concrete by the time it reaches Leadpoet: what changed, why now, and why copy comes after that.",
         "no-name wedge": "Buyer timing should answer why this account deserves action now.",
         "mechanism carries it": "The mechanism can carry the point: timing decides which account deserves action now.",
         "operator scene": "A rep should see what changed at the account before a sequence asks for copy.",
         "boundary line": "Verified data can say who exists; the sharper signal says who is worth action now.",
-        "signal language": "The signal has to explain why now, not only who fits. That account change is where the Leadpoet mention belongs.",
-        "ownership without definition": "Before louder outbound, the account-timing question should stay close to Leadpoet.",
-        "implicit product belief": "Timing should choose the account before copy writes the email. That belief reaches Leadpoet before another volume claim.",
+        "signal language": "The signal has to explain why now, not only who fits. Only then does the post need Leadpoet.",
+        "ownership without definition": "Before louder outbound, bring Leadpoet in only after the account-timing question is clear.",
+        "implicit product belief": "Timing should choose the account before copy writes the email. That belief can reach Leadpoet without another volume claim.",
         "context-only wedge": "Account context has to name what changed, why now, and what action follows.",
     }
     if product_lane in lane_replacements:
@@ -2487,35 +2487,35 @@ def leadpoet_formulaic_intro_replacement(match: re.Match[str], *, product_lane: 
     lowered_body = body.lower()
     if lowered_body.startswith("the harder question is "):
         tail = body[len("the harder question is "):]
-        return f"{prefix}{indent}The harder question is {tail}{ending} Keep the Leadpoet mention close to account timing, not in a definition line."
+        return f"{prefix}{indent}The harder question is {tail}{ending} By the time Leadpoet appears, the account-timing point should already be concrete."
     if lowered_body.startswith("account context has to "):
         tail = body[len("account context has to "):]
-        return f"{prefix}{indent}Account context has to {tail}{ending} That is the part to make useful inside Leadpoet."
+        return f"{prefix}{indent}Account context has to {tail}{ending} That is the practical work before it reaches Leadpoet."
     if lowered_body.startswith("timing means "):
         tail = body[len("timing means "):]
-        return f"{prefix}{indent}Timing is useful when it means {tail}{ending} That is the bar inside Leadpoet."
+        return f"{prefix}{indent}Timing is useful when it means {tail}{ending} That is the bar before the post brings in Leadpoet."
     if lowered_body.startswith("buyer timing is "):
         tail = body[len("buyer timing is "):]
-        return f"{prefix}{indent}Buyer timing stays tied to {tail}{ending} Keep the Leadpoet sentence specific there."
+        return f"{prefix}{indent}Buyer timing stays tied to {tail}{ending} Bring Leadpoet in only after that account reason is clear."
     if body:
         body = body[0].lower() + body[1:]
     body = f"{body}{ending}" if body else ""
     lane_templates = {
-        "mechanism-first": "Start with the mechanism: {body} The Leadpoet line only helps if that becomes usable.",
-        "consequence-first": "That only matters if the Leadpoet line makes it actionable: {body}",
-        "quiet embedded name": "Keep the Leadpoet mention inside the claim: {body}",
+        "mechanism-first": "The mechanism comes first: {body} The account reason can reach Leadpoet after that.",
+        "consequence-first": "That only matters if the account reason reaches Leadpoet as action: {body}",
+        "quiet embedded name": "Fold Leadpoet into the account reason itself: {body}",
         "mechanism carries it": "Let the mechanism carry the claim: {body}",
         "operator scene": "A rep should feel the account signal before copy starts: {body}",
         "boundary line": "That is the sharper side of the boundary for Leadpoet: {body}",
-        "signal language": "The signal has to make this plain before the Leadpoet mention is earned: {body}",
-        "ownership without definition": "The account-timing question can carry the name without a definition line: {body}",
-        "implicit product belief": "Inside Leadpoet, keep the belief concrete: {body}",
+        "signal language": "The signal has to make this plain before the post brings in Leadpoet: {body}",
+        "ownership without definition": "The account-timing question can reach Leadpoet without turning into a definition: {body}",
+        "implicit product belief": "The practical belief is simple by the time it reaches Leadpoet: {body}",
         "context-only wedge": "Keep the wedge in the account context itself: {body}",
     }
     if product_lane_omits_name(product_lane):
         template = "Buyer timing should stay concrete: {body}"
     else:
-        template = lane_templates.get(product_lane, "Keep the Leadpoet mention inside the claim: {body}")
+        template = lane_templates.get(product_lane, "Fold Leadpoet into the account reason itself: {body}")
     replacement = template.format(body=body or "buyer timing changes the account choice.")
     return f"{prefix}{indent}{replacement}"
 
@@ -2530,16 +2530,16 @@ def leadpoet_modal_leadin_replacement(match: re.Match[str], *, product_lane: str
         body = body[:-1].strip()
     body = body[0].lower() + body[1:] if body else "make buyer timing visible"
     templates = {
-        "mechanism-first": "The mechanism has to {body}. The Leadpoet line only helps if that becomes usable.",
-        "consequence-first": "That only matters when Leadpoet turns it into action: {body}.",
-        "quiet embedded name": "Keep the Leadpoet mention next to the mechanism that can {body}.",
+        "mechanism-first": "The mechanism has to {body}. The account reason can reach Leadpoet after that.",
+        "consequence-first": "That only matters when the account reason reaches Leadpoet as action: {body}.",
+        "quiet embedded name": "The mechanism has to {body} before it reaches Leadpoet.",
         "no-name wedge": "The signal has to {body}.",
         "mechanism carries it": "The mechanism has to {body}.",
-        "operator scene": "A rep should feel the account signal when that becomes usable in Leadpoet: {body}.",
-        "boundary line": "Verified data is not enough; the Leadpoet side of the line is whether it can {body}.",
-        "signal language": "The signal should make it clear when Leadpoet can {body}.",
-        "ownership without definition": "The account-timing question gets concrete inside Leadpoet when it can {body}.",
-        "implicit product belief": "Inside Leadpoet, keep the belief concrete: {body}.",
+        "operator scene": "A rep should feel the account signal before the work reaches Leadpoet: {body}.",
+        "boundary line": "Verified data is not enough; the sharper side is whether the signal can {body} before it reaches Leadpoet.",
+        "signal language": "The signal should make it clear before it reaches Leadpoet: can it {body}?",
+        "ownership without definition": "The account-timing question gets concrete when the signal can {body} before the sequence starts.",
+        "implicit product belief": "The product belief stays concrete when the signal can {body}.",
         "context-only wedge": "The account context has to {body}.",
     }
     replacement = templates.get(product_lane, templates["quiet embedded name"]).format(body=body)
@@ -2563,49 +2563,49 @@ def leadpoet_subject_verb_replacement(match: re.Match[str], *, product_lane: str
     if product_lane_omits_name(product_lane):
         replacement = f"Buyer timing should stay concrete: {action}."
     elif product_syntax == "product as object":
-        replacement = f"Put Leadpoet behind the account-change check: {action}."
+        replacement = f"The account-change check should come before Leadpoet: {action}."
     elif product_syntax == "prepositional tuck-in":
-        replacement = f"That account reason gets specific inside Leadpoet: {action}."
+        replacement = f"That account reason should reach Leadpoet already specific: {action}."
     elif product_syntax == "possessive modifier":
-        replacement = f"The Leadpoet constraint stays concrete: {action}."
+        replacement = f"By the time the signal reaches Leadpoet, it should stay concrete: {action}."
     elif product_syntax == "name omitted":
         replacement = f"The signal has to {action}."
     elif product_syntax == "handoff point":
         replacement = f"At the handoff into Leadpoet, the account reason has to {action}."
     elif product_syntax == "question-adjacent":
-        replacement = f"Inside Leadpoet, ask it plainly: can this {action}?"
+        replacement = f"When the signal reaches Leadpoet, ask it plainly: can this {action}?"
     elif product_syntax == "earned late noun":
-        replacement = f"First {action}. Then Leadpoet earns the mention."
+        replacement = f"First {action}. Then the sentence can bring in Leadpoet."
     elif verb.startswith("own"):
         if "timing" in lowered_body or "account" in lowered_body:
-            replacement = "The account-timing question gets specific inside Leadpoet."
+            replacement = "The account-timing question should be specific by the time it reaches Leadpoet."
         else:
-            replacement = f"Keep that part concrete inside Leadpoet: {body[0].lower() + body[1:]}{ending}"
+            replacement = f"That part should stay concrete by the time it reaches Leadpoet: {body[0].lower() + body[1:]}{ending}"
     elif verb.startswith("make"):
-        replacement = f"Inside Leadpoet, the useful test is whether it can make {body[0].lower() + body[1:]}{ending}"
+        replacement = f"By the time it reaches Leadpoet, the useful test is whether it can make {body[0].lower() + body[1:]}{ending}"
     elif verb.startswith("start"):
         tail = body[5:].strip() if lowered_body.startswith("with ") else body
         tail = tail or "buyer timing"
-        replacement = f"Inside Leadpoet, the starting point is {tail[0].lower() + tail[1:]}{ending}"
+        replacement = f"Before it reaches Leadpoet, the starting point is {tail[0].lower() + tail[1:]}{ending}"
     elif verb.startswith("keep"):
-        replacement = f"Inside Leadpoet, keep {body[0].lower() + body[1:]}{ending}"
+        replacement = f"Keep {body[0].lower() + body[1:]} by the time it reaches Leadpoet{ending}"
     elif verb.startswith("turn"):
         if " into " in lowered_body:
             left, right = re.split(r"\s+into\s+", body, maxsplit=1, flags=re.I)
-            replacement = f"Inside Leadpoet, {left[0].lower() + left[1:]} becomes {right}{ending}"
+            replacement = f"By the time it reaches Leadpoet, {left[0].lower() + left[1:]} becomes {right}{ending}"
         else:
-            replacement = f"Inside Leadpoet, that turn has to make {body[0].lower() + body[1:]}{ending}"
+            replacement = f"By the time it reaches Leadpoet, that turn has to make {body[0].lower() + body[1:]}{ending}"
     elif verb.startswith("focus"):
         if lowered_body.startswith("on "):
             tail = body[3:].strip()
-            replacement = f"{tail[0].upper() + tail[1:] if tail else 'Buyer timing'} is the part to keep specific inside Leadpoet."
+            replacement = f"{tail[0].upper() + tail[1:] if tail else 'Buyer timing'} should be specific before it reaches Leadpoet."
         elif lowered_body.startswith("near "):
             tail = body[5:].strip()
-            replacement = f"Keep the Leadpoet mention near {tail}{ending}"
+            replacement = f"Bring Leadpoet in near {tail}{ending}"
         else:
-            replacement = f"Inside Leadpoet, keep the focus on {body[0].lower() + body[1:]}{ending}"
+            replacement = f"Before it reaches Leadpoet, keep the focus on {body[0].lower() + body[1:]}{ending}"
     else:
-        replacement = f"Inside Leadpoet, keep the mechanism concrete: {body[0].lower() + body[1:]}{ending}"
+        replacement = f"By the time it reaches Leadpoet, keep the mechanism concrete: {body[0].lower() + body[1:]}{ending}"
     if ending != "." and replacement.endswith("."):
         replacement = f"{replacement[:-1]}{ending}"
     return f"{prefix}{indent}{replacement}"
@@ -2661,23 +2661,23 @@ def leadpoet_where_leadin_replacement(match: re.Match[str], *, product_lane: str
     lowered = body.lower()
     if lowered.startswith("focuses:"):
         detail = body.split(":", 1)[1].strip()
-        replacement = f"{detail[0].upper() + detail[1:] if detail else 'Timing before copy'} is the part Leadpoet keeps visible."
+        replacement = f"{detail[0].upper() + detail[1:] if detail else 'Timing before copy'} should stay visible by the time it reaches Leadpoet."
     elif lowered.startswith("focuses on "):
         detail = body[len("focuses on "):].strip()
-        replacement = f"{detail[0].upper() + detail[1:] if detail else 'Buyer timing'} is the part Leadpoet keeps visible."
+        replacement = f"{detail[0].upper() + detail[1:] if detail else 'Buyer timing'} should stay visible by the time it reaches Leadpoet."
     elif lowered.startswith(("should ", "can ", "needs ", "need ", "has to ")):
-        replacement = f"Make the Leadpoet constraint concrete: {body}."
+        replacement = f"Make the account-timing constraint concrete before it reaches Leadpoet: {body}."
     else:
         templates = {
-            "mechanism-first": "The mechanism should carry Leadpoet into the sentence: {body}.",
-            "consequence-first": "The consequence should carry Leadpoet into the sentence: {body}.",
-            "quiet embedded name": "Keep the Leadpoet mention concrete: {body}.",
+            "mechanism-first": "The mechanism should be clear before it reaches Leadpoet: {body}.",
+            "consequence-first": "The consequence should be clear by the time it reaches Leadpoet: {body}.",
+            "quiet embedded name": "The account reason should be concrete before Leadpoet enters: {body}.",
             "no-name wedge": "Buyer timing stays concrete: {body}.",
-            "operator scene": "A rep should feel where Leadpoet enters the work: {body}.",
-            "boundary line": "The sharper boundary is where Leadpoet enters: {body}.",
-            "signal language": "The account signal gets specific around Leadpoet here: {body}.",
-            "ownership without definition": "The account-timing question keeps Leadpoet grounded here: {body}.",
-            "implicit product belief": "Inside Leadpoet, the product belief stays concrete: {body}.",
+            "operator scene": "A rep should feel the account signal before the work reaches Leadpoet: {body}.",
+            "boundary line": "The sharper boundary comes before Leadpoet enters: {body}.",
+            "signal language": "The account signal should be specific before Leadpoet appears: {body}.",
+            "ownership without definition": "The account-timing question should stay grounded before it reaches Leadpoet: {body}.",
+            "implicit product belief": "The product belief should be concrete before it reaches Leadpoet: {body}.",
         }
         replacement = templates.get(product_lane, templates["quiet embedded name"]).format(
             body=body[0].lower() + body[1:] if body else "buyer timing changes the account choice"
@@ -3040,27 +3040,27 @@ def workspace_anchor_line(
 
 def leadpoet_anchor_line(product_lane: str, product_syntax: str | None = None) -> str:
     syntax_lines = {
-        "product as object": "Put Leadpoet behind the account-change check, after the why-now signal is clear.",
-        "prepositional tuck-in": "The account reason gets specific inside Leadpoet before generated copy starts.",
-        "possessive modifier": "The Leadpoet constraint stays concrete: why this account deserves action now.",
+        "product as object": "The account-change check should be clear before it reaches Leadpoet.",
+        "prepositional tuck-in": "The account reason should already be specific by the time it reaches Leadpoet.",
+        "possessive modifier": "The constraint stays concrete before it reaches Leadpoet: why this account deserves action now.",
         "name omitted": "Buyer timing should answer why this account deserves action now.",
         "handoff point": "At the handoff into Leadpoet, the signal has to explain why this account is worth action.",
-        "question-adjacent": "Inside Leadpoet, ask the practical question: why this account, this week?",
-        "earned late noun": "The account reason has to stand on its own first. Then Leadpoet earns the mention.",
+        "question-adjacent": "At the handoff to Leadpoet, ask it plainly: why this account, this week?",
+        "earned late noun": "The account reason has to stand on its own first. Only then does the sentence need Leadpoet.",
     }
     if product_syntax in syntax_lines:
         return syntax_lines[product_syntax]
     lines = {
-        "mechanism-first": "Buyer timing has to become visible before a sequence starts; that account-change check is where the Leadpoet mention earns its place.",
-        "consequence-first": "The account choice gets better when the why-now reason is visible inside Leadpoet.",
-        "quiet embedded name": "Put Leadpoet inside the account reason before the copy starts.",
+        "mechanism-first": "Buyer timing has to become visible before a sequence starts; the account-change check should be clear before it reaches Leadpoet.",
+        "consequence-first": "The account choice gets better when the why-now reason reaches Leadpoet before copy.",
+        "quiet embedded name": "The account reason should already be concrete by the time it reaches Leadpoet.",
         "no-name wedge": "The account reason can carry the post; the last line does not need Leadpoet as a tagline.",
         "mechanism carries it": "The timing mechanism can carry the post without turning the last line into a product mention.",
-        "operator scene": "A rep should see the changed account before the generated email. Put Leadpoet at that handoff.",
-        "boundary line": "Verified data can say who exists; the Leadpoet side of the boundary asks who is worth action now.",
+        "operator scene": "A rep should see the changed account before the generated email; the handoff to Leadpoet comes after that.",
+        "boundary line": "Verified data can say who exists; the sharper side, before Leadpoet, asks who is worth action now.",
         "signal language": "The account signal ties timing, context, and the next account before Leadpoet enters the copy.",
-        "ownership without definition": "Before outbound gets louder, the account-timing question is the work to get right inside Leadpoet.",
-        "implicit product belief": "Inside Leadpoet, the belief stays practical: timing should pick the account before copy writes the email.",
+        "ownership without definition": "Before outbound gets louder, get the account-timing question right before it reaches Leadpoet.",
+        "implicit product belief": "By the time it reaches Leadpoet, the belief stays practical: timing should pick the account before copy writes the email.",
         "context-only wedge": "Account context can carry the post when it names what changed, why now, and what action follows.",
     }
     return lines.get(product_lane, lines["signal language"])

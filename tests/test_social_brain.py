@@ -1640,6 +1640,95 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn("a useful leadpoet", combined)
         self.assertNotIn("the useful leadpoet", combined)
 
+    def test_deterministic_leadpoet_repairs_avoid_meta_instruction_language(self):
+        banned_meta_patterns = [
+            r"\binside\s+leadpoet\b",
+            r"\bleadpoet\s+(?:mention|line|sentence|constraint|side|part|lane)\b",
+            r"\bkeep\s+the\s+leadpoet\b",
+        ]
+        bad_inputs = [
+            "Leadpoet is building the intent layer for sales AI.",
+            "For Leadpoet, the harder question is who is worth action now.",
+            "For Leadpoet, account context has to explain what changed.",
+            "For Leadpoet, timing means action before copy.",
+            "For Leadpoet, buyer timing is tied to the account reason.",
+            "Leadpoet should explain why now.",
+            "Leadpoet can make buyer timing visible.",
+            "Leadpoet owns the account-timing question.",
+            "Leadpoet turns account reason into action.",
+            "This is where Leadpoet focuses: timing before copy.",
+        ]
+        trends = [
+            TrendItem(
+                id=f"repair-meta-trend-{index}",
+                title=f"Repair Meta Trend {index}",
+                source_type="web",
+                topic="sales AI",
+                summary="A trend about GTM context.",
+                why_it_matters="It shows timing matters.",
+                leadpoet_angle="Buyer timing needs proprietary account context.",
+                date=utc_now(),
+            )
+            for index in range(1, 16)
+        ]
+
+        for index, trend in enumerate(trends):
+            request = DraftRequest(
+                platform="x",
+                topic="sales AI",
+                post_type="founder_insight",
+                angle="buyer timing beats generic data",
+                trend_ids=[trend.id],
+            )
+            source = bad_inputs[index % len(bad_inputs)]
+            repaired = deterministic_leadpoet_definition_repair(
+                source,
+                request=request,
+                trends=[trend],
+                max_chars=1000,
+            ).lower()
+
+            with self.subTest(index=index, repaired=repaired):
+                self.assertNotEqual(source.lower(), repaired)
+                self.assertFalse(any(leadpoet_bad_phrase_counts(repaired).values()), repaired)
+                for pattern in banned_meta_patterns:
+                    self.assertNotRegex(repaired, pattern)
+
+    def test_leadpoet_anchor_lines_avoid_meta_instruction_language(self):
+        lines = [
+            leadpoet_anchor_line("mechanism-first", product_syntax=syntax)
+            for syntax in [
+                "product as object",
+                "prepositional tuck-in",
+                "possessive modifier",
+                "name omitted",
+                "handoff point",
+                "question-adjacent",
+                "earned late noun",
+            ]
+        ]
+        lines.extend(
+            leadpoet_anchor_line(lane)
+            for lane in [
+                "mechanism-first",
+                "consequence-first",
+                "quiet embedded name",
+                "no-name wedge",
+                "mechanism carries it",
+                "operator scene",
+                "boundary line",
+                "signal language",
+                "ownership without definition",
+                "implicit product belief",
+                "context-only wedge",
+            ]
+        )
+        combined = "\n".join(lines).lower()
+
+        self.assertNotRegex(combined, r"\binside\s+leadpoet\b")
+        self.assertNotRegex(combined, r"\bleadpoet\s+(?:mention|line|constraint|side|part|lane)\b")
+        self.assertNotRegex(combined, r"\bkeep\s+the\s+leadpoet\b")
+
     def test_ingest_x_post_stores_metrics_and_notes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -3020,7 +3109,7 @@ class SocialBrainTest(unittest.TestCase):
                 draft.text,
                 "Verified data tells an agent who exists.\n\n"
                 "The harder question is why this account is worth action now. "
-                "Keep the Leadpoet mention close to account timing, not in a definition line.",
+                "By the time Leadpoet appears, the account-timing point should already be concrete.",
             )
             self.assertNotIn("Leadpoet is building", draft.text)
             self.assertNotIn("For Leadpoet", draft.text)
@@ -3064,7 +3153,7 @@ class SocialBrainTest(unittest.TestCase):
                 draft.text,
                 "Verified data tells an agent who exists.\n\n"
                 "The harder question is why this account is worth action now. "
-                "Keep the Leadpoet mention close to account timing, not in a definition line.",
+                "By the time Leadpoet appears, the account-timing point should already be concrete.",
             )
             self.assertNotIn("For Leadpoet", draft.text)
             self.assertIn("avoid formulaic 'For Leadpoet...' product lead-in", provider.prompts[-1])
@@ -3235,7 +3324,7 @@ class SocialBrainTest(unittest.TestCase):
 
             self.assertEqual(
                 draft.text,
-                "More names do not fix judgment.\n\nTiming before copy is the part Leadpoet keeps visible.",
+                "More names do not fix judgment.\n\nTiming before copy should stay visible by the time it reaches Leadpoet.",
             )
             self.assertNotIn("That is where Leadpoet", draft.text)
             self.assertIn("avoid formulaic 'that is where Leadpoet...' product lead-in", provider.prompts[-1])
@@ -3424,9 +3513,9 @@ class SocialBrainTest(unittest.TestCase):
         combined = "\n".join(outputs_by_lane.values())
         for banned in ["Leadpoet is", "Leadpoet is building", "For Leadpoet", "Leadpoet should"]:
             self.assertNotIn(banned.lower(), combined.lower())
-        self.assertIn("That account-change check is where Leadpoet enters", combined)
-        self.assertIn("before Leadpoet earns the line", combined)
-        self.assertIn("That belief reaches Leadpoet before another volume claim", combined)
+        self.assertIn("Bring Leadpoet in after the timing reason is clear", combined)
+        self.assertIn("That answer should reach Leadpoet before any copy gets written", combined)
+        self.assertIn("That belief can reach Leadpoet without another volume claim", combined)
         mention_patterns = [
             leadpoet_mention_pattern(text)
             for text in outputs_by_lane.values()
