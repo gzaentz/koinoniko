@@ -2188,7 +2188,7 @@ def draft_rule_violations(
     if (
         anchor
         and should_require_anchor(request, trends)
-        and not product_lane_allows_omitting_anchor(request, trends)
+        and not product_lane_allows_omitting_anchor(request, trends, anchor=anchor)
         and anchor.lower() not in lowered
     ):
         violations.append(f"anchor the point to {anchor} as the source of the core wedge")
@@ -2372,7 +2372,7 @@ def anchor_draft_to_workspace(
     if (
         not anchor
         or not should_require_anchor(request, trends)
-        or product_lane_allows_omitting_anchor(request, trends)
+        or product_lane_allows_omitting_anchor(request, trends, anchor=anchor)
         or anchor.lower() in text.lower()
     ):
         return text
@@ -2510,8 +2510,19 @@ def should_require_anchor(request: DraftRequest, trends: list[TrendItem]) -> boo
     )
 
 
-def product_lane_allows_omitting_anchor(request: DraftRequest, trends: list[TrendItem]) -> bool:
-    return primary_product_mention_lane(request, trends)[0] == "no-name wedge"
+def product_lane_allows_omitting_anchor(
+    request: DraftRequest,
+    trends: list[TrendItem],
+    *,
+    anchor: str | None = None,
+) -> bool:
+    if primary_product_mention_lane(request, trends)[0] == "no-name wedge":
+        return True
+    return (
+        bool(anchor)
+        and anchor.lower() == "leadpoet"
+        and primary_product_mention_syntax_target(request, trends)[0] == "name omitted"
+    )
 
 
 def build_rule_repair_prompt(

@@ -3013,6 +3013,61 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
             store.close()
 
+    def test_name_omitted_product_syntax_can_omit_leadpoet_anchor(self):
+        class NoNameProvider:
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return ["Buyer timing should choose the account before copy writes the email."][:variants]
+                if "Choose the best X post" in prompt:
+                    return [evaluation_json("Buyer timing should choose the account before copy writes the email.")]
+                return ["Buyer timing should choose the account before copy writes the email."]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            selected: tuple[TrendItem, DraftRequest] | None = None
+            for index in range(80):
+                trend = store.save_trend_item(
+                    TrendItem(
+                        id=f"name_omitted_trend_{index}",
+                        title=f"Buyer timing becomes account selection {index}",
+                        source_type="web",
+                        topic="sales AI",
+                        summary="Context matters before generated copy.",
+                        why_it_matters="It proves account timing matters.",
+                        leadpoet_angle=f"Buyer timing beats generic data {index}.",
+                        date=utc_now(),
+                    )
+                )
+                request = DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle=trend.leadpoet_angle,
+                    use_trends=True,
+                    trend_ids=[trend.id],
+                )
+                if (
+                    primary_product_mention_syntax_target(request, [trend])[0] == "name omitted"
+                    and primary_product_mention_lane(request, [trend])[0] != "no-name wedge"
+                ):
+                    selected = (trend, request)
+                    break
+
+            self.assertIsNotNone(selected)
+            trend, request = selected
+            self.assertEqual(primary_product_mention_syntax_target(request, [trend])[0], "name omitted")
+            self.assertNotEqual(primary_product_mention_lane(request, [trend])[0], "no-name wedge")
+
+            draft = SocialBrainGenerator(store, provider=NoNameProvider()).generate(request, save=False)[0]
+
+            self.assertEqual(draft.text, "Buyer timing should choose the account before copy writes the email.")
+            self.assertNotIn("Leadpoet", draft.text)
+            self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
+            store.close()
+
     def test_generation_repairs_cookie_cutter_leadpoet_mentions_across_current_trend_batch(self):
         class CookieCutterTrendProvider:
             def __init__(self):
