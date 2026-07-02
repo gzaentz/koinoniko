@@ -83,7 +83,7 @@ LEADPOET_DEFINITION_PATTERNS = [
     (r"\bthat\s+is\s+the\s+leadpoet\s+(?:job|bar|point|constraint|product belief)\b", "avoid formulaic 'That is the Leadpoet...' closer"),
     (r"\bthe\s+leadpoet\s+(?:product belief|signal|point|constraint|job|bar|part)\s+is\b", "avoid formulaic 'The Leadpoet ... is...' product definition"),
     (r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:belongs|only\s+matters|must)\b", "avoid formulaic Leadpoet fallback lead-in"),
-    (r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:owns?|makes?|starts?|keeps?|turns?|focuses)\b", "avoid formulaic Leadpoet subject-verb lead-in"),
+    (r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:owns?|makes?|starts?|keeps?|turns?|focuses|helps?|gives?|answers?|shows?|lets?|finds?)\b", "avoid formulaic Leadpoet subject-verb lead-in"),
     (r"(?m)(?:^|\n\n)\s*leadpoet(?:'s|’s)?\s+(?:bet|job|role)\b", "avoid formulaic Leadpoet closer"),
     (r"(?m)(?:^|\n\n)\s*the layer worth building\b", "avoid generic 'layer worth building' closer"),
 ]
@@ -1219,7 +1219,7 @@ def leadpoet_sentence_grammar_fingerprint(sentence: str) -> str:
     if re.match(r"leadpoet\s+is(?:\s+building|\s+built)?\b", lowered):
         return "leadpoet_is_definition"
     if re.match(
-        r"leadpoet\s+(?:owns?|can|gets?|makes?|starts?|keeps?|turns?|focuses|needs?|should|has\s+to|belongs|must|only\s+matters)\b",
+        r"leadpoet\s+(?:owns?|can|gets?|makes?|starts?|keeps?|turns?|focuses|helps?|gives?|answers?|shows?|lets?|finds?|needs?|should|has\s+to|belongs|must|only\s+matters)\b",
         lowered,
     ):
         return "leadpoet_subject_verb"
@@ -1266,7 +1266,7 @@ def leadpoet_phrase_pattern_fingerprint(sentence: str) -> str:
         return "product_as_object"
     if re.search(r"\bleadpoet\b[^.!?]{0,80}\b(?:before|after|when|where|if|because|as)\b", lowered):
         return "clause_embedded"
-    if re.search(r"\bleadpoet\s+(?:owns?|can|gets?|makes?|starts?|keeps?|turns?|focuses|needs?|should|has\s+to|belongs|must|only\s+matters)\b", lowered):
+    if re.search(r"\bleadpoet\s+(?:owns?|can|gets?|makes?|starts?|keeps?|turns?|focuses|helps?|gives?|answers?|shows?|lets?|finds?|needs?|should|has\s+to|belongs|must|only\s+matters)\b", lowered):
         return "leadpoet_subject_verb"
     if re.search(r"\bleadpoet(?:'s)?\s+\w+", lowered):
         return "leadpoet_modifier"
@@ -2314,7 +2314,7 @@ def deterministic_leadpoet_definition_repair(
         flags=re.I,
     )
     repaired = re.sub(
-        r"(?m)(^|(?<=[.!?])\s+|\n\n)(\s*)Leadpoet\s+(owns?|makes?|starts?|keeps?|turns?|focuses)\s+([^.!?\n]*(?:[.!?]|$))",
+        r"(?m)(^|(?<=[.!?])\s+|\n\n)(\s*)Leadpoet\s+(owns?|makes?|starts?|keeps?|turns?|focuses|helps?|gives?|answers?|shows?|lets?|finds?)\s+([^.!?\n]*(?:[.!?]|$))",
         lambda match: leadpoet_subject_verb_replacement(match, product_lane=product_lane, product_syntax=product_syntax),
         repaired,
         flags=re.I,
@@ -2443,7 +2443,7 @@ def leadpoet_subject_verb_replacement(match: re.Match[str], *, product_lane: str
         body = body[:-1].strip()
     body = body or "buyer timing visible"
     lowered_body = body.lower()
-    action = leadpoet_subject_verb_action(body)
+    action = leadpoet_subject_verb_action(body, verb=verb)
     if product_lane == "no-name wedge":
         replacement = f"The useful wedge is buyer timing: {action}."
     elif product_syntax == "product as object":
@@ -2495,8 +2495,21 @@ def leadpoet_subject_verb_replacement(match: re.Match[str], *, product_lane: str
     return f"{prefix}{indent}{replacement}"
 
 
-def leadpoet_subject_verb_action(body: str) -> str:
+def leadpoet_subject_verb_action(body: str, *, verb: str = "") -> str:
     phrase = body[0].lower() + body[1:] if body else "buyer timing visible"
+    phrase = re.sub(r"^(?:teams|reps|users|sales teams|founders)\s+", "", phrase, flags=re.I).strip()
+    if verb.startswith("answer"):
+        return phrase if phrase.startswith("answer ") else f"answer {phrase}"
+    if verb.startswith(("show", "find")):
+        return phrase if phrase.startswith(("show ", "find ", "make ")) else f"make {phrase} visible"
+    if verb.startswith("give"):
+        return phrase if phrase.startswith(("give ", "make ")) else f"make {phrase} usable"
+    if verb.startswith("let"):
+        return phrase if phrase.startswith(("make ", "show ", "find ", "answer ", "keep ", "turn ", "start ", "choose ")) else f"make {phrase} possible"
+    if verb.startswith("help") and phrase.startswith("unlock "):
+        return f"make {phrase[len('unlock '):].strip() or 'buyer timing'} usable"
+    if verb.startswith("help") and phrase.startswith(("act ", "see ", "know ", "find ", "choose ")):
+        return phrase
     if re.match(r"(?:the|a|an|this|that)\b", phrase, flags=re.I):
         return f"keep {phrase} concrete"
     if phrase.startswith("with "):
