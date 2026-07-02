@@ -96,6 +96,8 @@ LEADPOET_TEMPLATE_DOMAIN_TERMS = (
     "agents",
     "buyer",
     "buyers",
+    "change",
+    "changes",
     "context",
     "constraint",
     "constraints",
@@ -1281,7 +1283,8 @@ def leadpoet_sentence_template_fingerprint(sentence: str) -> str:
     lowered = re.sub(r"\bleadpoet(?:'s)?\b", "{product}", lowered)
     lowered = re.sub(r"\b\d+(?:[.,]\d+)?%?\b", "{number}", lowered)
     lowered = re.sub(rf"\b(?:{'|'.join(LEADPOET_TEMPLATE_DOMAIN_TERMS)})\b", "{domain}", lowered)
-    lowered = re.sub(r"(?:\{domain\}\s*){2,}", "{domain}", lowered)
+    lowered = re.sub(r"\{domain\}(?:[\s/-]+\{domain\})+", "{domain}", lowered)
+    lowered = " ".join(lowered.split())
     return lowered.strip(" .!?")
 
 
@@ -2338,15 +2341,15 @@ def leadpoet_definition_replacement(match: re.Match[str], *, product_lane: str) 
     original = " ".join(match.group(0).strip().split())
     lowered = original.lower()
     lane_replacements = {
-        "mechanism-first": "The hard part is turning context into the next account worth working. Put Leadpoet inside that account-change check, not in a category line.",
+        "mechanism-first": "The hard part is turning context into the next account worth working. That account-change check is where Leadpoet enters, not a category line.",
         "consequence-first": "A rep should know why this account, this week. That answer has to change the next action before Leadpoet earns the line.",
-        "quiet embedded name": "Put Leadpoet inside the account reason: what changed, why now, and why copy comes after that.",
+        "quiet embedded name": "The account reason should carry Leadpoet quietly: what changed, why now, and why copy comes after that.",
         "no-name wedge": "The useful wedge is buyer timing: why this account deserves action now.",
         "operator scene": "A rep should see what changed at the account before a sequence asks for copy.",
         "boundary line": "Verified data can say who exists; the sharper signal says who is worth action now.",
-        "signal language": "The signal has to explain why now, not only who fits. Keep Leadpoet next to that account change.",
-        "ownership without definition": "Before louder outbound, the account-timing question has to get specific inside Leadpoet.",
-        "implicit product belief": "Timing should choose the account before copy writes the email. Inside Leadpoet, that belief beats another volume claim.",
+        "signal language": "The signal has to explain why now, not only who fits. That account change is where the Leadpoet mention belongs.",
+        "ownership without definition": "Before louder outbound, the account-timing question should stay close to Leadpoet.",
+        "implicit product belief": "Timing should choose the account before copy writes the email. That belief reaches Leadpoet before another volume claim.",
     }
     if product_lane in lane_replacements:
         return lane_replacements[product_lane]

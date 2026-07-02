@@ -3320,9 +3320,21 @@ class SocialBrainTest(unittest.TestCase):
         combined = "\n".join(outputs_by_lane.values())
         for banned in ["Leadpoet is", "Leadpoet is building", "For Leadpoet", "Leadpoet should"]:
             self.assertNotIn(banned.lower(), combined.lower())
-        self.assertIn("Put Leadpoet inside that account-change check", combined)
+        self.assertIn("That account-change check is where Leadpoet enters", combined)
         self.assertIn("before Leadpoet earns the line", combined)
-        self.assertIn("Inside Leadpoet, that belief beats another volume claim", combined)
+        self.assertIn("That belief reaches Leadpoet before another volume claim", combined)
+        mention_patterns = [
+            leadpoet_mention_pattern(text)
+            for text in outputs_by_lane.values()
+            if leadpoet_mention_pattern(text) != "no_leadpoet"
+        ]
+        self.assertLessEqual(max(mention_patterns.count(pattern) for pattern in set(mention_patterns)), 2)
+        templates = [
+            leadpoet_sentence_template(text)
+            for text in outputs_by_lane.values()
+            if leadpoet_sentence_template(text) != "no_leadpoet"
+        ]
+        self.assertEqual(len(templates), len(set(templates)))
 
     def test_deterministic_leadpoet_subject_verb_repairs_vary_by_syntax_target(self):
         outputs_by_syntax = {}
@@ -4491,6 +4503,14 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(
             leadpoet_sentence_template("The Leadpoet question points to account context."),
             "the {product} {domain} points to {domain}",
+        )
+        self.assertEqual(
+            leadpoet_sentence_template("The account-timing question gets specific inside Leadpoet."),
+            "the {domain} gets specific inside {product}",
+        )
+        self.assertEqual(
+            leadpoet_sentence_template("Put Leadpoet behind the account-change check."),
+            "put {product} behind the {domain} check",
         )
 
     def test_leadpoet_bad_phrase_counts_include_active_formulaic_rules(self):
