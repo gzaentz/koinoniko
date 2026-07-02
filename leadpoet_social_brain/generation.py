@@ -2591,17 +2591,17 @@ def leadpoet_modal_leadin_replacement(match: re.Match[str], *, product_lane: str
         body = body[:-1].strip()
     body = body[0].lower() + body[1:] if body else "make buyer timing visible"
     templates = {
-        "mechanism-first": "The mechanism has to {body}. In Leadpoet, the account reason should be visible after that.",
-        "consequence-first": "That only matters when it changes action before copy: {body}.",
-        "quiet embedded name": "The mechanism has to {body}; the product name can come later.",
+        "mechanism-first": "The mechanism has to {body}. The account reason should become usable in Leadpoet after that.",
+        "consequence-first": "That only matters when it changes the next account choice in Leadpoet: {body}.",
+        "quiet embedded name": "The account reason can carry Leadpoet quietly: {body}.",
         "no-name wedge": "The signal has to {body}.",
-        "mechanism carries it": "The mechanism has to {body}.",
+        "mechanism carries it": "Let the mechanism carry the claim: {body}.",
         "operator scene": "When a rep opens Leadpoet, the account signal should already {body}.",
-        "boundary line": "Verified data is not enough; the sharper side is whether the signal can {body} before copy.",
-        "signal language": "The signal should make this clear before copy: can it {body}?",
-        "ownership without definition": "The account-timing question gets concrete when the signal can {body} before the sequence starts.",
-        "implicit product belief": "The product belief stays concrete when the signal can {body}.",
-        "context-only wedge": "The account context has to {body}.",
+        "boundary line": "Verified data is not enough; before Leadpoet, the sharper side asks whether the signal can {body} before copy.",
+        "signal language": "Near Leadpoet, the signal has to answer one question: can it {body}?",
+        "ownership without definition": "Use Leadpoet as the pressure test for the account-timing question: can the signal {body} before the sequence starts?",
+        "implicit product belief": "That belief stays practical in Leadpoet when the signal can {body}.",
+        "context-only wedge": "Account context can carry this on its own: {body}.",
     }
     replacement = templates.get(product_lane, templates["quiet embedded name"]).format(body=body)
     if ending != "." and replacement.endswith("."):

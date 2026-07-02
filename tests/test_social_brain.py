@@ -3768,6 +3768,54 @@ class SocialBrainTest(unittest.TestCase):
         ]
         self.assertEqual(len(templates), len(set(templates)))
 
+    def test_deterministic_leadpoet_modal_repairs_vary_by_lane(self):
+        outputs_by_lane = {}
+        for index in range(120):
+            trend = TrendItem(
+                id=f"modal_repair_trend_{index}",
+                title=f"Modal repair trend {index}",
+                source_type="web",
+                topic="sales AI",
+                summary="Context layer",
+                why_it_matters="It proves context matters.",
+                leadpoet_angle="Buyer timing beats generic data.",
+                date=utc_now(),
+            )
+            request = DraftRequest(
+                platform="x",
+                topic="sales AI",
+                post_type="founder_insight",
+                angle="buyer timing beats generic data",
+                trend_ids=[trend.id],
+            )
+            lane = primary_product_mention_lane(request, [trend])[0]
+            outputs_by_lane.setdefault(
+                lane,
+                deterministic_leadpoet_definition_repair(
+                    "Leadpoet should make buyer timing visible.",
+                    request=request,
+                    trends=[trend],
+                    max_chars=280,
+                ),
+            )
+
+        self.assertEqual(len(outputs_by_lane), 11)
+        self.assertEqual(len(set(outputs_by_lane.values())), 11)
+        combined = "\n".join(outputs_by_lane.values()).lower()
+        self.assertNotIn("leadpoet should", combined)
+        self.assertNotIn("in leadpoet,", combined)
+        self.assertNotIn("product name", combined)
+        self.assertFalse(any(leadpoet_bad_phrase_counts(combined).values()), combined)
+        mention_patterns = [leadpoet_mention_pattern(text) for text in outputs_by_lane.values()]
+        self.assertEqual(mention_patterns.count("no_leadpoet"), 3)
+        self.assertGreaterEqual(len(set(mention_patterns)), 5)
+        templates = [
+            leadpoet_sentence_template(text)
+            for text in outputs_by_lane.values()
+            if leadpoet_sentence_template(text) != "no_leadpoet"
+        ]
+        self.assertEqual(len(templates), len(set(templates)))
+
     def test_deterministic_leadpoet_subject_verb_repairs_vary_by_syntax_target(self):
         outputs_by_syntax = {}
         for index in range(180):
