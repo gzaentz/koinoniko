@@ -4462,6 +4462,46 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotIn("Leadpoet can argue buyer timing", prompt)
             store.close()
 
+    def test_generic_saved_trend_hooks_and_post_angles_are_removed_before_prompting(self):
+        generic_angle = "Tie the signal back to buyer timing, proprietary context, and why generic sales automation is not enough."
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            trend = store.save_trend_item(
+                TrendItem(
+                    id="generic-prompt-seeds-trend",
+                    title="HubSpot Buys Warmly for Person-Level Intent and AI Agents",
+                    source_type="web_daily",
+                    topic="sales AI",
+                    summary="HubSpot bought Warmly to add person-level intent and AI agents.",
+                    why_it_matters="It shows intent moving closer to CRM workflows.",
+                    leadpoet_angle=generic_angle,
+                    suggested_hooks="The sales AI debate is really a context debate.",
+                    post_angles_json=json.dumps(
+                        ["Use this to talk about sales AI through the lens of Leadpoet's saved positioning."]
+                    ),
+                    date=utc_now(),
+                )
+            )
+
+            prompt = SocialBrainGenerator(store).build_prompt(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    use_trends=True,
+                    trend_ids=[trend.id],
+                )
+            )
+
+            self.assertIn("Saved angle:\nUse HubSpot Buys Warmly", prompt)
+            self.assertIn("Suggested hooks:\n- No hooks stored.", prompt)
+            self.assertIn("Possible post angles:\n- Use the saved angle above.", prompt)
+            self.assertNotIn(generic_angle, prompt)
+            self.assertNotIn("The sales AI debate is really a context debate.", prompt)
+            self.assertNotIn("through the lens of Leadpoet's saved positioning", prompt)
+            store.close()
+
     def test_audit_naturalness_x_cover_all_trends_expands_plan_count(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)

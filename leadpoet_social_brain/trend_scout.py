@@ -989,7 +989,7 @@ def enrich_trend_source(
         except Exception as exc:  # noqa: BLE001 - keep partial extraction if the model fails.
             provider_error = f"digest failed: {exc}"
     if not digest:
-        digest = fallback_trend_digest(trend, article, page)
+        digest = fallback_trend_digest(trend, article, page, profile=profile)
 
     if provider_digest and trend_digest_rejects(digest):
         reason = clean_text(digest.get("reject_reason") or digest.get("relevance_reason")) or "Rejected by Trend Scout relevance gate."
@@ -1302,7 +1302,13 @@ def trend_digest_rejects(digest: dict[str, object]) -> bool:
     return bool(relevance_score and relevance_score < 6)
 
 
-def fallback_trend_digest(trend: TrendItem, article: dict[str, object], page: SourcePageDetails) -> dict[str, object]:
+def fallback_trend_digest(
+    trend: TrendItem,
+    article: dict[str, object],
+    page: SourcePageDetails,
+    *,
+    profile: TrendScoutProfile,
+) -> dict[str, object]:
     what_happened = page.excerpt or trend.summary
     claims = page.key_paragraphs[:4] or [trend.summary]
     numbers = page.important_numbers[:3]
@@ -1313,8 +1319,8 @@ def fallback_trend_digest(trend: TrendItem, article: dict[str, object], page: So
         "why_it_matters": f"{trend.why_it_matters}{number_note}",
         "why_it_matters_to_gtm": "This matters for sales and lead generation if it changes buyer timing, prioritization, or the context reps need before outreach.",
         "leadpoet_angle": trend.leadpoet_angle,
-        "suggested_hooks": [trend.suggested_hooks] if trend.suggested_hooks else [suggested_hook_for_topic(trend.topic)],
-        "possible_post_angles": [trend.leadpoet_angle],
+        "suggested_hooks": [trend.suggested_hooks] if trend.suggested_hooks else [suggested_hook_for_trend(trend.title, trend.topic)],
+        "possible_post_angles": [default_post_angle_for_trend(trend.title, trend.topic, profile)],
         "key_points": normalize_string_list([what_happened, clean_text(article.get("trend_breakdown_text"))], limit=4),
         "important_claims": claims,
         "source_confidence": "medium" if page.text_excerpt else "low",
@@ -1477,7 +1483,7 @@ def web_trend_from_article(
         summary=summary,
         why_it_matters="This may shift buyer priorities, sales workflows, or the market timing behind AI-led pipeline work.",
         leadpoet_angle=profile.default_angle,
-        suggested_hooks=suggested_hook_for_topic(topic),
+        suggested_hooks=suggested_hook_for_trend(title, topic),
         urgency="high" if source_type == WEB_DAILY_SOURCE_TYPE else "medium",
         date=date_value,
         status="unused",
@@ -1490,7 +1496,7 @@ def web_trend_from_article(
         source_text_excerpt=None,
         key_points_json=json.dumps(normalize_string_list([summary, article.get("trend_breakdown_text")], limit=4)),
         important_claims_json=json.dumps([]),
-        post_angles_json=json.dumps([f"Use this to talk about {topic} through the lens of {profile.workspace_name}'s saved positioning."]),
+        post_angles_json=json.dumps([default_post_angle_for_trend(title, topic, profile)]),
         source_confidence="low",
         enrichment_status="not_attempted",
     )
@@ -1571,6 +1577,27 @@ def suggested_hook_for_topic(topic: str) -> str:
     if topic == "sales AI":
         return "The sales AI debate is really a context debate."
     return "The AI trend that matters is the one that changes buyer behavior."
+
+
+def suggested_hook_for_trend(title: str, topic: str) -> str:
+    title_text = clean_text(title)
+    if title_text:
+        if topic == "lead generation":
+            return f"{title_text}: the useful question is whether timing changed before volume did."
+        if topic == "sales AI":
+            return f"{title_text}: the useful question is what changed before a rep writes."
+        return f"{title_text}: the useful question is whether buyer timing changed or only the tool label did."
+    return suggested_hook_for_topic(topic)
+
+
+def default_post_angle_for_trend(title: str, topic: str, profile: TrendScoutProfile) -> str:
+    proof = clean_text(title) or clean_text(topic) or "this source"
+    if profile.workspace_name == "Leadpoet":
+        return (
+            f"Use {proof} as market proof for the account-timing question it raises before copy, "
+            "outreach, or account selection."
+        )
+    return f"Use {proof} as market proof for how {profile.workspace_name}'s saved positioning should meet this market shift."
 
 
 def clean_text(value: object) -> str:

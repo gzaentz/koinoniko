@@ -538,6 +538,10 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
             self.assertEqual(groups.failed, 2)
             self.assertEqual(groups.daily[0].enrichment_status, "failed")
             self.assertIn("source fetch failed", groups.daily[0].enrichment_error or "")
+            self.assertIn("AI sales source 1d", groups.daily[0].suggested_hooks or "")
+            self.assertIn("AI sales source 1d", groups.daily[0].post_angles_json or "")
+            self.assertNotIn("The sales AI debate is really a context debate.", groups.daily[0].suggested_hooks or "")
+            self.assertNotIn("through the lens of Leadpoet's saved positioning", groups.daily[0].post_angles_json or "")
             store.close()
 
     def test_generation_prompt_uses_enriched_digest_not_raw_article(self):

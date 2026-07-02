@@ -3506,6 +3506,17 @@ GENERIC_TREND_ANGLE_TEXTS = {
     "use the source as market proof, then make the angle specific to the account-timing question it raises before copy or outreach.",
 }
 
+GENERIC_TREND_PROMPT_LINE_TEXTS = {
+    *GENERIC_TREND_ANGLE_TEXTS,
+    "lead generation is becoming a timing problem, not just a volume problem.",
+    "the sales ai debate is really a context debate.",
+    "the ai trend that matters is the one that changes buyer behavior.",
+}
+
+GENERIC_TREND_PROMPT_LINE_PATTERNS = [
+    r"^use this to talk about .+ through the lens of .+ saved positioning\.?$",
+]
+
 
 def trend_angle_for_generation(trend: TrendItem) -> str:
     angle = " ".join(str(trend.leadpoet_angle or "").split())
@@ -3522,9 +3533,16 @@ def trend_prompt_lines_for_generation(values: list[str]) -> list[str]:
     lines = []
     for value in values:
         line = " ".join(str(value or "").split())
-        if line and not trend_angle_is_formulaic(line):
+        if line and not trend_angle_is_formulaic(line) and not trend_prompt_line_is_generic(line):
             lines.append(line)
     return lines
+
+
+def trend_prompt_line_is_generic(line: str) -> bool:
+    lowered = line.lower()
+    return lowered in GENERIC_TREND_PROMPT_LINE_TEXTS or any(
+        re.search(pattern, line, flags=re.I) for pattern in GENERIC_TREND_PROMPT_LINE_PATTERNS
+    )
 
 
 def trend_specific_generation_angle(trend: TrendItem) -> str:
