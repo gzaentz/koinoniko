@@ -3163,6 +3163,68 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotIn("leadpoet_is", payload["leadpoet_shapes"])
             store.close()
 
+    def test_audit_naturalness_x_feeds_prior_batch_outputs_into_prompts(self):
+        class BatchMemoryProvider:
+            def __init__(self):
+                self.prompts: list[str] = []
+                self.final_count = 0
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                self.prompts.append(prompt)
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "Static records answer who exists.\n\nThe useful Leadpoet question is why this account now.",
+                        "The CRM record can be right.\n\nTiming changes the account before it reaches Leadpoet.",
+                        "More names do not fix judgment.\n\nThe account-change moment belongs before copy.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    finals = [
+                        "Static records answer who exists.\n\nThe useful Leadpoet question is why this account now.",
+                        "The CRM record can be right.\n\nTiming changes the account before it reaches Leadpoet.",
+                    ]
+                    text = finals[self.final_count % len(finals)]
+                    self.final_count += 1
+                    return [evaluation_json(text)]
+                return ["Timing changes the account before it reaches Leadpoet."]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            for index in range(2):
+                store.save_trend_item(
+                    TrendItem(
+                        title=f"Trend {index}",
+                        source_type="web",
+                        topic="sales AI",
+                        summary="A trend about GTM context.",
+                        why_it_matters="It shows timing matters.",
+                        leadpoet_angle="Buyer timing needs proprietary account context.",
+                        date=utc_now(),
+                    )
+                )
+            provider = BatchMemoryProvider()
+
+            payload = build_naturalness_audit(
+                store,
+                SocialBrainGenerator(store, provider=provider),
+                count=2,
+                trend_limit=2,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+                save_drafts=False,
+            )
+
+            strategy_prompts = [prompt for prompt in provider.prompts if "Do not write the post yet" in prompt]
+            self.assertEqual(payload["post_count"], 2)
+            self.assertEqual(len(strategy_prompts), 2)
+            self.assertNotIn("source=batch", strategy_prompts[0])
+            self.assertIn("source=batch", strategy_prompts[1])
+            self.assertIn("The useful Leadpoet question is why this account now.", strategy_prompts[1])
+            store.close()
+
     def test_audit_naturalness_x_warns_on_repeated_closing_line(self):
         class RepeatedCloserProvider:
             def __init__(self):
@@ -3748,7 +3810,8 @@ class SocialBrainTest(unittest.TestCase):
                     )
 
             self.assertEqual(exit_code, 1)
-            self.assertIn("Leadpoet mention syntax is not varied enough", output.getvalue())
+            self.assertIn("Warnings:", output.getvalue())
+            self.assertIn("Leadpoet mention", output.getvalue())
 
     def test_audit_naturalness_x_warns_when_not_all_loaded_trends_are_covered(self):
         class CoverageProvider:

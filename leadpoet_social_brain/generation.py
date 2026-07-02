@@ -325,6 +325,7 @@ class SocialBrainGenerator:
         *,
         variants: int = 3,
         save: bool = True,
+        recent_output_texts: list[str] | None = None,
     ) -> list[GeneratedDraft]:
         _ = variants
         adapter = self._adapter_for(request.platform)
@@ -360,6 +361,7 @@ class SocialBrainGenerator:
             provider_name=provider_name,
             model_routing=model_routing,
             save=save,
+            recent_output_texts=recent_output_texts,
         )
 
     def _generate_quality_draft(
@@ -376,10 +378,11 @@ class SocialBrainGenerator:
         provider_name: str,
         model_routing: ModelRouting,
         save: bool,
+        recent_output_texts: list[str] | None = None,
     ) -> list[GeneratedDraft]:
         assert self.provider is not None
         adapter = self._adapter_for(request.platform)
-        recent_output_context = build_recent_output_context(self.store, request)
+        recent_output_context = build_recent_output_context(self.store, request, extra_texts=recent_output_texts)
         strategy_prompt = build_strategy_prompt(
             request,
             bundle,
@@ -536,7 +539,7 @@ class SocialBrainGenerator:
             draft = self.store.save_generated_draft(draft)
         return [draft]
 
-    def build_prompt(self, request: DraftRequest) -> str:
+    def build_prompt(self, request: DraftRequest, *, recent_output_texts: list[str] | None = None) -> str:
         adapter = self._adapter_for(request.platform)
         max_chars = resolve_length_max_chars(request, adapter.rules.default_max_chars)
         bundle = self.context_manager.build_bundle(
@@ -550,7 +553,7 @@ class SocialBrainGenerator:
         skills = generation_skills(platform=request.platform, post_type=request.post_type)
         active_rules = active_writing_rules_for_prompt(self.store, skills)
         skills = skills_with_review_rules(skills, active_rules["review_rules"])
-        recent_output_context = build_recent_output_context(self.store, request)
+        recent_output_context = build_recent_output_context(self.store, request, extra_texts=recent_output_texts)
         return build_generation_prompt(
             request,
             bundle,
@@ -924,8 +927,14 @@ def variation_seed_source(request: DraftRequest, trends: list[TrendItem]) -> str
     )
 
 
-def build_recent_output_context(store: SQLiteStore, request: DraftRequest, *, limit: int = 6) -> dict[str, object]:
-    rows = recent_output_rows(store, request, limit=limit)
+def build_recent_output_context(
+    store: SQLiteStore,
+    request: DraftRequest,
+    *,
+    limit: int = 6,
+    extra_texts: list[str] | None = None,
+) -> dict[str, object]:
+    rows = recent_output_rows(store, request, limit=limit, extra_texts=extra_texts)
     if not rows:
         return {"section": "", "rows": []}
     lines = [
@@ -953,9 +962,23 @@ def build_recent_output_context(store: SQLiteStore, request: DraftRequest, *, li
     return {"section": "\n".join(lines), "rows": rows}
 
 
-def recent_output_rows(store: SQLiteStore, request: DraftRequest, *, limit: int) -> list[dict[str, str]]:
+def recent_output_rows(
+    store: SQLiteStore,
+    request: DraftRequest,
+    *,
+    limit: int,
+    extra_texts: list[str] | None = None,
+) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     seen: set[str] = set()
+    for text in reversed((extra_texts or [])[-limit:]):
+        row = recent_output_row(text, source="batch")
+        if not row["fingerprint"] or row["fingerprint"] in seen:
+            continue
+        rows.append(row)
+        seen.add(row["fingerprint"])
+        if len(rows) >= limit:
+            return rows
     for item in store.list_content_queue(platform=request.platform, limit=50):
         if request.topic and item.topic and item.topic != request.topic:
             continue
@@ -983,7 +1006,7 @@ def recent_output_row(text: str, *, source: str) -> dict[str, str]:
     last = truncate_for_prompt(last_nonempty_text_line(cleaned), 110)
     leadpoet_sentence = truncate_for_prompt(first_sentence_with_word(cleaned, "Leadpoet"), 130)
     layout = recent_output_layout(cleaned)
-    fingerprint = "|".join([source, first.lower(), last.lower(), leadpoet_sentence.lower(), layout])
+    fingerprint = "|".join([first.lower(), last.lower(), leadpoet_sentence.lower(), layout])
     return {
         "source": source,
         "first_line": first,

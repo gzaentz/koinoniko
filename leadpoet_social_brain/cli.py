@@ -931,6 +931,7 @@ def build_naturalness_audit(
     if not trends:
         raise SystemExit("No trends found for naturalness audit.")
     rows: list[dict[str, object]] = []
+    batch_recent_outputs: list[str] = []
     for index in range(count):
         trend = trends[index % len(trends)]
         draft = generator.generate(
@@ -948,6 +949,7 @@ def build_naturalness_audit(
             ),
             variants=1,
             save=save_drafts,
+            recent_output_texts=batch_recent_outputs,
         )[0]
         primary_structure = ""
         first_structure = ""
@@ -1045,6 +1047,7 @@ def build_naturalness_audit(
                 "primary_human_rhythm_target": primary_human_rhythm_target,
             }
         )
+        batch_recent_outputs.append(draft.text)
     text_blob = "\n\n".join(str(row["text"]) for row in rows).lower()
     warnings: list[str] = []
     bad_phrase_counts = leadpoet_bad_phrase_counts(text_blob)
