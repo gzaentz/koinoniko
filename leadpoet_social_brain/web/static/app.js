@@ -1621,15 +1621,15 @@ function renderQueueModal() {
       </div>
       <label>Status<input value="${escapeAttr(label(item.status))}" disabled></label>
     </div>
+    <div class="revision-box queue-revision-box">
+      <label class="ai-revision-composer">AI instruction<textarea id="revisionInstruction" rows="2" placeholder="${canUseAI ? "Ask for a rewrite..." : "Connect a provider to ask for revisions."}" onkeydown="submitRevisionInstructionFromKey(event)" ${canUseAI ? "" : "disabled"} title="${canUseAI ? "" : "Provider-backed generation is not connected."}"></textarea></label>
+      <div id="revisionList" class="revision-list">${revisionList(item.versions || [])}</div>
+    </div>
     <div class="queue-detail-toolbar">
       <button class="secondary" type="button" onclick="openQueueMoreDetails(event)">More Details</button>
     </div>
-    <div class="modal-actions">
-      <button onclick="saveQueueDetail(event)">Save changes</button>
-    </div>
-    <div class="revision-box">
-      <label class="ai-revision-composer">AI instruction<textarea id="revisionInstruction" rows="2" placeholder="${canUseAI ? "Ask for a rewrite..." : "Connect a provider to ask for revisions."}" onkeydown="submitRevisionInstructionFromKey(event)" ${canUseAI ? "" : "disabled"} title="${canUseAI ? "" : "Provider-backed generation is not connected."}"></textarea></label>
-      <div id="revisionList" class="revision-list">${revisionList(item.versions || [])}</div>
+    <div class="modal-actions queue-save-actions">
+      <button onclick="saveQueueDetail(event)">Save</button>
     </div>
   `;
 }
@@ -1669,7 +1669,7 @@ function renderQueueMoreDetailsModal() {
       ${detail("Why suggested", item.angle || item.reviewer_notes || "Suggested from Social Brain context.")}
     </div>
     <div class="modal-actions">
-      <button onclick="saveQueueDetail(event)">Save changes</button>
+      <button onclick="saveQueueDetail(event)">Save</button>
     </div>
   `;
 }
@@ -1691,8 +1691,8 @@ window.saveQueueDetail = (event) => {
     state.queueDetail = payload.item;
     showMessage("Post updated.");
     await refresh();
-    renderQueueModal();
-    if (moreDetailsOpen) renderQueueMoreDetailsModal();
+    if (moreDetailsOpen) closeModal("queueMoreDetailsModal");
+    closeModal("queueModal");
   });
 };
 

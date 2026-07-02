@@ -2531,6 +2531,16 @@ main {
   gap: 12px;
 }
 
+.queue-revision-box {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.queue-save-actions {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
 .ai-revision-composer textarea {
   min-height: 72px;
   resize: vertical;
