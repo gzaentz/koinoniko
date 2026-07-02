@@ -53,6 +53,51 @@ from leadpoet_social_brain.providers import load_provider_from_env, resolve_mode
 from leadpoet_social_brain.storage.sqlite_store import DEFAULT_DB_PATH, DEFAULT_WEB_AUTH_USERNAME, SQLiteStore
 from leadpoet_social_brain.trend_scout import refresh_web_trends
 
+REPEATED_PHRASE_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "but",
+    "by",
+    "can",
+    "did",
+    "do",
+    "does",
+    "for",
+    "from",
+    "had",
+    "has",
+    "have",
+    "how",
+    "in",
+    "into",
+    "is",
+    "it",
+    "not",
+    "of",
+    "on",
+    "or",
+    "should",
+    "that",
+    "the",
+    "their",
+    "them",
+    "they",
+    "this",
+    "to",
+    "when",
+    "where",
+    "who",
+    "why",
+    "will",
+    "with",
+    "would",
+}
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -822,6 +867,9 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
     print("Generated layout fingerprint counts:")
     for key, value in sorted(payload["layout_fingerprint_counts"].items()):
         print(f"- {key}: {value}")
+    print("Repeated stock phrase counts:")
+    for key, value in sorted(payload["repeated_phrase_counts"].items()):
+        print(f"- {key}: {value}")
     if payload["warnings"]:
         print("Warnings:")
         for warning in payload["warnings"]:
@@ -982,6 +1030,10 @@ def build_naturalness_audit(
     elif layout_counts and layout_counts.most_common(1)[0][1] >= max(3, (len(rows) + 1) // 2):
         layout, layout_count = layout_counts.most_common(1)[0]
         warnings.append(f"Generated post layouts are too concentrated: {layout} appears {layout_count}/{len(rows)} times.")
+    repeated_phrase_counts = repeated_batch_phrase_counts([str(row["text"]) for row in rows])
+    if repeated_phrase_counts:
+        phrase, phrase_count = next(iter(repeated_phrase_counts.items()))
+        warnings.append(f"Repeated stock phrase appeared across generated posts: '{phrase}' appears {phrase_count}/{len(rows)} times.")
     return {
         "trend_count": len(trends),
         "post_count": len(rows),
@@ -1001,6 +1053,7 @@ def build_naturalness_audit(
         "first_product_mention_lane_counts": dict(first_product_lane_counts or primary_product_lane_counts),
         "leadpoet_mention_pattern_counts": dict(mention_pattern_counts),
         "layout_fingerprint_counts": dict(layout_counts),
+        "repeated_phrase_counts": repeated_phrase_counts,
         "warnings": warnings,
         "rows": rows,
     }
@@ -1105,6 +1158,40 @@ def leadpoet_mention_pattern(text: str) -> str:
     if re.search(r"\bleadpoet(?:'s|’s)\s+\w+", text, flags=re.I):
         return "leadpoet_possessive"
     return "leadpoet_contextual"
+
+
+def repeated_batch_phrase_counts(texts: list[str], *, phrase_size: int = 4) -> dict[str, int]:
+    if len(texts) < 4:
+        return {}
+    threshold = min(len(texts), max(4, (len(texts) + 2) // 3))
+    counts: Counter[str] = Counter()
+    for text in texts:
+        tokens = repeated_phrase_tokens(text)
+        seen = {
+            " ".join(tokens[index:index + phrase_size])
+            for index in range(0, max(0, len(tokens) - phrase_size + 1))
+        }
+        for phrase in seen:
+            if repeated_phrase_is_meaningful(phrase):
+                counts[phrase] += 1
+    repeated = sorted(
+        ((phrase, count) for phrase, count in counts.items() if count >= threshold),
+        key=lambda item: (-item[1], item[0]),
+    )
+    return dict(repeated[:10])
+
+
+def repeated_phrase_tokens(text: str) -> list[str]:
+    normalized = text.lower().replace("’", "'")
+    return re.findall(r"[a-z0-9]+(?:'[a-z0-9]+)?", normalized)
+
+
+def repeated_phrase_is_meaningful(phrase: str) -> bool:
+    tokens = phrase.split()
+    if len(tokens) < 4:
+        return False
+    content_tokens = [token for token in tokens if token not in REPEATED_PHRASE_STOPWORDS]
+    return len(set(content_tokens)) >= 2
 
 
 def first_nonempty_line(text: str) -> str:

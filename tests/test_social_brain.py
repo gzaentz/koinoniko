@@ -2627,6 +2627,72 @@ class SocialBrainTest(unittest.TestCase):
             )
             store.close()
 
+    def test_audit_naturalness_x_warns_on_repeated_stock_phrase(self):
+        class RepeatedPhraseProvider:
+            def __init__(self):
+                self.final_count = 0
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "Static records answer who exists. Buyer timing should choose the account before copy.\n\nLeadpoet can make signal one visible.",
+                        "The CRM can be correct. Buyer timing should choose the account before copy.\n\nLeadpoet can make signal two visible.",
+                        "More names do not fix judgment. Buyer timing should choose the account before copy.\n\nLeadpoet can make signal three visible.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    first_lines = [
+                        "Static records answer who exists.",
+                        "The CRM can be correct.",
+                        "More names do not fix judgment.",
+                        "Context only matters when it changes action.",
+                        "A sales agent needs timing before copy.",
+                    ]
+                    endings = ["one", "two", "three", "four", "five"]
+                    index = self.final_count % len(first_lines)
+                    self.final_count += 1
+                    return [
+                        evaluation_json(
+                            f"{first_lines[index]} Buyer timing should choose the account before copy.\n\n"
+                            f"Leadpoet can make signal {endings[index]} visible."
+                        )
+                    ]
+                return ["Static records answer who exists. Leadpoet can make timing visible."]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            for index in range(5):
+                store.save_trend_item(
+                    TrendItem(
+                        title=f"Trend {index}",
+                        source_type="web",
+                        topic="sales AI",
+                        summary="A trend about GTM context.",
+                        why_it_matters="It shows timing matters.",
+                        leadpoet_angle="Buyer timing needs proprietary account context.",
+                        date=utc_now(),
+                    )
+                )
+
+            payload = build_naturalness_audit(
+                store,
+                SocialBrainGenerator(store, provider=RepeatedPhraseProvider()),
+                count=5,
+                trend_limit=5,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+                save_drafts=False,
+            )
+
+            self.assertEqual(payload["repeated_phrase_counts"]["buyer timing should choose"], 5)
+            self.assertTrue(
+                any("Repeated stock phrase appeared across generated posts" in warning for warning in payload["warnings"])
+            )
+            store.close()
+
     def test_leadpoet_mention_pattern_classifies_common_dynamic_verbs(self):
         cases = {
             "Leadpoet should explain why now.": "leadpoet_should",
