@@ -45,6 +45,7 @@ from leadpoet_social_brain.generation import (
     clean_generated_text,
     deterministic_leadpoet_definition_repair,
     leadpoet_anchor_line,
+    leadpoet_name_omission_replacements,
     primary_closing_target,
     primary_human_rhythm_target,
     primary_layout_target,
@@ -1621,6 +1622,23 @@ class SocialBrainTest(unittest.TestCase):
                 self.assertFalse(any(leadpoet_bad_phrase_counts(line).values()), line)
                 self.assertFalse(leadpoet_starts_sentence(line), line)
                 self.assertNotRegex(line, r"\bLeadpoet\s+(?:owns|starts|can|needs?|should|has\s+to|makes?|keeps?|turns?|focuses)\b")
+
+    def test_deterministic_fallbacks_avoid_useful_wedge_language(self):
+        outputs = [
+            *leadpoet_name_omission_replacements("Leadpoet should explain why now."),
+            *leadpoet_name_omission_replacements("Leadpoet turns account reason into action."),
+            *leadpoet_name_omission_replacements("Leadpoet makes timing useful."),
+            leadpoet_anchor_line("no-name wedge"),
+            leadpoet_anchor_line("mechanism carries it"),
+            leadpoet_anchor_line("context-only wedge"),
+            leadpoet_anchor_line("mechanism-first", product_syntax="name omitted"),
+        ]
+        combined = "\n".join(outputs).lower()
+
+        self.assertNotIn("the useful wedge", combined)
+        self.assertNotIn("the useful signal", combined)
+        self.assertNotIn("a useful leadpoet", combined)
+        self.assertNotIn("the useful leadpoet", combined)
 
     def test_ingest_x_post_stores_metrics_and_notes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
