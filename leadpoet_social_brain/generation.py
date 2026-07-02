@@ -1293,7 +1293,12 @@ def apply_deterministic_rule_repair(
     max_chars: int,
     previous_violations: list[str],
 ) -> tuple[str, list[str]]:
-    repaired = deterministic_leadpoet_definition_repair(text, max_chars=max_chars)
+    repaired = deterministic_leadpoet_definition_repair(
+        text,
+        request=request,
+        trends=trends,
+        max_chars=max_chars,
+    )
     if repaired == text:
         return text, previous_violations
     violations = draft_rule_violations(
@@ -1309,33 +1314,58 @@ def apply_deterministic_rule_repair(
     return text, previous_violations
 
 
-def deterministic_leadpoet_definition_repair(text: str, *, max_chars: int) -> str:
+def deterministic_leadpoet_definition_repair(
+    text: str,
+    *,
+    request: DraftRequest,
+    trends: list[TrendItem],
+    max_chars: int,
+) -> str:
     repaired = text
+    product_lane = primary_product_mention_lane(request, trends)[0]
     for pattern in [
         r"\bLeadpoet\s+is\s+building[^.!?\n]*(?:[.!?]|$)",
         r"\bLeadpoet\s+is\s+built[^.!?\n]*(?:[.!?]|$)",
         r"\bLeadpoet\s+is[^.!?\n]*(?:[.!?]|$)",
         r"\bLeadpoet(?:'s|’s)\s+(?:bet|job|role)\s+is[^.!?\n]*(?:[.!?]|$)",
     ]:
-        repaired = re.sub(pattern, leadpoet_definition_replacement, repaired, flags=re.I)
+        repaired = re.sub(
+            pattern,
+            lambda match: leadpoet_definition_replacement(match, product_lane=product_lane),
+            repaired,
+            flags=re.I,
+        )
     cleaned = clean_generated_text(repaired, max_chars=max_chars)
     if not cleaned or len(cleaned) > max_chars:
         return text
     return cleaned
 
 
-def leadpoet_definition_replacement(match: re.Match[str]) -> str:
+def leadpoet_definition_replacement(match: re.Match[str], *, product_lane: str) -> str:
     original = " ".join(match.group(0).strip().split())
     lowered = original.lower()
+    lane_replacements = {
+        "mechanism-first": "The Leadpoet mechanism has to turn context into the next account worth working.",
+        "consequence-first": "Leadpoet should make the next account choice feel earned, not guessed.",
+        "quiet embedded name": "A useful Leadpoet post makes the account reason obvious before the copy starts.",
+        "no-name wedge": "The useful wedge is buyer timing: why this account deserves action now.",
+        "operator scene": "A rep should see what changed at the account before a sequence asks for copy.",
+        "boundary line": "Verified data can say who exists; the sharper signal says who is worth action now.",
+        "signal language": "The Leadpoet signal should explain why now, not only who fits.",
+        "ownership without definition": "Leadpoet owns the account-timing question before outbound gets louder.",
+        "implicit product belief": "Leadpoet's product belief is simple: timing should choose the account before copy writes the email.",
+    }
+    if product_lane in lane_replacements:
+        return lane_replacements[product_lane]
     if "not another" in lowered or "not a " in lowered or "not the " in lowered:
-        return "Leadpoet should give a better reason to choose the account now."
+        return lane_replacements["consequence-first"]
     if "context" in lowered:
-        return "For Leadpoet, context only matters when it changes the account a rep works next."
+        return lane_replacements["mechanism-first"]
     if "timing" in lowered or "intent" in lowered:
-        return "For Leadpoet, buyer timing has to explain why this account is worth action now."
+        return lane_replacements["signal language"]
     if "layer" in lowered or "signal" in lowered:
-        return "The Leadpoet signal has to connect timing to the next account worth working."
-    return "For Leadpoet, the useful question is why this account deserves action now."
+        return lane_replacements["ownership without definition"]
+    return lane_replacements["quiet embedded name"]
 
 
 def draft_rule_violations(
@@ -1520,7 +1550,7 @@ def anchor_draft_to_workspace(
     anchor = workspace_anchor_name(bundle, active_rules)
     if not anchor or not should_require_anchor(request, trends) or anchor.lower() in text.lower():
         return text
-    anchor_line = workspace_anchor_line(anchor, bundle, active_rules)
+    anchor_line = workspace_anchor_line(anchor, request, bundle, trends=trends, active_rules=active_rules)
     candidates = [
         f"{text.rstrip()}\n\n{anchor_line}",
         f"{first_sentence_or_line(text)}\n\n{anchor_line}",
@@ -1533,9 +1563,16 @@ def anchor_draft_to_workspace(
     return text
 
 
-def workspace_anchor_line(anchor: str, bundle: ContextBundle, active_rules: dict[str, list[str]]) -> str:
+def workspace_anchor_line(
+    anchor: str,
+    request: DraftRequest,
+    bundle: ContextBundle,
+    *,
+    trends: list[TrendItem],
+    active_rules: dict[str, list[str]],
+) -> str:
     if anchor.lower() == "leadpoet":
-        return "For Leadpoet, proprietary buyer context and timing signals are where useful sales AI starts."
+        return leadpoet_anchor_line(primary_product_mention_lane(request, trends)[0])
     sources = [
         *active_rules.get("positioning_rules", []),
         *(section.content for section in bundle.positioning_sections),
@@ -1552,6 +1589,21 @@ def workspace_anchor_line(anchor: str, bundle: ContextBundle, active_rules: dict
             if len(sentence) <= 120:
                 return sentence
     return f"For {anchor}, the useful layer starts with proprietary context and timing."
+
+
+def leadpoet_anchor_line(product_lane: str) -> str:
+    lines = {
+        "mechanism-first": "Buyer timing needs to become visible before a sequence starts; that is the Leadpoet job.",
+        "consequence-first": "The account choice gets better when Leadpoet can show why now.",
+        "quiet embedded name": "A useful Leadpoet draft makes the account reason obvious before the copy starts.",
+        "no-name wedge": "Leadpoet can stay quiet in the copy, but the account reason still has to show up.",
+        "operator scene": "A rep should see the changed account before the generated email; Leadpoet starts there.",
+        "boundary line": "Verified data can say who exists; Leadpoet needs to show who is worth action now.",
+        "signal language": "The Leadpoet signal has to tie timing, context, and the next account to work.",
+        "ownership without definition": "Leadpoet owns the account-timing question before outbound gets louder.",
+        "implicit product belief": "Leadpoet's product belief is simple: timing should pick the account before copy writes the email.",
+    }
+    return lines.get(product_lane, lines["signal language"])
 
 
 def first_sentence_or_line(text: str) -> str:

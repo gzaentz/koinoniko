@@ -2034,10 +2034,85 @@ class SocialBrainTest(unittest.TestCase):
             )[0]
 
             self.assertIn("Verified data tells an agent who exists.", draft.text)
-            self.assertIn("For Leadpoet, context only matters", draft.text)
+            self.assertIn("Leadpoet", draft.text)
+            self.assertIn("timing should choose the account", draft.text)
             self.assertNotIn("Leadpoet is", draft.text)
             self.assertNotIn("Leadpoet is building", draft.text)
+            self.assertNotIn("For Leadpoet", draft.text)
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
+            store.close()
+
+    def test_missing_anchor_fallback_varies_leadpoet_line_by_trend(self):
+        class NoAnchorProvider:
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [
+                        strategy_json(
+                            thesis="Buyer timing needs account context.",
+                            concrete_detail="buyer timing",
+                            source_bridge="The trend points to buyer timing.",
+                        )
+                    ]
+                if "Write 3 X draft options" in prompt:
+                    return ["Buyer timing is the real sales AI advantage. More email is not strategy."][:variants]
+                if "Choose the best X post" in prompt:
+                    return [evaluation_json("Buyer timing is the real sales AI advantage. More email is not strategy.")]
+                if "Repair this X post" in prompt:
+                    return ["Buyer timing is the real sales AI advantage. More email is not strategy."]
+                return ["Buyer timing is the real sales AI advantage."]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            trend_a = store.save_trend_item(
+                TrendItem(
+                    id="trend_a",
+                    title="ZoomInfo context layer",
+                    source_type="web",
+                    topic="sales AI",
+                    summary="Context layer",
+                    why_it_matters="It proves context matters.",
+                    leadpoet_angle="Buyer timing beats generic data.",
+                    date=utc_now(),
+                )
+            )
+            trend_b = store.save_trend_item(
+                TrendItem(
+                    id="trend_b",
+                    title="Close launches AI agent",
+                    source_type="web",
+                    topic="sales AI",
+                    summary="AI agent",
+                    why_it_matters="It proves agents need better timing.",
+                    leadpoet_angle="Account context should decide action.",
+                    date=utc_now(),
+                )
+            )
+            generator = SocialBrainGenerator(store, provider=NoAnchorProvider())
+            request_a = DraftRequest(
+                platform="x",
+                topic="sales AI",
+                post_type="founder_insight",
+                angle="buyer timing beats generic data",
+                use_trends=True,
+                trend_ids=[trend_a.id],
+            )
+            request_b = replace(request_a, trend_ids=[trend_b.id])
+
+            draft_a = generator.generate(request_a, save=False)[0]
+            draft_b = generator.generate(request_b, save=False)[0]
+
+            self.assertIn("Leadpoet", draft_a.text)
+            self.assertIn("Leadpoet", draft_b.text)
+            self.assertNotEqual(draft_a.text, draft_b.text)
+            self.assertNotIn("Leadpoet is", draft_a.text)
+            self.assertNotIn("Leadpoet is", draft_b.text)
+            self.assertNotIn("proprietary buyer context and timing signals are where useful sales AI starts", draft_a.text)
+            self.assertNotIn("proprietary buyer context and timing signals are where useful sales AI starts", draft_b.text)
+            self.assertNotEqual(
+                draft_a.context_snapshot["primary_product_mention_lane"]["name"],
+                draft_b.context_snapshot["primary_product_mention_lane"]["name"],
+            )
             store.close()
 
     def test_generation_repairs_cookie_cutter_leadpoet_mentions_across_current_trend_batch(self):
@@ -3456,11 +3531,13 @@ class SocialBrainTest(unittest.TestCase):
 
             self.assertEqual(status, 200)
             self.assertEqual(payload["status"], "needs_review")
-            self.assertEqual(
-                payload["generated_text"],
-                "Buyer timing is the real sales AI advantage. More email is not strategy.\n\n"
+            self.assertIn("Buyer timing is the real sales AI advantage. More email is not strategy.", payload["generated_text"])
+            self.assertIn("Leadpoet", payload["generated_text"])
+            self.assertNotIn(
                 "For Leadpoet, proprietary buyer context and timing signals are where useful sales AI starts.",
+                payload["generated_text"],
             )
+            self.assertNotIn("Leadpoet is", payload["generated_text"])
             self.assertEqual(payload["item"]["status"], "needs_review")
             self.assertEqual(payload["item"]["scheduled_at"], "2026-06-30T10:00")
             self.assertEqual(payload["item"]["quality_mode"], "quality_review")
