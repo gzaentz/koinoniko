@@ -803,6 +803,7 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
     for key, value in sorted(payload["bad_phrase_counts"].items()):
         print(f"- {key}: {value}")
     print(f"Unique first lines: {payload['unique_first_lines']}")
+    print(f"Unique closing lines: {payload['unique_last_lines']}")
     print("Primary structure option counts:")
     for key, value in sorted(payload["primary_structure_option_counts"].items()):
         print(f"- {key}: {value}")
@@ -908,6 +909,7 @@ def build_naturalness_audit(
                 "leadpoet_mention_pattern": leadpoet_mention_pattern(draft.text),
                 "layout_fingerprint": post_layout_fingerprint(draft.text),
                 "first_line": first_nonempty_line(draft.text),
+                "last_line": last_nonempty_line(draft.text),
                 "primary_structure_option": primary_structure,
                 "first_structure_option": first_structure,
                 "primary_product_mention_lane": primary_product_lane,
@@ -929,6 +931,9 @@ def build_naturalness_audit(
     unique_first_lines = len({str(row["first_line"]).lower() for row in rows if row["first_line"]})
     if unique_first_lines < min(5, len(rows)):
         warnings.append("First lines are not varied enough.")
+    unique_last_lines = len({str(row["last_line"]).lower() for row in rows if row["last_line"]})
+    if unique_last_lines < min(5, len(rows)):
+        warnings.append("Closing lines are not varied enough.")
     primary_structure_counts = Counter(str(row["primary_structure_option"]) for row in rows if row["primary_structure_option"])
     first_structure_counts = Counter(str(row["first_structure_option"]) for row in rows if row["first_structure_option"])
     if len(primary_structure_counts) < min(5, len(trends), count):
@@ -972,6 +977,7 @@ def build_naturalness_audit(
         "leadpoet_shapes": dict(Counter(str(row["leadpoet_shape"]) for row in rows)),
         "bad_phrase_counts": bad_phrase_counts,
         "unique_first_lines": unique_first_lines,
+        "unique_last_lines": unique_last_lines,
         "primary_structure_option_counts": dict(primary_structure_counts),
         "primary_product_mention_lane_counts": dict(primary_product_lane_counts),
         "primary_layout_target_counts": dict(primary_layout_target_counts),
@@ -1087,6 +1093,14 @@ def leadpoet_mention_pattern(text: str) -> str:
 
 def first_nonempty_line(text: str) -> str:
     for line in text.splitlines():
+        cleaned = line.strip()
+        if cleaned:
+            return cleaned
+    return ""
+
+
+def last_nonempty_line(text: str) -> str:
+    for line in reversed(text.splitlines()):
         cleaned = line.strip()
         if cleaned:
             return cleaned

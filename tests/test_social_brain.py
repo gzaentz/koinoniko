@@ -2496,6 +2496,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(all(count == 0 for count in payload["bad_phrase_counts"].values()))
             self.assertEqual(payload["warnings"], [])
             self.assertGreaterEqual(payload["unique_first_lines"], 5)
+            self.assertGreaterEqual(payload["unique_last_lines"], 5)
             self.assertGreaterEqual(len(payload["primary_structure_option_counts"]), 5)
             self.assertGreaterEqual(len(payload["primary_product_mention_lane_counts"]), 5)
             self.assertGreaterEqual(len(payload["primary_layout_target_counts"]), 4)
@@ -2507,6 +2508,67 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotIn("leadpoet_is_building", payload["leadpoet_shapes"])
             self.assertNotIn("leadpoet_is_built", payload["leadpoet_shapes"])
             self.assertNotIn("leadpoet_is", payload["leadpoet_shapes"])
+            store.close()
+
+    def test_audit_naturalness_x_warns_on_repeated_closing_line(self):
+        class RepeatedCloserProvider:
+            def __init__(self):
+                self.final_count = 0
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "Static records answer who exists. Leadpoet should make timing visible.\n\nThe useful question is why now.",
+                        "The CRM can be correct. Leadpoet should make timing visible.\n\nThe useful question is why now.",
+                        "More names do not fix judgment. Leadpoet should make timing visible.\n\nThe useful question is why now.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    first_lines = [
+                        "Static records answer who exists.",
+                        "The CRM can be correct.",
+                        "More names do not fix judgment.",
+                        "Context only matters when it changes action.",
+                        "A sales agent needs timing before copy.",
+                    ]
+                    line = first_lines[self.final_count % len(first_lines)]
+                    self.final_count += 1
+                    return [evaluation_json(f"{line} Leadpoet should make timing visible.\n\nThe useful question is why now.")]
+                return ["Static records answer who exists. Leadpoet should make timing visible.\n\nThe useful question is why now."]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            for index in range(5):
+                store.save_trend_item(
+                    TrendItem(
+                        title=f"Trend {index}",
+                        source_type="web",
+                        topic="sales AI",
+                        summary="A trend about GTM context.",
+                        why_it_matters="It shows timing matters.",
+                        leadpoet_angle="Buyer timing needs proprietary account context.",
+                        date=utc_now(),
+                    )
+                )
+
+            payload = build_naturalness_audit(
+                store,
+                SocialBrainGenerator(store, provider=RepeatedCloserProvider()),
+                count=5,
+                trend_limit=5,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+                save_drafts=False,
+            )
+
+            self.assertEqual(payload["unique_first_lines"], 5)
+            self.assertEqual(payload["unique_last_lines"], 1)
+            self.assertTrue(
+                any("Closing lines are not varied enough" in warning for warning in payload["warnings"])
+            )
             store.close()
 
     def test_leadpoet_mention_pattern_classifies_common_dynamic_verbs(self):
