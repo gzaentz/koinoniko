@@ -804,6 +804,9 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
     print("First structure option counts:")
     for key, value in sorted(payload["first_structure_option_counts"].items()):
         print(f"- {key}: {value}")
+    print("Leadpoet mention pattern counts:")
+    for key, value in sorted(payload["leadpoet_mention_pattern_counts"].items()):
+        print(f"- {key}: {value}")
     if payload["warnings"]:
         print("Warnings:")
         for warning in payload["warnings"]:
@@ -858,6 +861,7 @@ def build_naturalness_audit(
                 "text": draft.text,
                 "chars": len(draft.text),
                 "leadpoet_shape": leadpoet_mention_shape(draft.text),
+                "leadpoet_mention_pattern": leadpoet_mention_pattern(draft.text),
                 "first_line": first_nonempty_line(draft.text),
                 "first_structure_option": first_structure,
             }
@@ -879,6 +883,14 @@ def build_naturalness_audit(
     first_structure_counts = Counter(str(row["first_structure_option"]) for row in rows if row["first_structure_option"])
     if len(first_structure_counts) < min(5, len(trends), count):
         warnings.append("Structure guidance did not vary enough across trends.")
+    mention_pattern_counts = Counter(
+        str(row["leadpoet_mention_pattern"])
+        for row in rows
+        if row["leadpoet_mention_pattern"] and row["leadpoet_mention_pattern"] != "no_leadpoet"
+    )
+    if mention_pattern_counts and mention_pattern_counts.most_common(1)[0][1] >= max(3, (len(rows) + 1) // 2):
+        pattern, pattern_count = mention_pattern_counts.most_common(1)[0]
+        warnings.append(f"Leadpoet mention phrasing is too concentrated: {pattern} appears {pattern_count}/{len(rows)} times.")
     return {
         "trend_count": len(trends),
         "post_count": len(rows),
@@ -886,6 +898,7 @@ def build_naturalness_audit(
         "bad_phrase_counts": bad_phrase_counts,
         "unique_first_lines": unique_first_lines,
         "first_structure_option_counts": dict(first_structure_counts),
+        "leadpoet_mention_pattern_counts": dict(mention_pattern_counts),
         "warnings": warnings,
         "rows": rows,
     }
@@ -904,6 +917,32 @@ def leadpoet_mention_shape(text: str) -> str:
     if re.search(r"(?m)^\s*leadpoet\b", text, flags=re.I):
         return "leadpoet_paragraph_start"
     return "leadpoet_embedded"
+
+
+def leadpoet_mention_pattern(text: str) -> str:
+    if not re.search(r"\bleadpoet\b", text, flags=re.I):
+        return "no_leadpoet"
+    if re.search(r"\bleadpoet\s+is\s+building\b", text, flags=re.I):
+        return "leadpoet_is_building"
+    if re.search(r"\bleadpoet\s+is\b", text, flags=re.I):
+        return "leadpoet_is"
+    if re.search(r"\bfor\s+leadpoet\b", text, flags=re.I):
+        return "for_leadpoet"
+    if re.search(r"\bthat\s+is\s+where\s+leadpoet\b|\bthat's\s+where\s+leadpoet\b", text, flags=re.I):
+        return "that_is_where_leadpoet"
+    if re.search(r"\bleadpoet\s+lane\b|\bleadpoet's\s+lane\b|\bleadpoet’s\s+lane\b", text, flags=re.I):
+        return "leadpoet_lane"
+    if re.search(r"\bleadpoet\s+signal\b|\bleadpoet's\s+signal\b|\bleadpoet’s\s+signal\b", text, flags=re.I):
+        return "leadpoet_signal"
+    if re.search(r"\bleadpoet\s+has\s+to\b", text, flags=re.I):
+        return "leadpoet_has_to"
+    if re.search(r"\bleadpoet\s+focuses\b", text, flags=re.I):
+        return "leadpoet_focuses"
+    if re.search(r"(?m)^\s*leadpoet\b", text, flags=re.I):
+        return "leadpoet_starts_line"
+    if re.search(r"\bleadpoet(?:'s|’s)\s+\w+", text, flags=re.I):
+        return "leadpoet_possessive"
+    return "leadpoet_contextual"
 
 
 def first_nonempty_line(text: str) -> str:

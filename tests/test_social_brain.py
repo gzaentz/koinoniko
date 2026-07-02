@@ -1955,8 +1955,8 @@ class SocialBrainTest(unittest.TestCase):
                     repairs = [
                         "Static records answer who exists.\n\nFor Leadpoet, the harder question is why this account is worth action now.",
                         "A rep does not need another prettier list.\n\nThey need the account where something changed. That is the Leadpoet lane.",
-                        "Context only matters when it changes action.\n\nFor Leadpoet, that means timing a rep can actually use.",
-                        "Buyer timing beats another warmed-up account score.\n\nFor Leadpoet, the signal has to explain why now.",
+                        "Context only matters when it changes action.\n\nLeadpoet has to turn that into timing a rep can actually use.",
+                        "Buyer timing beats another warmed-up account score.\n\nThe Leadpoet signal has to explain why now.",
                         "A contact record can be correct and still useless today.\n\nThat is where Leadpoet focuses: buyer context with a reason to act.",
                     ]
                     return [repairs[(self.repair_count - 1) % len(repairs)]]
@@ -2068,8 +2068,8 @@ class SocialBrainTest(unittest.TestCase):
                     repairs = [
                         "Static records answer who exists.\n\nFor Leadpoet, the harder question is why this account is worth action now.",
                         "A rep does not need another prettier list.\n\nThey need the account where something changed. That is the Leadpoet lane.",
-                        "Context only matters when it changes action.\n\nFor Leadpoet, that means timing a rep can actually use.",
-                        "Buyer timing beats another warmed-up account score.\n\nFor Leadpoet, the signal has to explain why now.",
+                        "Context only matters when it changes action.\n\nLeadpoet has to turn that into timing a rep can actually use.",
+                        "Buyer timing beats another warmed-up account score.\n\nThe Leadpoet signal has to explain why now.",
                         "A contact record can be correct and still useless today.\n\nThat is where Leadpoet focuses: buyer context with a reason to act.",
                     ]
                     return [repairs[(self.repair_count - 1) % len(repairs)]]
@@ -2131,9 +2131,71 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["warnings"], [])
             self.assertGreaterEqual(payload["unique_first_lines"], 5)
             self.assertGreaterEqual(len(payload["first_structure_option_counts"]), 5)
+            self.assertGreaterEqual(len(payload["leadpoet_mention_pattern_counts"]), 5)
+            self.assertLess(max(payload["leadpoet_mention_pattern_counts"].values()), 10)
             self.assertNotIn("leadpoet_is_building", payload["leadpoet_shapes"])
             self.assertNotIn("leadpoet_is_built", payload["leadpoet_shapes"])
             self.assertNotIn("leadpoet_is", payload["leadpoet_shapes"])
+            store.close()
+
+    def test_audit_naturalness_x_warns_on_repeated_leadpoet_mention_pattern(self):
+        class RepetitiveMentionProvider:
+            def __init__(self):
+                self.final_count = 0
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [strategy_json()]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "Static records answer who exists.\n\nFor Leadpoet, timing is the useful question.",
+                        "The CRM can be correct and still late.\n\nFor Leadpoet, context has to change action.",
+                        "More names do not fix judgment.\n\nFor Leadpoet, the signal has to explain why now.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    first_lines = [
+                        "Static records answer who exists.",
+                        "The CRM can be correct and still late.",
+                        "More names do not fix judgment.",
+                        "Context only matters when it changes action.",
+                        "A sales agent needs timing before copy.",
+                    ]
+                    line = first_lines[self.final_count % len(first_lines)]
+                    self.final_count += 1
+                    return [evaluation_json(f"{line}\n\nFor Leadpoet, buyer timing is the useful question.")]
+                return ["For Leadpoet, buyer timing is the useful question."]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            for index in range(5):
+                store.save_trend_item(
+                    TrendItem(
+                        title=f"Trend {index}",
+                        source_type="web",
+                        topic="sales AI",
+                        summary="A trend about GTM context.",
+                        why_it_matters="It shows timing matters.",
+                        leadpoet_angle="Buyer timing needs proprietary account context.",
+                        date=utc_now(),
+                    )
+                )
+
+            payload = build_naturalness_audit(
+                store,
+                SocialBrainGenerator(store, provider=RepetitiveMentionProvider()),
+                count=5,
+                trend_limit=5,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+                save_drafts=False,
+            )
+
+            self.assertEqual(payload["leadpoet_mention_pattern_counts"]["for_leadpoet"], 5)
+            self.assertTrue(
+                any("Leadpoet mention phrasing is too concentrated" in warning for warning in payload["warnings"])
+            )
             store.close()
 
     def test_generation_allows_supported_first_person_context(self):
