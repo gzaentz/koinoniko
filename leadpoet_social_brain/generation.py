@@ -2481,6 +2481,12 @@ def deterministic_leadpoet_definition_repair(
         flags=re.I,
     )
     repaired = re.sub(
+        r"(?m)(^|(?<=[.!?])\s+|\n\n)(\s*)Leadpoet\s+(belongs|only\s+matters|must)\s+([^.!?\n]*(?:[.!?]|$))",
+        lambda match: leadpoet_fallback_leadin_replacement(match, product_lane=product_lane),
+        repaired,
+        flags=re.I,
+    )
+    repaired = re.sub(
         r"(?m)(^|(?<=[.!?])\s+|\n\n)(\s*)Leadpoet\s+(owns?|makes?|starts?|keeps?|turns?|focuses|helps?|gives?|answers?|shows?|lets?|finds?|enables?|provides?|delivers?|powers?|unlocks?|brings?|drives?|creates?)\s+([^.!?\n]*(?:[.!?]|$))",
         lambda match: leadpoet_subject_verb_replacement(match, product_lane=product_lane, product_syntax=product_syntax),
         repaired,
@@ -2604,6 +2610,62 @@ def leadpoet_modal_leadin_replacement(match: re.Match[str], *, product_lane: str
         "context-only wedge": "Account context can carry this on its own: {body}.",
     }
     replacement = templates.get(product_lane, templates["quiet embedded name"]).format(body=body)
+    if ending != "." and replacement.endswith("."):
+        replacement = f"{replacement[:-1]}{ending}"
+    return f"{prefix}{indent}{replacement}"
+
+
+def leadpoet_fallback_leadin_replacement(match: re.Match[str], *, product_lane: str) -> str:
+    prefix = match.group(1) or ""
+    indent = match.group(2) or ""
+    verb = " ".join((match.group(3) or "").lower().split())
+    body = " ".join((match.group(4) or "").strip().split())
+    ending = "."
+    if body and body[-1] in ".!?":
+        ending = body[-1]
+        body = body[:-1].strip()
+    body = body[0].lower() + body[1:] if body else "close to the account reason"
+    if verb == "only matters" and body.startswith("when "):
+        condition = body[len("when "):].strip()
+        visible_match = re.match(r"(.+?)\s+is\s+visible$", condition, flags=re.I)
+        if visible_match:
+            subject = visible_match.group(1).strip() or "timing"
+            body = f"{subject} becomes visible enough to change the account choice"
+        else:
+            body = f"{condition} changes the account choice" if condition else "timing changes the account choice"
+    if verb == "belongs" and body.startswith(("near ", "close to ", "with ")):
+        if body.startswith("close to "):
+            subject = body[len("close to "):].strip() or "account timing"
+            body = f"{subject} stays close to the account choice"
+        elif body.startswith("near "):
+            subject = body[len("near "):].strip() or "the account reason"
+            body = f"{subject} stays near the account choice"
+        elif body.startswith("with "):
+            subject = body[len("with "):].strip() or "the account reason"
+            body = f"{subject} stays tied to the account choice"
+    elif verb == "must":
+        body = body if body.startswith(("make ", "keep ", "show ", "answer ", "turn ")) else f"make {body}"
+    templates = {
+        "mechanism-first": "The mechanism should come first: {body}. Leadpoet comes after the account reason is clear.",
+        "consequence-first": "That only matters when it changes the next account choice in Leadpoet: {body}.",
+        "quiet embedded name": "The account reason can carry Leadpoet quietly: {body}.",
+        "no-name wedge": "Buyer timing should stay concrete: {body}.",
+        "mechanism carries it": "Let the mechanism carry the claim: {body}.",
+        "operator scene": "When a rep opens Leadpoet, the account signal should already make this obvious: {body}.",
+        "boundary line": "Around Leadpoet, the sharper boundary is this: {body}.",
+        "signal language": "A signal near Leadpoet has one job: {body}.",
+        "ownership without definition": "Use Leadpoet as the pressure test for the account-timing question: {body}.",
+        "implicit product belief": "That belief stays practical through Leadpoet: {body}.",
+        "context-only wedge": "Account context can carry this on its own: {body}.",
+    }
+    template = templates.get(product_lane, templates["quiet embedded name"])
+    if product_lane_omits_name(product_lane):
+        template = {
+            "no-name wedge": "Buyer timing should stay concrete: {body}.",
+            "mechanism carries it": "Let the mechanism carry the claim: {body}.",
+            "context-only wedge": "Account context can carry this on its own: {body}.",
+        }.get(product_lane, "Buyer timing should stay concrete: {body}.")
+    replacement = template.format(body=body)
     if ending != "." and replacement.endswith("."):
         replacement = f"{replacement[:-1]}{ending}"
     return f"{prefix}{indent}{replacement}"
