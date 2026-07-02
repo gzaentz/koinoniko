@@ -1010,8 +1010,6 @@ def build_naturalness_plan_audit(
         length_mode=length_mode,
     )
     rows: list[dict[str, object]] = []
-    prompt_seed_violations: list[dict[str, object]] = []
-    prompt_builder = SocialBrainGenerator(store)
     for index, trend, request, assignment in audit_plan:
         rows.append(
             {
@@ -1023,16 +1021,7 @@ def build_naturalness_plan_audit(
                 **assignment,
             }
         )
-        prompt = prompt_builder.build_prompt(request)
-        for violation in prompt_seed_violations_for_prompt(prompt):
-            prompt_seed_violations.append(
-                {
-                    "index": index + 1,
-                    "trend_id": trend.id,
-                    "trend_title": trend.title,
-                    **violation,
-                }
-            )
+    prompt_seed_violations = prompt_seed_violations_for_audit_plan(store, audit_plan)
     covered_trend_ids = {str(row["trend_id"]) for row in rows if row["trend_id"]}
     uncovered_trend_count = max(0, len(trends) - len(covered_trend_ids))
     primary_structure_counts = Counter(str(row["primary_structure_option"]) for row in rows)
@@ -1120,6 +1109,35 @@ def build_naturalness_plan_audit(
         "warnings": warnings,
         "rows": rows,
     }
+
+
+def prompt_seed_violations_for_audit_plan(
+    store: SQLiteStore,
+    audit_plan: list[tuple[int, TrendItem, DraftRequest, dict[str, str]]],
+) -> list[dict[str, object]]:
+    prompt_seed_violations: list[dict[str, object]] = []
+    prompt_builder = SocialBrainGenerator(store)
+    for index, trend, request, _assignment in audit_plan:
+        prompt = prompt_builder.build_prompt(request)
+        for violation in prompt_seed_violations_for_prompt(prompt):
+            prompt_seed_violations.append(
+                {
+                    "index": index + 1,
+                    "trend_id": trend.id,
+                    "trend_title": trend.title,
+                    **violation,
+                }
+            )
+    return prompt_seed_violations
+
+
+def prompt_seed_gate_message(violations: list[dict[str, object]]) -> str:
+    first = violations[0] if violations else {}
+    return (
+        "Prompt seed scan found formulaic or generic source text before provider generation: "
+        f"{len(violations)} issue(s), first={first.get('label')} in {first.get('section')}. "
+        "Run the plan-only audit for details."
+    )
 
 
 def prompt_seed_violations_for_prompt(prompt: str) -> list[dict[str, str]]:
@@ -1338,6 +1356,9 @@ def build_naturalness_audit(
         post_type=post_type,
         length_mode=length_mode,
     )
+    prompt_seed_violations = prompt_seed_violations_for_audit_plan(store, audit_plan)
+    if prompt_seed_violations:
+        raise SystemExit(prompt_seed_gate_message(prompt_seed_violations))
     for index, trend, request, _assignment in audit_plan:
         draft = generator.generate(
             request,

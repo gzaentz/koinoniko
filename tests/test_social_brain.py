@@ -4397,6 +4397,54 @@ class SocialBrainTest(unittest.TestCase):
             self.assertTrue(any("Prompt seed scan found" in warning for warning in payload["warnings"]))
             store.close()
 
+    def test_audit_naturalness_x_live_stops_before_provider_on_prompt_seed_text(self):
+        class CountingProvider:
+            def __init__(self):
+                self.calls = 0
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                self.calls += 1
+                return ["This provider should not be called."]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            store.save_context_section(
+                ContextSection(
+                    kind="positioning",
+                    name="Risky positioning note",
+                    content="Leadpoet is building the intent layer for buyer timing.",
+                )
+            )
+            store.save_trend_item(
+                TrendItem(
+                    title="HubSpot Adds Buyer Intent Signals",
+                    source_type="web",
+                    topic="sales AI",
+                    summary="A trend about CRM intent.",
+                    why_it_matters="It shows timing matters.",
+                    leadpoet_angle="Buyer timing needs proprietary account context.",
+                    date=utc_now(),
+                )
+            )
+            provider = CountingProvider()
+
+            with self.assertRaises(SystemExit) as raised:
+                build_naturalness_audit(
+                    store,
+                    SocialBrainGenerator(store, provider=provider),
+                    count=1,
+                    trend_limit=0,
+                    trend_status="unused",
+                    post_type="founder_insight",
+                    length_mode="standard",
+                    save_drafts=False,
+                )
+
+            self.assertIn("Prompt seed scan found", str(raised.exception))
+            self.assertEqual(provider.calls, 0)
+            store.close()
+
     def test_generic_trend_angles_are_made_specific_for_generation_and_audit(self):
         generic_angle = "Tie the signal back to buyer timing, proprietary context, and why generic sales automation is not enough."
         with tempfile.TemporaryDirectory() as tmpdir:
