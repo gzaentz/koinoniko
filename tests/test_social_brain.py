@@ -1660,6 +1660,83 @@ class SocialBrainTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(leadpoet_phrase_pattern_for_text(text), expected)
 
+    def test_deterministic_leadpoet_repairs_avoid_reach_template_language(self):
+        bad_inputs = [
+            "Leadpoet is building the intent layer for buyer timing.",
+            "For Leadpoet, the harder question is why this account is worth action now.",
+            "For Leadpoet, account context has to explain what changed.",
+            "For Leadpoet, timing means action before copy.",
+            "For Leadpoet, buyer timing is tied to the account reason.",
+            "Leadpoet should explain why now.",
+            "Leadpoet can make buyer timing visible.",
+            "Leadpoet owns the account-timing question.",
+            "Leadpoet makes timing useful when an account has a reason to listen.",
+            "Leadpoet turns account reason into action.",
+            "Leadpoet focuses on buyer timing.",
+            "This is where Leadpoet focuses: timing before copy.",
+        ]
+        lane_names = [
+            "mechanism-first",
+            "consequence-first",
+            "quiet embedded name",
+            "no-name wedge",
+            "mechanism carries it",
+            "operator scene",
+            "boundary line",
+            "signal language",
+            "ownership without definition",
+            "implicit product belief",
+            "context-only wedge",
+        ]
+        syntax_names = [
+            "product as object",
+            "prepositional tuck-in",
+            "possessive modifier",
+            "name omitted",
+            "handoff point",
+            "question-adjacent",
+            "earned late noun",
+        ]
+
+        outputs = [
+            leadpoet_anchor_line(lane)
+            for lane in lane_names
+        ]
+        outputs.extend(leadpoet_anchor_line("mechanism-first", product_syntax=syntax) for syntax in syntax_names)
+        for index in range(120):
+            trend = TrendItem(
+                id=f"reach-template-trend-{index}",
+                title=f"Reach Template Trend {index}",
+                source_type="web",
+                topic="sales AI",
+                summary="A trend about account timing.",
+                why_it_matters="It shows timing matters.",
+                leadpoet_angle="Buyer timing needs proprietary account context.",
+                date=utc_now(),
+            )
+            request = DraftRequest(
+                platform="x",
+                topic="sales AI",
+                post_type="founder_insight",
+                angle="buyer timing beats generic data",
+                trend_ids=[trend.id],
+            )
+            outputs.extend(
+                deterministic_leadpoet_definition_repair(
+                    bad_input,
+                    request=request,
+                    trends=[trend],
+                    max_chars=1000,
+                )
+                for bad_input in bad_inputs
+            )
+
+        combined = "\n".join(outputs)
+        self.assertNotRegex(combined, r"\b(?:reaches?|reach)\s+Leadpoet\b")
+        self.assertNotRegex(combined, r"\bby the time\b[^.!?\n]*\bLeadpoet\b")
+        self.assertNotRegex(combined, r"\bbring\s+Leadpoet\s+in\b")
+        self.assertFalse(any(leadpoet_bad_phrase_counts(combined.lower()).values()))
+
     def test_deterministic_leadpoet_repairs_avoid_meta_instruction_language(self):
         banned_meta_patterns = [
             r"\binside\s+leadpoet\b",
