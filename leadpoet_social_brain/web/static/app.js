@@ -19,6 +19,8 @@ const state = {
   voiceAvoidDraft: [],
   reviewItems: [],
   scheduledItems: [],
+  pendingReviewCreations: [],
+  arrivedQueueItemIds: new Set(),
   savedTrends: [],
   selectedTrendWindow: "daily",
   selectedPatternWindow: "weekly",
@@ -1559,15 +1561,19 @@ function queueCardPrompt(item, title) {
 
 function renderReviewer() {
   closeReviewAddMenu();
-  $("reviewCount").textContent = String(state.reviewItems.length);
+  $("reviewCount").textContent = String(state.reviewItems.length + state.pendingReviewCreations.length);
   $("scheduledCount").textContent = String(state.scheduledItems.length);
   if (state.booting && !state.status) {
     $("reviewList").innerHTML = skeletonCards(2, "queue-card");
     $("scheduledList").innerHTML = skeletonCards(1, "queue-card");
     return;
   }
-  $("reviewList").innerHTML = state.reviewItems.length
-    ? state.reviewItems.map((item) => queueCard(item, "review")).join("")
+  const reviewCards = [
+    ...state.pendingReviewCreations.map(pendingQueueCard),
+    ...state.reviewItems.map((item) => queueCard(item, "review")),
+  ].join("");
+  $("reviewList").innerHTML = reviewCards
+    ? reviewCards
     : "";
   $("scheduledList").innerHTML = state.scheduledItems.length
     ? state.scheduledItems.map((item) => queueCard(item, "scheduled")).join("")
@@ -1580,11 +1586,12 @@ function queueCard(item, column) {
   const prompt = queueCardPrompt(item, title);
   const canPost = item.status === "approved" && state.status?.x_write_configured;
   const postNowTitle = state.status?.x_write_configured ? "" : "X write auth is not connected.";
+  const arrivedClass = state.arrivedQueueItemIds.has(item.id) ? " queue-card-arrived" : "";
   const secondaryAction = column === "scheduled"
     ? `<button class="secondary" onclick='postNow(event, ${jsArg(item.id)})' ${canPost ? "" : "disabled"} title="${escapeAttr(postNowTitle)}">Post now</button>`
     : `<button class="secondary" onclick='skipQueue(event, ${jsArg(item.id)})'>Deny</button>`;
   return `
-    <article class="queue-card" draggable="true" ondragstart='dragQueue(event, ${jsArg(item.id)})'>
+    <article class="queue-card${arrivedClass}" draggable="true" ondragstart='dragQueue(event, ${jsArg(item.id)})'>
       <button class="card-open" onclick='openQueueDetail(${jsArg(item.id)})'>
         <h3>${escapeHtml(title)}</h3>
         ${prompt ? `<p>${escapeHtml(prompt)}</p>` : ""}
@@ -1596,6 +1603,52 @@ function queueCard(item, column) {
       </div>
     </article>
   `;
+}
+
+function pendingQueueCard(item) {
+  const title = summarize(cleanString(item.instruction) || "New post", 88);
+  const contextLine = [
+    topicLabel(item.topic || "uncategorized"),
+    label(item.post_type || "post"),
+  ].filter(Boolean).join(" · ");
+  return `
+    <article class="queue-card queue-card-pending" aria-live="polite">
+      <div class="card-open">
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(contextLine || "Writing draft")}</p>
+        <div class="schedule-line">Generating post for review</div>
+      </div>
+      <div class="queue-pending-indicator" aria-label="Generating">
+        <span></span><span></span><span></span>
+      </div>
+    </article>
+  `;
+}
+
+function addPendingReviewCreation(item) {
+  state.pendingReviewCreations = [item, ...state.pendingReviewCreations];
+  if (state.view === "reviewer") renderReviewer();
+}
+
+function removePendingReviewCreation(id) {
+  state.pendingReviewCreations = state.pendingReviewCreations.filter((item) => item.id !== id);
+  if (state.view === "reviewer") renderReviewer();
+}
+
+function showCreatedQueueItem(item) {
+  if (!item?.id) return;
+  state.reviewItems = [item, ...state.reviewItems.filter((existing) => existing.id !== item.id)];
+  markQueueItemArrived(item.id);
+  if (state.view === "reviewer") renderReviewer();
+}
+
+function markQueueItemArrived(id) {
+  if (!id) return;
+  state.arrivedQueueItemIds.add(id);
+  window.setTimeout(() => {
+    state.arrivedQueueItemIds.delete(id);
+    if (state.view === "reviewer") renderReviewer();
+  }, 1600);
 }
 
 window.dragQueue = (event, id) => {
@@ -1926,19 +1979,28 @@ async function createPost() {
     scheduled_at: $("createPostScheduled").value,
     extra_context: $("createPostExtra").value,
   };
-  showMessage("Generating post for review.");
+  const pendingId = `pending-post-${Date.now()}`;
+  addPendingReviewCreation({ id: pendingId, ...requestBody });
+  clearMessage();
   closeModal("createPostModal");
   setView("reviewer");
-  const payload = await api("/api/content/create-post", {
-    method: "POST",
-    body: JSON.stringify(requestBody),
-  });
+  let payload;
+  try {
+    payload = await api("/api/content/create-post", {
+      method: "POST",
+      body: JSON.stringify(requestBody),
+    });
+  } catch (error) {
+    removePendingReviewCreation(pendingId);
+    throw error;
+  }
   const createdQueueId = payload.queue_id || payload.item?.id || "";
   const warnings = payload.warnings || [];
   $("createPostResult").innerHTML = warnings.length
     ? warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join("")
     : "";
-  showMessage(warnings.length ? `Created post for review. ${warnings[0]}` : "Created post for review.");
+  removePendingReviewCreation(pendingId);
+  if (payload.item) showCreatedQueueItem(payload.item);
   $("createPostInstruction").value = "";
   $("createPostExtra").value = "";
   $("createPostScheduled").value = "";
@@ -1948,8 +2010,8 @@ async function createPost() {
   state.selectedTrendForCreate = null;
   state.selectedPatternForCreate = null;
   renderCreatePostPatternHint();
+  if (createdQueueId && !payload.item) markQueueItemArrived(createdQueueId);
   await refresh();
-  if (createdQueueId) await openQueueDetailById(createdQueueId);
 }
 
 async function planWeek() {
