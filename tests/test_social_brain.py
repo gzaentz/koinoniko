@@ -5962,7 +5962,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(type_counts["product_update"], 0)
             self.assertIn("product update examples", coverage["recommendation"])
 
-    def test_default_positioning_rules_do_not_seed_leadpoet_is_definition(self):
+    def test_default_positioning_rules_do_not_seed_formulaic_leadpoet_subjects(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
             store.seed_defaults()
@@ -5971,11 +5971,39 @@ class SocialBrainTest(unittest.TestCase):
             prompt = SocialBrainGenerator(store).build_prompt(
                 DraftRequest(platform="x", topic="sales LLMs", post_type="founder_insight")
             )
+            rules_text = "\n".join(rules)
 
-            self.assertTrue(any("Leadpoet owns the intent wedge" in rule for rule in rules))
-            self.assertNotIn("Leadpoet is the core intent layer", "\n".join(rules))
-            self.assertIn("Leadpoet owns the intent wedge", prompt)
+            self.assertTrue(any("Keep the Leadpoet wedge concrete" in rule for rule in rules))
+            self.assertIn("buyer timing and proprietary context inside Leadpoet", rules_text)
+            self.assertNotIn("Leadpoet owns the intent wedge", rules_text)
+            self.assertNotRegex(rules_text, r"\bLeadpoet\s+(?:owns|is|should|can|needs?|has\s+to|starts)\b")
+            self.assertNotIn("Leadpoet is the core intent layer", rules_text)
+            self.assertIn("Keep the Leadpoet wedge concrete", prompt)
+            self.assertNotIn("Leadpoet owns the intent wedge", prompt)
             self.assertNotIn("Leadpoet is the core intent layer", prompt)
+            store.close()
+
+    def test_legacy_default_positioning_rules_rewrite_on_load(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            save_positioning_rules(
+                store,
+                [
+                    "Leadpoet owns the intent wedge: proprietary buyer context, timing signals, and account-level intent.",
+                    "Other tools, agents, and case studies are market proof that intent matters, not the source of Leadpoet's unique wedge.",
+                    "When referencing another product, validate the market shift, then pull the point back to Leadpoet owning buyer timing and proprietary context.",
+                    "Custom rule: Leadpoet owns buyer timing when the user explicitly says it that way.",
+                ],
+            )
+
+            rules = load_positioning_rules(store)
+            rules_text = "\n".join(rules)
+
+            self.assertIn("Keep the Leadpoet wedge concrete", rules_text)
+            self.assertIn("buyer timing and proprietary context inside Leadpoet", rules_text)
+            self.assertNotIn("Leadpoet owns the intent wedge", rules_text)
+            self.assertNotIn("Leadpoet owning buyer timing", rules_text)
+            self.assertIn("Custom rule: Leadpoet owns buyer timing", rules_text)
             store.close()
 
     def test_voice_rules_endpoint_groups_positioning_voice_filters_and_guardrails(self):

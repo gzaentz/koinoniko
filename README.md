@@ -241,7 +241,7 @@ The Voice page shows:
 - selected Voice Examples with one simple performance signal
 - suggested Voice Examples behind `Show suggested examples`
 
-Positioning rules include the core Leadpoet framing: Leadpoet owns the intent wedge for proprietary buyer context, timing signals, and account-level intent. Other tools, agents, or case studies should be treated as market proof that intent matters, then brought back to Leadpoet's wedge. Editing these rules in the Voice modal updates the active generation/review prompts; positioning edits also update the reusable Leadpoet context section.
+Positioning rules include the core Leadpoet framing: the wedge is proprietary buyer context, timing signals, and account-level intent. Other tools, agents, or case studies should be treated as market proof that intent matters, then brought back to buyer timing and proprietary context inside Leadpoet. Editing these rules in the Voice modal updates the active generation/review prompts; positioning edits also update the reusable Leadpoet context section.
 
 Voice UI rule: each section should have one visible title only. Do not add eyebrow labels, mini titles, or descriptive subtitles above/below section titles unless the user explicitly asks for them.
 

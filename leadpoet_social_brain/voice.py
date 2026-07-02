@@ -31,10 +31,16 @@ DEFAULT_AVOID_PHRASES = [
 ]
 
 DEFAULT_WORKSPACE_POSITIONING_RULES = [
-    "Leadpoet owns the intent wedge: proprietary buyer context, timing signals, and account-level intent.",
-    "Other tools, agents, and case studies are market proof that intent matters, not the source of Leadpoet's unique wedge.",
-    "When referencing another product, validate the market shift, then pull the point back to Leadpoet owning buyer timing and proprietary context.",
+    "Keep the Leadpoet wedge concrete: proprietary buyer context, timing signals, and account-level intent.",
+    "Other tools, agents, and case studies are market proof that intent matters, not the source of the unique wedge.",
+    "When referencing another product, validate the market shift, then bring the point back to buyer timing and proprietary context inside Leadpoet.",
 ]
+
+LEGACY_WORKSPACE_POSITIONING_REPLACEMENTS = {
+    "Leadpoet owns the intent wedge: proprietary buyer context, timing signals, and account-level intent.": DEFAULT_WORKSPACE_POSITIONING_RULES[0],
+    "Other tools, agents, and case studies are market proof that intent matters, not the source of Leadpoet's unique wedge.": DEFAULT_WORKSPACE_POSITIONING_RULES[1],
+    "When referencing another product, validate the market shift, then pull the point back to Leadpoet owning buyer timing and proprietary context.": DEFAULT_WORKSPACE_POSITIONING_RULES[2],
+}
 
 UNIVERSAL_POSITIONING_RULES = [
     "Use saved Facts & Context as the source of truth for writer, company, product, audience, and positioning.",
@@ -85,11 +91,11 @@ def load_positioning_rules(store: SQLiteStore) -> list[str]:
     raw = store.get_app_setting(VOICE_POSITIONING_RULES_SETTING)
     if raw is None:
         return default_positioning_rules(store)
-    return with_universal_positioning_rules(parse_rules_value(raw, []))
+    return with_universal_positioning_rules(rewrite_legacy_positioning_rules(parse_rules_value(raw, [])))
 
 
 def save_positioning_rules(store: SQLiteStore, rules: list[object]) -> list[str]:
-    normalized = with_universal_positioning_rules(normalize_rules(rules))
+    normalized = with_universal_positioning_rules(rewrite_legacy_positioning_rules(normalize_rules(rules)))
     store.save_app_setting(VOICE_POSITIONING_RULES_SETTING, json.dumps(normalized))
     store.save_context_section(
         ContextSection(
@@ -173,6 +179,10 @@ def with_required_review_rules(rules: list[str]) -> list[str]:
 
 def with_universal_positioning_rules(rules: list[str]) -> list[str]:
     return normalize_rules([*rules, *UNIVERSAL_POSITIONING_RULES])
+
+
+def rewrite_legacy_positioning_rules(rules: list[str]) -> list[str]:
+    return [LEGACY_WORKSPACE_POSITIONING_REPLACEMENTS.get(rule, rule) for rule in rules]
 
 
 def positioning_rules_context_content(rules: list[str]) -> str:
