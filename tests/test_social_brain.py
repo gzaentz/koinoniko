@@ -3510,9 +3510,11 @@ class SocialBrainTest(unittest.TestCase):
 
             self.assertEqual(
                 draft.text,
-                "More names do not fix judgment.\n\nIn Leadpoet, timing before copy should stay visible.",
+                "More names do not fix judgment.\n\n"
+                "Near Leadpoet, ask the plain question: why this account, this week?",
             )
             self.assertNotIn("That is where Leadpoet", draft.text)
+            self.assertNotIn("In Leadpoet, timing before copy", draft.text)
             self.assertNotIn("by the time it reaches Leadpoet", draft.text)
             self.assertIn("avoid formulaic 'this is where' product lead-in", provider.prompts[-1])
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
@@ -3809,6 +3811,57 @@ class SocialBrainTest(unittest.TestCase):
         mention_patterns = [leadpoet_mention_pattern(text) for text in outputs_by_lane.values()]
         self.assertEqual(mention_patterns.count("no_leadpoet"), 3)
         self.assertGreaterEqual(len(set(mention_patterns)), 5)
+        templates = [
+            leadpoet_sentence_template(text)
+            for text in outputs_by_lane.values()
+            if leadpoet_sentence_template(text) != "no_leadpoet"
+        ]
+        self.assertEqual(len(templates), len(set(templates)))
+
+    def test_deterministic_leadpoet_where_repairs_vary_by_lane(self):
+        outputs_by_lane = {}
+        for index in range(120):
+            trend = TrendItem(
+                id=f"where_repair_trend_{index}",
+                title=f"Where repair trend {index}",
+                source_type="web",
+                topic="sales AI",
+                summary="Context layer",
+                why_it_matters="It proves context matters.",
+                leadpoet_angle="Buyer timing beats generic data.",
+                date=utc_now(),
+            )
+            request = DraftRequest(
+                platform="x",
+                topic="sales AI",
+                post_type="founder_insight",
+                angle="buyer timing beats generic data",
+                trend_ids=[trend.id],
+            )
+            lane = primary_product_mention_lane(request, [trend])[0]
+            outputs_by_lane.setdefault(
+                lane,
+                deterministic_leadpoet_definition_repair(
+                    "That is where Leadpoet focuses: timing before copy.",
+                    request=request,
+                    trends=[trend],
+                    max_chars=280,
+                ),
+            )
+
+        self.assertEqual(len(outputs_by_lane), 11)
+        self.assertEqual(len(set(outputs_by_lane.values())), 11)
+        combined = "\n".join(outputs_by_lane.values()).lower()
+        self.assertNotIn("that is where leadpoet", combined)
+        self.assertNotIn("this is where leadpoet", combined)
+        self.assertNotIn("in leadpoet,", combined)
+        self.assertNotIn("leadpoet should", combined)
+        self.assertNotIn("leadpoet enters", combined)
+        self.assertNotIn("leadpoet appears", combined)
+        self.assertFalse(any(leadpoet_bad_phrase_counts(combined).values()), combined)
+        mention_patterns = [leadpoet_mention_pattern(text) for text in outputs_by_lane.values()]
+        self.assertEqual(mention_patterns.count("no_leadpoet"), 3)
+        self.assertGreaterEqual(len(set(mention_patterns)), 4)
         templates = [
             leadpoet_sentence_template(text)
             for text in outputs_by_lane.values()

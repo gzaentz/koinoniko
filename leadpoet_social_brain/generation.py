@@ -2749,23 +2749,25 @@ def leadpoet_where_leadin_replacement(match: re.Match[str], *, product_lane: str
     lowered = body.lower()
     if lowered.startswith("focuses:"):
         detail = body.split(":", 1)[1].strip()
-        replacement = f"In Leadpoet, {detail[0].lower() + detail[1:] if detail else 'timing before copy'} should stay visible."
+        replacement = leadpoet_where_focus_replacement(detail, product_lane=product_lane)
     elif lowered.startswith("focuses on "):
         detail = body[len("focuses on "):].strip()
-        replacement = f"In Leadpoet, {detail[0].lower() + detail[1:] if detail else 'buyer timing'} should stay visible."
+        replacement = leadpoet_where_focus_replacement(detail, product_lane=product_lane)
     elif lowered.startswith(("should ", "can ", "needs ", "need ", "has to ")):
         replacement = f"Make the account-timing constraint concrete before copy starts: {body}."
     else:
         templates = {
             "mechanism-first": "The mechanism should be clear before copy: {body}.",
-            "consequence-first": "The consequence should be clear before the product name appears: {body}.",
-            "quiet embedded name": "The account reason should be concrete before Leadpoet enters: {body}.",
+            "consequence-first": "That only matters when it changes the next account choice in Leadpoet: {body}.",
+            "quiet embedded name": "The account reason can carry Leadpoet quietly: {body}.",
             "no-name wedge": "Buyer timing stays concrete: {body}.",
             "operator scene": "When a rep opens Leadpoet, the account signal should already be clear: {body}.",
-            "boundary line": "The sharper boundary comes before Leadpoet enters: {body}.",
-            "signal language": "The account signal should be specific before Leadpoet appears: {body}.",
+            "boundary line": "Before Leadpoet, the sharper boundary stays concrete: {body}.",
+            "signal language": "Near Leadpoet, the account signal should stay specific: {body}.",
             "ownership without definition": "The account-timing question should stay grounded in Leadpoet: {body}.",
             "implicit product belief": "The product belief should stay concrete in Leadpoet: {body}.",
+            "mechanism carries it": "Let the mechanism carry the claim: {body}.",
+            "context-only wedge": "Account context can carry this on its own: {body}.",
         }
         replacement = templates.get(product_lane, templates["quiet embedded name"]).format(
             body=body[0].lower() + body[1:] if body else "buyer timing changes the account choice"
@@ -2773,6 +2775,27 @@ def leadpoet_where_leadin_replacement(match: re.Match[str], *, product_lane: str
     if ending != "." and replacement.endswith("."):
         replacement = f"{replacement[:-1]}{ending}"
     return f"{prefix}{indent}{replacement}"
+
+
+def leadpoet_where_focus_replacement(detail: str, *, product_lane: str) -> str:
+    detail = detail.strip()
+    detail_text = detail[0].lower() + detail[1:] if detail else "timing before copy"
+    leadpoet_detail = re.sub(r"\bbefore\s+copy\b", "ahead of copy", detail_text, flags=re.I)
+    templates = {
+        "mechanism-first": "The mechanism should stay visible before copy: {detail}. The account reason should become usable through Leadpoet once that mechanism is clear.",
+        "consequence-first": "The next account choice gets sharper with Leadpoet: {leadpoet_detail}.",
+        "quiet embedded name": "The account reason can carry Leadpoet quietly: {leadpoet_detail}.",
+        "no-name wedge": "Buyer timing stays concrete: {detail}.",
+        "mechanism carries it": "Let the mechanism carry the claim: {detail}.",
+        "operator scene": "When a rep opens Leadpoet, the account signal should already show {leadpoet_detail}.",
+        "boundary line": "Around Leadpoet, the sharper boundary is {leadpoet_detail}.",
+        "signal language": "A signal near Leadpoet has one job: make {leadpoet_detail} plain.",
+        "ownership without definition": "Use Leadpoet as the pressure test for the account-timing question: {leadpoet_detail}.",
+        "implicit product belief": "That belief stays practical through Leadpoet: {leadpoet_detail}.",
+        "context-only wedge": "Account context can carry this on its own: {detail}.",
+    }
+    template = templates.get(product_lane, templates["quiet embedded name"])
+    return template.format(detail=detail_text, leadpoet_detail=leadpoet_detail)
 
 
 def draft_rule_violations(
