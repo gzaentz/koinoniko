@@ -33,6 +33,7 @@ from leadpoet_social_brain.core.models import (
 from leadpoet_social_brain.generation import (
     MISSING_PROVIDER_MESSAGE,
     SocialBrainGenerator,
+    leadpoet_phrase_pattern_fingerprint,
     leadpoet_sentence_grammar_fingerprint,
     primary_closing_target,
     primary_human_rhythm_target,
@@ -926,6 +927,12 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
         print("Leadpoet grammar fingerprint counts:")
         for key, value in sorted(payload["leadpoet_grammar_fingerprint_counts"].items()):
             print(f"- {key}: {value}")
+        print("Leadpoet phrase pattern counts:")
+        for key, value in sorted(payload["leadpoet_phrase_pattern_counts"].items()):
+            print(f"- {key}: {value}")
+        print("Leadpoet sentence template counts:")
+        for key, value in sorted(payload["leadpoet_sentence_template_counts"].items()):
+            print(f"- {key}: {value}")
         print("Leadpoet paragraph position counts:")
         for key, value in sorted(payload["leadpoet_paragraph_position_counts"].items()):
             print(f"- {key}: {value}")
@@ -1204,6 +1211,8 @@ def build_naturalness_audit(
                 "leadpoet_mention_pattern": leadpoet_mention_pattern(draft.text),
                 "leadpoet_actual_syntax": leadpoet_actual_syntax(draft.text),
                 "leadpoet_grammar_fingerprint": leadpoet_grammar_fingerprint_for_text(draft.text),
+                "leadpoet_phrase_pattern": leadpoet_phrase_pattern_for_text(draft.text),
+                "leadpoet_sentence_template": leadpoet_sentence_template(draft.text),
                 "leadpoet_paragraph_position": leadpoet_text_position(draft.text),
                 "leadpoet_in_final_line": bool(re.search(r"\bleadpoet\b", last_nonempty_line(draft.text), flags=re.I)),
                 "leadpoet_sentence_position": leadpoet_sentence_position(draft.text),
@@ -1326,6 +1335,34 @@ def build_naturalness_audit(
         warnings.append(
             f"Leadpoet grammar fingerprints are too concentrated: {grammar} appears {grammar_count}/{sum(leadpoet_grammar_fingerprint_counts.values())} times."
         )
+    leadpoet_phrase_pattern_counts = Counter(
+        str(row["leadpoet_phrase_pattern"])
+        for row in rows
+        if row["leadpoet_phrase_pattern"] and row["leadpoet_phrase_pattern"] != "no_leadpoet"
+    )
+    if leadpoet_phrase_pattern_counts and len(leadpoet_phrase_pattern_counts) < min(
+        3, sum(leadpoet_phrase_pattern_counts.values())
+    ):
+        warnings.append("Leadpoet phrase patterns are not varied enough.")
+    elif leadpoet_phrase_pattern_counts and leadpoet_phrase_pattern_counts.most_common(1)[0][1] >= max(
+        3, (sum(leadpoet_phrase_pattern_counts.values()) + 1) // 2
+    ):
+        phrase_pattern, phrase_pattern_count = leadpoet_phrase_pattern_counts.most_common(1)[0]
+        warnings.append(
+            f"Leadpoet phrase patterns are too concentrated: {phrase_pattern} appears {phrase_pattern_count}/{sum(leadpoet_phrase_pattern_counts.values())} times."
+        )
+    leadpoet_sentence_template_counts = Counter(
+        str(row["leadpoet_sentence_template"])
+        for row in rows
+        if row["leadpoet_sentence_template"] and row["leadpoet_sentence_template"] != "no_leadpoet"
+    )
+    if leadpoet_sentence_template_counts and leadpoet_sentence_template_counts.most_common(1)[0][1] >= max(
+        3, (sum(leadpoet_sentence_template_counts.values()) + 1) // 2
+    ):
+        template, template_count = leadpoet_sentence_template_counts.most_common(1)[0]
+        warnings.append(
+            f"Leadpoet sentence templates are too concentrated: {template} appears {template_count}/{sum(leadpoet_sentence_template_counts.values())} times."
+        )
     leadpoet_position_counts = Counter(
         str(row["leadpoet_paragraph_position"])
         for row in rows
@@ -1399,6 +1436,8 @@ def build_naturalness_audit(
         "leadpoet_mention_pattern_counts": dict(mention_pattern_counts),
         "leadpoet_actual_syntax_counts": dict(actual_syntax_counts),
         "leadpoet_grammar_fingerprint_counts": dict(leadpoet_grammar_fingerprint_counts),
+        "leadpoet_phrase_pattern_counts": dict(leadpoet_phrase_pattern_counts),
+        "leadpoet_sentence_template_counts": dict(leadpoet_sentence_template_counts),
         "leadpoet_paragraph_position_counts": dict(leadpoet_position_counts),
         "leadpoet_sentence_position_counts": dict(leadpoet_sentence_position_counts),
         "leadpoet_final_line_mentions": leadpoet_final_line_mentions,
@@ -1485,6 +1524,79 @@ def leadpoet_grammar_fingerprint_for_text(text: str) -> str:
         "",
     )
     return leadpoet_sentence_grammar_fingerprint(sentence) or "no_leadpoet"
+
+
+def leadpoet_phrase_pattern_for_text(text: str) -> str:
+    sentence = first_leadpoet_sentence(text)
+    return leadpoet_phrase_pattern_fingerprint(sentence) or "no_leadpoet"
+
+
+def leadpoet_sentence_template(text: str) -> str:
+    sentence = first_leadpoet_sentence(text)
+    if not sentence:
+        return "no_leadpoet"
+    cleaned = re.sub(r"^(?:[-*•]\s+|\d+[.)]\s+)", "", sentence.strip())
+    lowered = " ".join(cleaned.lower().replace("’", "'").split())
+    lowered = re.sub(r"\bleadpoet(?:'s)?\b", "{product}", lowered)
+    lowered = re.sub(r"\b\d+(?:[.,]\d+)?%?\b", "{number}", lowered)
+    domain_terms = (
+        "account",
+        "accounts",
+        "action",
+        "agent",
+        "agents",
+        "buyer",
+        "buyers",
+        "context",
+        "constraint",
+        "constraints",
+        "copy",
+        "crm",
+        "data",
+        "edge",
+        "email",
+        "emails",
+        "gtm",
+        "intent",
+        "judgment",
+        "judgement",
+        "lane",
+        "layer",
+        "lead",
+        "leads",
+        "market",
+        "mention",
+        "name",
+        "names",
+        "outbound",
+        "prioritization",
+        "qualification",
+        "question",
+        "reason",
+        "record",
+        "records",
+        "rep",
+        "reps",
+        "sales",
+        "sequence",
+        "signal",
+        "signals",
+        "system",
+        "timing",
+        "volume",
+        "wedge",
+        "workflow",
+    )
+    lowered = re.sub(rf"\b(?:{'|'.join(domain_terms)})\b", "{domain}", lowered)
+    lowered = re.sub(r"(?:\{domain\}\s*){2,}", "{domain}", lowered)
+    return lowered.strip(" .!?")
+
+
+def first_leadpoet_sentence(text: str) -> str:
+    return next(
+        (sentence for sentence in text_sentences(text) if re.search(r"\bleadpoet\b", sentence, flags=re.I)),
+        "",
+    )
 
 
 def text_sentences(text: str) -> list[str]:

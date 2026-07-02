@@ -30,12 +30,14 @@ from leadpoet_social_brain.cli import (
     leadpoet_actual_syntax,
     leadpoet_bad_phrase_counts,
     leadpoet_mention_pattern,
+    leadpoet_phrase_pattern_for_text,
+    leadpoet_sentence_template,
     leadpoet_sentence_position,
     leadpoet_starts_sentence,
     main as cli_main,
 )
 from leadpoet_social_brain.context import ContextManager
-from leadpoet_social_brain.core.models import ContentQueueItem, ContextSection, DraftRequest, EngagementMetrics, Pattern, PostNote, SocialPost, SyncMetadata, TrendItem, utc_now
+from leadpoet_social_brain.core.models import ContentQueueItem, ContextSection, DraftRequest, EngagementMetrics, GeneratedDraft, Pattern, PostNote, SocialPost, SyncMetadata, TrendItem, utc_now
 from leadpoet_social_brain.generation import (
     MISSING_PROVIDER_MESSAGE,
     SocialBrainGenerator,
@@ -4398,6 +4400,20 @@ class SocialBrainTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(leadpoet_actual_syntax(text), expected)
 
+    def test_leadpoet_phrase_pattern_and_sentence_template_track_repetitive_shapes(self):
+        self.assertEqual(
+            leadpoet_phrase_pattern_for_text("The account reason reaches Leadpoet when timing explains why now."),
+            "clause_embedded",
+        )
+        self.assertEqual(
+            leadpoet_sentence_template("The Leadpoet signal points to timing."),
+            "the {product} {domain} points to {domain}",
+        )
+        self.assertEqual(
+            leadpoet_sentence_template("The Leadpoet question points to account context."),
+            "the {product} {domain} points to {domain}",
+        )
+
     def test_leadpoet_bad_phrase_counts_include_active_formulaic_rules(self):
         text = "\n\n".join(
             [
@@ -4500,6 +4516,74 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(len(payload["layout_fingerprint_counts"]), 1)
             self.assertTrue(
                 any("Generated post layouts are not varied enough" in warning for warning in payload["warnings"])
+            )
+            store.close()
+
+    def test_audit_naturalness_x_warns_on_repeated_leadpoet_sentence_template(self):
+        class RepetitiveSentenceTemplateGenerator:
+            def __init__(self):
+                self.index = 0
+
+            def generate(self, request: DraftRequest, *, variants: int, save: bool, recent_output_texts: list[str]) -> list[GeneratedDraft]:
+                first_lines = [
+                    "Static records answer who exists.",
+                    "The CRM can be correct and still late.",
+                    "More names do not fix judgment.",
+                    "Context only matters when it changes action.",
+                    "A sales agent needs timing before copy.",
+                ]
+                endings = [
+                    "The Leadpoet signal points to timing.",
+                    "The Leadpoet question points to context.",
+                    "The Leadpoet edge points to action.",
+                    "The Leadpoet constraint points to prioritization.",
+                    "The Leadpoet wedge points to qualification.",
+                ]
+                index = self.index % len(first_lines)
+                self.index += 1
+                return [
+                    GeneratedDraft(
+                        text=f"{first_lines[index]}\n\n{endings[index]}",
+                        request=request,
+                        explanation="",
+                        influences=[],
+                        context_snapshot={},
+                    )
+                ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            for index in range(5):
+                store.save_trend_item(
+                    TrendItem(
+                        title=f"Trend {index}",
+                        source_type="web",
+                        topic="sales AI",
+                        summary="A trend about GTM context.",
+                        why_it_matters="It shows timing matters.",
+                        leadpoet_angle="Buyer timing needs proprietary account context.",
+                        date=utc_now(),
+                    )
+                )
+
+            payload = build_naturalness_audit(
+                store,
+                RepetitiveSentenceTemplateGenerator(),
+                count=5,
+                trend_limit=5,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+                save_drafts=False,
+            )
+
+            self.assertEqual(
+                payload["leadpoet_sentence_template_counts"].get("the {product} {domain} points to {domain}"),
+                5,
+            )
+            self.assertTrue(
+                any("Leadpoet sentence templates are too concentrated" in warning for warning in payload["warnings"])
             )
             store.close()
 
