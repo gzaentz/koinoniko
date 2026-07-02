@@ -30,7 +30,17 @@ from leadpoet_social_brain.core.models import (
     TrendItem,
     utc_now,
 )
-from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator
+from leadpoet_social_brain.generation import (
+    MISSING_PROVIDER_MESSAGE,
+    SocialBrainGenerator,
+    primary_closing_target,
+    primary_human_rhythm_target,
+    primary_layout_target,
+    primary_product_mention_lane,
+    primary_product_mention_placement_target,
+    primary_product_mention_syntax_target,
+    primary_structure_shape,
+)
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
 from leadpoet_social_brain.pattern_scout import (
     PATTERN_REFRESH_MISSING_PROVIDER,
@@ -285,6 +295,7 @@ def build_parser() -> argparse.ArgumentParser:
     audit_naturalness.add_argument("--post-type", default="founder_insight")
     audit_naturalness.add_argument("--length", choices=["short", "standard", "long"], default="standard")
     audit_naturalness.add_argument("--save-drafts", action="store_true")
+    audit_naturalness.add_argument("--plan-only", action="store_true", help="Audit deterministic trend/variation coverage without calling the LLM provider.")
     audit_naturalness.add_argument("--json", action="store_true", dest="json_output")
     audit_naturalness.add_argument("--fail-on-warning", action="store_true")
     audit_naturalness.set_defaults(func=cmd_audit_naturalness_x)
@@ -837,34 +848,49 @@ def cmd_generate_x(store: SQLiteStore, args: argparse.Namespace) -> int:
 
 
 def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int:
-    provider = load_configured_provider(store)
-    if not provider:
-        raise SystemExit(MISSING_PROVIDER_MESSAGE)
-    generator = SocialBrainGenerator(store, provider=provider)
-    payload = build_naturalness_audit(
-        store,
-        generator,
-        count=args.count,
-        trend_limit=args.trend_limit,
-        trend_status=args.trend_status,
-        post_type=args.post_type,
-        length_mode=args.length,
-        save_drafts=args.save_drafts,
-    )
+    if args.plan_only:
+        payload = build_naturalness_plan_audit(
+            store,
+            count=args.count,
+            trend_limit=args.trend_limit,
+            trend_status=args.trend_status,
+            post_type=args.post_type,
+            length_mode=args.length,
+        )
+    else:
+        provider = load_configured_provider(store)
+        if not provider:
+            raise SystemExit(MISSING_PROVIDER_MESSAGE)
+        generator = SocialBrainGenerator(store, provider=provider)
+        payload = build_naturalness_audit(
+            store,
+            generator,
+            count=args.count,
+            trend_limit=args.trend_limit,
+            trend_status=args.trend_status,
+            post_type=args.post_type,
+            length_mode=args.length,
+            save_drafts=args.save_drafts,
+        )
     if args.json_output:
         print(json.dumps(payload, indent=2))
         return 1 if args.fail_on_warning and payload["warnings"] else 0
-    print(f"Generated: {payload['post_count']} post(s) across {payload['trend_count']} trend(s)")
+    if payload.get("mode") == "plan_only":
+        print(f"Planned: {payload['post_count']} post(s) across {payload['trend_count']} trend(s)")
+        print("Provider calls: no")
+    else:
+        print(f"Generated: {payload['post_count']} post(s) across {payload['trend_count']} trend(s)")
     print(f"Trend coverage: {payload['covered_trend_count']} covered, {payload['uncovered_trend_count']} uncovered")
-    print(f"Saved drafts: {'yes' if args.save_drafts else 'no'}")
-    print("Leadpoet mention shapes:")
-    for key, value in sorted(payload["leadpoet_shapes"].items()):
-        print(f"- {key}: {value}")
-    print("Bad phrase counts:")
-    for key, value in sorted(payload["bad_phrase_counts"].items()):
-        print(f"- {key}: {value}")
-    print(f"Unique first lines: {payload['unique_first_lines']}")
-    print(f"Unique closing lines: {payload['unique_last_lines']}")
+    if payload.get("mode") != "plan_only":
+        print(f"Saved drafts: {'yes' if args.save_drafts else 'no'}")
+        print("Leadpoet mention shapes:")
+        for key, value in sorted(payload["leadpoet_shapes"].items()):
+            print(f"- {key}: {value}")
+        print("Bad phrase counts:")
+        for key, value in sorted(payload["bad_phrase_counts"].items()):
+            print(f"- {key}: {value}")
+        print(f"Unique first lines: {payload['unique_first_lines']}")
+        print(f"Unique closing lines: {payload['unique_last_lines']}")
     print("Primary structure option counts:")
     for key, value in sorted(payload["primary_structure_option_counts"].items()):
         print(f"- {key}: {value}")
@@ -886,31 +912,138 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
     print("Primary human rhythm target counts:")
     for key, value in sorted(payload["primary_human_rhythm_target_counts"].items()):
         print(f"- {key}: {value}")
-    print("Leadpoet mention pattern counts:")
-    for key, value in sorted(payload["leadpoet_mention_pattern_counts"].items()):
-        print(f"- {key}: {value}")
-    print("Leadpoet actual syntax counts:")
-    for key, value in sorted(payload["leadpoet_actual_syntax_counts"].items()):
-        print(f"- {key}: {value}")
-    print("Leadpoet paragraph position counts:")
-    for key, value in sorted(payload["leadpoet_paragraph_position_counts"].items()):
-        print(f"- {key}: {value}")
-    print("Leadpoet sentence position counts:")
-    for key, value in sorted(payload["leadpoet_sentence_position_counts"].items()):
-        print(f"- {key}: {value}")
-    print(f"Leadpoet final-line mentions: {payload['leadpoet_final_line_mentions']}")
-    print(f"Leadpoet sentence-start mentions: {payload['leadpoet_sentence_start_mentions']}")
-    print("Generated layout fingerprint counts:")
-    for key, value in sorted(payload["layout_fingerprint_counts"].items()):
-        print(f"- {key}: {value}")
-    print("Repeated stock phrase counts:")
-    for key, value in sorted(payload["repeated_phrase_counts"].items()):
-        print(f"- {key}: {value}")
+    if payload.get("mode") != "plan_only":
+        print("Leadpoet mention pattern counts:")
+        for key, value in sorted(payload["leadpoet_mention_pattern_counts"].items()):
+            print(f"- {key}: {value}")
+        print("Leadpoet actual syntax counts:")
+        for key, value in sorted(payload["leadpoet_actual_syntax_counts"].items()):
+            print(f"- {key}: {value}")
+        print("Leadpoet paragraph position counts:")
+        for key, value in sorted(payload["leadpoet_paragraph_position_counts"].items()):
+            print(f"- {key}: {value}")
+        print("Leadpoet sentence position counts:")
+        for key, value in sorted(payload["leadpoet_sentence_position_counts"].items()):
+            print(f"- {key}: {value}")
+        print(f"Leadpoet final-line mentions: {payload['leadpoet_final_line_mentions']}")
+        print(f"Leadpoet sentence-start mentions: {payload['leadpoet_sentence_start_mentions']}")
+        print("Generated layout fingerprint counts:")
+        for key, value in sorted(payload["layout_fingerprint_counts"].items()):
+            print(f"- {key}: {value}")
+        print("Repeated stock phrase counts:")
+        for key, value in sorted(payload["repeated_phrase_counts"].items()):
+            print(f"- {key}: {value}")
     if payload["warnings"]:
         print("Warnings:")
         for warning in payload["warnings"]:
             print(f"- {warning}")
     return 1 if args.fail_on_warning and payload["warnings"] else 0
+
+
+def build_naturalness_plan_audit(
+    store: SQLiteStore,
+    *,
+    count: int,
+    trend_limit: int,
+    trend_status: str | None,
+    post_type: str,
+    length_mode: str,
+) -> dict[str, object]:
+    if count <= 0:
+        raise SystemExit("--count must be greater than 0.")
+    effective_trend_limit = trend_limit if trend_limit > 0 else 1000
+    trends = store.list_trends(status=trend_status or None, limit=effective_trend_limit)
+    if not trends:
+        raise SystemExit("No trends found for naturalness audit.")
+    rows: list[dict[str, object]] = []
+    for index in range(count):
+        trend = trends[index % len(trends)]
+        request = naturalness_audit_request_for_trend(
+            trend,
+            post_type=post_type,
+            length_mode=length_mode,
+        )
+        rows.append(
+            {
+                "index": index + 1,
+                "trend_id": trend.id,
+                "trend_title": trend.title,
+                "topic": trend.topic,
+                "primary_structure_option": primary_structure_shape(request, [trend])[0],
+                "primary_product_mention_lane": primary_product_mention_lane(request, [trend])[0],
+                "primary_product_mention_placement_target": primary_product_mention_placement_target(request, [trend])[0],
+                "primary_product_mention_syntax_target": primary_product_mention_syntax_target(request, [trend])[0],
+                "primary_layout_target": primary_layout_target(request, [trend])[0],
+                "primary_closing_target": primary_closing_target(request, [trend])[0],
+                "primary_human_rhythm_target": primary_human_rhythm_target(request, [trend])[0],
+            }
+        )
+    covered_trend_ids = {str(row["trend_id"]) for row in rows if row["trend_id"]}
+    uncovered_trend_count = max(0, len(trends) - len(covered_trend_ids))
+    primary_structure_counts = Counter(str(row["primary_structure_option"]) for row in rows)
+    primary_product_lane_counts = Counter(str(row["primary_product_mention_lane"]) for row in rows)
+    primary_product_placement_counts = Counter(str(row["primary_product_mention_placement_target"]) for row in rows)
+    primary_product_syntax_counts = Counter(str(row["primary_product_mention_syntax_target"]) for row in rows)
+    primary_layout_target_counts = Counter(str(row["primary_layout_target"]) for row in rows)
+    primary_closing_target_counts = Counter(str(row["primary_closing_target"]) for row in rows)
+    primary_human_rhythm_target_counts = Counter(str(row["primary_human_rhythm_target"]) for row in rows)
+    warnings: list[str] = []
+    if len(primary_structure_counts) < min(5, len(trends), count):
+        warnings.append("Structure guidance did not vary enough across trends.")
+    if len(primary_product_lane_counts) < min(5, len(trends), count):
+        warnings.append("Product mention guidance did not vary enough across trends.")
+    if len(primary_product_placement_counts) < min(4, len(trends), count):
+        warnings.append("Product mention placement guidance did not vary enough across trends.")
+    if len(primary_product_syntax_counts) < min(4, len(trends), count):
+        warnings.append("Product mention syntax guidance did not vary enough across trends.")
+    if len(primary_layout_target_counts) < min(4, len(trends), count):
+        warnings.append("Layout target guidance did not vary enough across trends.")
+    if len(primary_closing_target_counts) < min(4, len(trends), count):
+        warnings.append("Closing target guidance did not vary enough across trends.")
+    if len(primary_human_rhythm_target_counts) < min(4, len(trends), count):
+        warnings.append("Human rhythm guidance did not vary enough across trends.")
+    if uncovered_trend_count:
+        warnings.append(
+            f"{uncovered_trend_count} loaded trend(s) were not covered; raise --count or lower --trend-limit for full coverage."
+        )
+    return {
+        "mode": "plan_only",
+        "trend_count": len(trends),
+        "post_count": len(rows),
+        "covered_trend_count": len(covered_trend_ids),
+        "uncovered_trend_count": uncovered_trend_count,
+        "loaded_all_matching_trends": trend_limit <= 0,
+        "trend_limit": trend_limit,
+        "primary_structure_option_counts": dict(primary_structure_counts),
+        "primary_product_mention_lane_counts": dict(primary_product_lane_counts),
+        "primary_product_mention_placement_target_counts": dict(primary_product_placement_counts),
+        "primary_product_mention_syntax_target_counts": dict(primary_product_syntax_counts),
+        "primary_layout_target_counts": dict(primary_layout_target_counts),
+        "primary_closing_target_counts": dict(primary_closing_target_counts),
+        "primary_human_rhythm_target_counts": dict(primary_human_rhythm_target_counts),
+        "warnings": warnings,
+        "rows": rows,
+    }
+
+
+def naturalness_audit_request_for_trend(
+    trend: TrendItem,
+    *,
+    post_type: str,
+    length_mode: str,
+) -> DraftRequest:
+    return DraftRequest(
+        platform="x",
+        topic=trend.topic or "sales AI",
+        post_type=post_type,
+        angle=trend.leadpoet_angle or trend.title,
+        extra_context=(
+            "Naturalness audit: use this trend, vary the post structure, and avoid a formulaic product definition."
+        ),
+        use_trends=True,
+        trend_ids=[trend.id],
+        length_mode=length_mode,
+    )
 
 
 def build_naturalness_audit(
@@ -935,16 +1068,9 @@ def build_naturalness_audit(
     for index in range(count):
         trend = trends[index % len(trends)]
         draft = generator.generate(
-            DraftRequest(
-                platform="x",
-                topic=trend.topic or "sales AI",
+            naturalness_audit_request_for_trend(
+                trend,
                 post_type=post_type,
-                angle=trend.leadpoet_angle or trend.title,
-                extra_context=(
-                    "Naturalness audit: use this trend, vary the post structure, and avoid a formulaic product definition."
-                ),
-                use_trends=True,
-                trend_ids=[trend.id],
                 length_mode=length_mode,
             ),
             variants=1,

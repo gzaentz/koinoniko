@@ -25,6 +25,7 @@ from leadpoet_social_brain.categorization import XPostLLMCategorizer, parse_x_ca
 from leadpoet_social_brain.content_queue import create_post_x, plan_week_x, post_queue_item_x
 from leadpoet_social_brain.cli import (
     build_naturalness_audit,
+    build_naturalness_plan_audit,
     build_parser as build_cli_parser,
     leadpoet_actual_syntax,
     leadpoet_bad_phrase_counts,
@@ -3261,6 +3262,87 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("source=batch", strategy_prompts[1])
             self.assertIn("The useful Leadpoet question is why this account now.", strategy_prompts[1])
             store.close()
+
+    def test_audit_naturalness_x_plan_only_reports_variation_without_provider(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            for index in range(6):
+                store.save_trend_item(
+                    TrendItem(
+                        title=f"Trend {index}",
+                        source_type="web",
+                        topic="sales AI",
+                        summary="A trend about GTM context.",
+                        why_it_matters="It shows timing matters.",
+                        leadpoet_angle=f"Buyer timing needs proprietary account context {index}.",
+                        date=utc_now(),
+                    )
+                )
+
+            payload = build_naturalness_plan_audit(
+                store,
+                count=5,
+                trend_limit=0,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+            )
+
+            self.assertEqual(payload["mode"], "plan_only")
+            self.assertEqual(payload["post_count"], 5)
+            self.assertEqual(payload["trend_count"], 6)
+            self.assertEqual(payload["covered_trend_count"], 5)
+            self.assertEqual(payload["uncovered_trend_count"], 1)
+            self.assertTrue(payload["primary_structure_option_counts"])
+            self.assertTrue(payload["primary_product_mention_lane_counts"])
+            self.assertTrue(payload["primary_product_mention_placement_target_counts"])
+            self.assertTrue(payload["primary_product_mention_syntax_target_counts"])
+            self.assertTrue(payload["primary_layout_target_counts"])
+            self.assertIn("primary_structure_option", payload["rows"][0])
+            self.assertIn("primary_product_mention_syntax_target", payload["rows"][0])
+            self.assertTrue(any("were not covered" in warning for warning in payload["warnings"]))
+            store.close()
+
+    def test_audit_naturalness_x_plan_only_cli_skips_provider_load(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.seed_defaults()
+            for index in range(5):
+                store.save_trend_item(
+                    TrendItem(
+                        title=f"Trend {index}",
+                        source_type="web",
+                        topic="sales AI",
+                        summary="A trend about GTM context.",
+                        why_it_matters="It shows timing matters.",
+                        leadpoet_angle=f"Buyer timing needs proprietary account context {index}.",
+                        date=utc_now(),
+                    )
+                )
+            store.close()
+
+            with patch("leadpoet_social_brain.cli.load_configured_provider") as load_provider:
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    exit_code = cli_main(
+                        [
+                            "--db",
+                            str(db_path),
+                            "audit-naturalness-x",
+                            "--count",
+                            "5",
+                            "--plan-only",
+                            "--fail-on-warning",
+                        ]
+                    )
+
+            self.assertEqual(exit_code, 1)
+            load_provider.assert_not_called()
+            self.assertIn("Planned: 5 post(s) across 5 trend(s)", output.getvalue())
+            self.assertIn("Provider calls: no", output.getvalue())
+            self.assertIn("Warnings:", output.getvalue())
 
     def test_audit_naturalness_x_warns_on_repeated_closing_line(self):
         class RepeatedCloserProvider:
@@ -7093,8 +7175,10 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(args.post_type, "founder_insight")
         self.assertEqual(args.length, "standard")
         self.assertFalse(args.save_drafts)
+        self.assertFalse(args.plan_only)
         self.assertFalse(args.fail_on_warning)
         self.assertTrue(parser.parse_args(["audit-naturalness-x", "--fail-on-warning"]).fail_on_warning)
+        self.assertTrue(parser.parse_args(["audit-naturalness-x", "--plan-only"]).plan_only)
 
     def test_weekly_pattern_refresh_task_updates_weekly_and_monthly_windows(self):
         with tempfile.TemporaryDirectory() as tmpdir:
