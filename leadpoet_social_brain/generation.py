@@ -46,6 +46,80 @@ POST_LENGTH_PRESETS = {
 }
 
 
+NATURAL_VOICE_POLISH_PATTERNS = [
+    (r"\bthe future of\b", "avoid polished 'future of' framing"),
+    (r"\bhere'?s the thing\b", "remove stock setup phrase"),
+    (r"\bin today'?s (?:world|market|landscape)\b", "remove generic topical setup"),
+    (r"\btoday'?s rapidly evolving\b", "remove generic topical setup"),
+    (r"\bas (?:ai|the market|the industry|technology|sales|gtm)[^.\n]{0,80}\bcontinues to\b", "remove polished 'as X continues to' setup"),
+    (r"\b(?:new era|paradigm shift|next wave)\b", "remove generic trend language"),
+    (r"\b(?:leverage|harness|seamless|cutting-edge|transformative)\b", "replace corporate/AI-polish language with plain words"),
+    (r"\bat scale\b", "replace generic scale language with a concrete mechanism"),
+    (r"\bthe (?:real )?(?:opportunity|takeaway|lesson) is\b", "avoid tidy thought-leadership framing"),
+]
+
+STOCK_CONTRAST_PATTERNS = [
+    (r"\bit(?:'s| is) not about [^.\n]{1,120}\.\s+it(?:'s| is) about\b", "avoid stock 'it's not about X, it's about Y' framing"),
+    (r"\bnot about [^.\n]{1,120};?\s+(?:it(?:'s| is)|but)\s+about\b", "avoid stock 'not about X, about Y' framing"),
+]
+
+UNSUPPORTED_FIRST_PERSON_PATTERNS = [
+    (r"\bi spent (?:the )?(?:morning|afternoon|day|week|weekend|month)\b", "remove unsupported first-person research setup"),
+    (r"\bi (?:was )?talking to\b", "remove unsupported first-person conversation setup"),
+    (r"\bafter talking to\b", "remove unsupported first-person conversation setup"),
+    (r"\ba customer told me\b", "remove unsupported customer anecdote"),
+    (r"\bwe (?:tested|ran|analyzed|surveyed|interviewed)\b", "remove unsupported proof or research setup"),
+    (r"\bi (?:dug into|read through|analyzed|surveyed|interviewed)\b", "remove unsupported research setup"),
+]
+
+LEADPOET_DEFINITION_PATTERNS = [
+    (r"\bleadpoet is building\b", "avoid default 'Leadpoet is building...' product definition"),
+    (r"\bleadpoet is built\b", "avoid default 'Leadpoet is built for...' product definition"),
+    (r"\bleadpoet is\b", "avoid standalone 'Leadpoet is...' product definition"),
+    (r"(?m)(?:^|\n\n)\s*leadpoet(?:'s|’s)?\s+(?:bet|job|role)\b", "avoid formulaic Leadpoet closer"),
+    (r"(?m)(?:^|\n\n)\s*the layer worth building\b", "avoid generic 'layer worth building' closer"),
+]
+
+POST_STRUCTURE_SHAPES = [
+    (
+        "specific signal -> blunt implication -> product mechanism",
+        "Start with a named source/detail, then a short implication, then the concrete mechanism the workspace cares about.",
+    ),
+    (
+        "weak default teardown",
+        "Name the weak default, explain why it fails, then give the sharper replacement model.",
+    ),
+    (
+        "buyer/user scene",
+        "Open inside a practical buyer or rep moment without inventing a story; make the situation do the work.",
+    ),
+    (
+        "two short claims + consequence",
+        "Use two clipped observations, then one consequence that makes the point feel earned.",
+    ),
+    (
+        "market proof -> boundary",
+        "Treat the trend as proof of a shift, then draw a clear boundary around what the trend does not solve.",
+    ),
+    (
+        "question -> answer -> why it matters",
+        "Ask the real operational question, answer it plainly, then state why the answer changes action.",
+    ),
+    (
+        "definition inversion",
+        "Redefine a familiar category by what actually changes behavior, not by the vendor label.",
+    ),
+    (
+        "micro-list with a turn",
+        "Use 2-3 concrete fragments or clauses, then turn them into one useful conclusion.",
+    ),
+    (
+        "plain product belief",
+        "Skip the trend recap and state a grounded belief from saved context in a human way.",
+    ),
+]
+
+
 class SocialBrainGenerator:
     def __init__(self, store: SQLiteStore, provider: DraftProvider | None = None):
         self.store = store
@@ -377,6 +451,75 @@ def length_prompt_section(request: DraftRequest, max_chars: int) -> str:
     )
 
 
+def natural_voice_prompt_section(bundle: ContextBundle | None = None, anchor: str | None = None) -> str:
+    example_line = (
+        "- Voice Examples are the calibration set: borrow cadence, bluntness, and specificity, not wording."
+        if bundle and bundle.examples
+        else "- With thin examples, use saved Facts & Context and keep the language plainer than feels necessary."
+    )
+    product_label = anchor or "the product"
+    return (
+        "Natural Voice Calibration:\n"
+        "- Sound like one specific founder noticing a real thing, not a brand explaining a category.\n"
+        "- Prefer exact nouns from the request/context over umbrella language like platform, solution, workflow, or transformation.\n"
+        "- Keep the first line plain. No grand setup, hype setup, or polished category recap.\n"
+        "- Let the point land without a motivational closer, generic lesson, or forced CTA.\n"
+        "- If a sentence feels smooth enough for a launch page, shorten it and make it more concrete.\n"
+        "- Avoid stock contrast frames like \"it's not about X, it's about Y\" and \"not just X, but Y\".\n"
+        f"- Do not default to standalone product-definition sentences like \"{product_label} is...\" or \"{product_label} is building...\".\n"
+        "- If the product name appears, earn it through the specific mechanism, scene, or consequence in the post.\n"
+        f"{example_line}"
+    )
+
+
+def structure_variation_prompt_section(request: DraftRequest, trends: list[TrendItem]) -> str:
+    selected = selected_structure_shapes(request, trends, count=4)
+    options = "\n".join(f"- {name}: {guidance}" for name, guidance in selected)
+    return (
+        "Structure Variation:\n"
+        "Avoid the default template: trend recap -> generic product definition -> tidy closer.\n"
+        "Use a shape that fits the specific idea. In multi-option prompts, each option must use a different shape.\n"
+        f"{options}"
+    )
+
+
+def product_mention_prompt_section(anchor: str | None = None) -> str:
+    product_label = anchor or "the product"
+    example_prefix = anchor or "the product"
+    return (
+        "Dynamic Product Mention:\n"
+        "- Do not make the product mention the same final paragraph every time.\n"
+        f"- Avoid standalone sentences beginning \"{product_label} is...\", \"{product_label} is building...\", or \"{product_label}'s bet...\".\n"
+        "- Prefer varied human phrasing: \"the part we care about...\", \"that is where the product has to start...\", "
+        f"\"for {example_prefix}, the useful signal is...\", or no product name if the saved-context mechanism is already clear.\n"
+        "- If the post needs the name for positioning, embed it in a concrete sentence rather than defining the company."
+    )
+
+
+def selected_structure_shapes(
+    request: DraftRequest,
+    trends: list[TrendItem],
+    *,
+    count: int,
+) -> list[tuple[str, str]]:
+    seed_source = "|".join(
+        [
+            request.platform,
+            request.topic,
+            request.post_type,
+            request.angle or "",
+            ",".join(request.trend_ids or []),
+            ",".join(trend.id for trend in trends),
+        ]
+    )
+    digest = hashlib.sha256(seed_source.encode("utf-8")).hexdigest()
+    start = int(digest[:8], 16) % len(POST_STRUCTURE_SHAPES)
+    return [
+        POST_STRUCTURE_SHAPES[(start + offset) % len(POST_STRUCTURE_SHAPES)]
+        for offset in range(min(count, len(POST_STRUCTURE_SHAPES)))
+    ]
+
+
 def build_generation_prompt(
     request: DraftRequest,
     bundle: ContextBundle,
@@ -412,6 +555,10 @@ def build_generation_prompt(
         positioning_rules=(active_rules or {}).get("positioning_rules", []),
         voice_rules=(active_rules or {}).get("voice_rules", []),
     )
+    anchor = workspace_anchor_name(bundle, active_rules or {})
+    natural_voice_section = natural_voice_prompt_section(bundle, anchor=anchor)
+    structure_section = structure_variation_prompt_section(request, trends)
+    product_mention_section = product_mention_prompt_section(anchor)
     length_section = length_prompt_section(request, max_chars)
     return f"""Write {request.platform.upper()} posts for this workspace.
 
@@ -423,6 +570,12 @@ Facts & Context:
 
 Voice profile:
 {voice or "- No saved Voice profile yet."}
+
+{natural_voice_section}
+
+{structure_section}
+
+{product_mention_section}
 
 {active_rules_section}
 {trend_section}
@@ -472,6 +625,10 @@ def build_strategy_prompt(
     )
     max_chars = resolve_length_max_chars(request, get_x_adapter().rules.default_max_chars)
     length_section = length_prompt_section(request, max_chars)
+    anchor = workspace_anchor_name(bundle, active_rules or {})
+    natural_voice_section = natural_voice_prompt_section(bundle, anchor=anchor)
+    structure_section = structure_variation_prompt_section(request, trends)
+    product_mention_section = product_mention_prompt_section(anchor)
     return f"""You are the hidden content strategist for this workspace's posts.
 
 Do not write the post yet. Produce the structured Post Intent that the natural writer will use.
@@ -499,6 +656,12 @@ Facts & Context:
 {context or "- No saved facts/context yet."}
 
 {active_rules_section}
+
+{natural_voice_section}
+
+{structure_section}
+
+{product_mention_section}
 
 Voice Examples and worked-reason notes:
 {examples_text or "No examples selected."}
@@ -552,6 +715,10 @@ def build_best_writer_prompt(
         voice_rules=(active_rules or {}).get("voice_rules", []),
     )
     length_section = length_prompt_section(request, max_chars)
+    anchor = workspace_anchor_name(bundle, active_rules or {})
+    natural_voice_section = natural_voice_prompt_section(bundle, anchor=anchor)
+    structure_section = structure_variation_prompt_section(request, trends)
+    product_mention_section = product_mention_prompt_section(anchor)
     return f"""Write 3 X draft options for this workspace.
 
 Prioritize exact Voice Examples, worked-reason notes, and the writing skills below over generic marketing instincts.
@@ -576,6 +743,12 @@ Facts & Context:
 {context or "- No saved facts/context yet."}
 
 {active_rules_section}
+
+{natural_voice_section}
+
+{structure_section}
+
+{product_mention_section}
 
 Trend context:
 {trends_text or "No timely trends selected."}
@@ -627,6 +800,10 @@ def build_evaluation_prompt(
         voice_rules=(active_rules or {}).get("voice_rules", []),
     )
     length_section = length_prompt_section(request, max_chars)
+    anchor = workspace_anchor_from_active_rules(active_rules or {})
+    natural_voice_section = natural_voice_prompt_section(anchor=anchor)
+    structure_section = structure_variation_prompt_section(request, [])
+    product_mention_section = product_mention_prompt_section(anchor)
     return f"""Choose the best X post for this workspace and clean it up lightly.
 
 Original request:
@@ -647,6 +824,12 @@ Voice and review rules:
 
 {active_rules_section}
 
+{natural_voice_section}
+
+{structure_section}
+
+{product_mention_section}
+
 {avoid_section}
 
 Draft options:
@@ -664,6 +847,9 @@ Final evaluator should check:
 - positioning fidelity: if saved Facts & Context names a company/product as owning the core wedge, the final draft must frame that company/product as the source of the wedge
 - generic swap test: the draft would still be specific if company and product names were removed; if it could apply to any workspace, fail it
 - evidence safety: no invented first-person anecdote, fake customer story, fake quote, fake metric, unsupported reading/research session, or unsupported product claim
+- natural voice: sounds like a specific person posting a useful thought, not an AI recap, brand post, or launch page
+- structure freshness: does not use the default trend recap -> generic Leadpoet definition -> tidy closer template
+- dynamic product mention: avoids standalone "Leadpoet is..." or "Leadpoet is building..." phrasing unless quoted from source
 - specificity: at least one concrete noun, situation, mechanism, or contrast
 - substance: the draft has a real point, not a vibe, joke, or generic AI take
 - no avoid phrases
@@ -733,6 +919,10 @@ def build_context_snapshot(
         "strategy_summary": strategy_summary,
         "evaluation": evaluation,
         "quality_notes": quality_notes,
+        "structure_variation_options": [
+            {"name": name, "guidance": guidance}
+            for name, guidance in selected_structure_shapes(request, trends, count=4)
+        ],
         "avoid_phrases": avoid_phrases or [],
         "active_writing_rules": active_rules or {},
         "skills": [
@@ -937,9 +1127,13 @@ def repair_draft_against_rules(
             violations=violations,
             request=request,
             bundle=bundle,
+            active_rules=active_rules,
             max_chars=max_chars,
         )
-        repaired_raw = generate_with_provider(provider, repair_prompt, variants=1, model=model)[0]
+        repair_options = generate_with_provider(provider, repair_prompt, variants=1, model=model)
+        if not repair_options:
+            return repaired, violations
+        repaired_raw = repair_options[0]
         repaired = fit_generated_text_to_limit(
             provider,
             repaired_raw,
@@ -1001,6 +1195,7 @@ def draft_rule_violations(
         violations.append("remove em dash")
     if re.search(r"\b(cannot proceed|no product update supplied|provide:|provide more details|need more details|to write this post)\b", lowered):
         violations.append("return a publishable post, not a refusal, caveat, or request for more details")
+    violations.extend(natural_voice_violations(text, request))
     anchor = workspace_anchor_name(bundle, active_rules)
     if anchor and re.search(rf"\b(i do not|i don't) know enough about {re.escape(anchor.lower())}\b", lowered):
         violations.append(f"remove model uncertainty about {anchor}; use saved context or make a narrower claim")
@@ -1009,11 +1204,76 @@ def draft_rule_violations(
     return dedupe_preserve_order(violations)
 
 
+def natural_voice_violations(text: str, request: DraftRequest) -> list[str]:
+    violations: list[str] = []
+    for pattern, label in NATURAL_VOICE_POLISH_PATTERNS:
+        if re.search(pattern, text, flags=re.I):
+            violations.append(label)
+    for pattern, label in STOCK_CONTRAST_PATTERNS:
+        if re.search(pattern, text, flags=re.I):
+            violations.append(label)
+    for pattern, label in LEADPOET_DEFINITION_PATTERNS:
+        if re.search(pattern, text, flags=re.I):
+            violations.append(label)
+    if not request_supports_first_person_evidence(request):
+        for pattern, label in UNSUPPORTED_FIRST_PERSON_PATTERNS:
+            if re.search(pattern, text, flags=re.I):
+                violations.append(label)
+    return dedupe_preserve_order(violations)
+
+
+def request_supports_first_person_evidence(request: DraftRequest) -> bool:
+    haystack = " ".join(
+        str(value or "")
+        for value in [
+            request.angle,
+            request.extra_context,
+            request.call_to_action,
+        ]
+    ).lower()
+    if not haystack:
+        return False
+    return any(
+        marker in haystack
+        for marker in [
+            "i spent",
+            "i talked",
+            "talked to",
+            "customer told",
+            "we tested",
+            "we ran",
+            "we analyzed",
+            "we surveyed",
+            "we interviewed",
+            "i dug into",
+            "i read through",
+            "i analyzed",
+            "after talking to",
+        ]
+    )
+
+
 def workspace_anchor_name(bundle: ContextBundle, active_rules: dict[str, list[str]]) -> str | None:
     sources = [
         *active_rules.get("positioning_rules", []),
         *(section.content for section in bundle.positioning_sections),
         *active_rules.get("voice_rules", []),
+    ]
+    for source in sources:
+        candidate = first_workspace_anchor_candidate(source)
+        if candidate:
+            return candidate
+    haystack = "\n".join(sources)
+    if re.search(r"\bLeadpoet\b", haystack):
+        return "Leadpoet"
+    return None
+
+
+def workspace_anchor_from_active_rules(active_rules: dict[str, list[str]]) -> str | None:
+    sources = [
+        *active_rules.get("positioning_rules", []),
+        *active_rules.get("voice_rules", []),
+        *active_rules.get("review_rules", []),
     ]
     for source in sources:
         candidate = first_workspace_anchor_candidate(source)
@@ -1106,6 +1366,8 @@ def anchor_draft_to_workspace(
 
 
 def workspace_anchor_line(anchor: str, bundle: ContextBundle, active_rules: dict[str, list[str]]) -> str:
+    if anchor.lower() == "leadpoet":
+        return "For Leadpoet, proprietary buyer context and timing signals are where useful sales AI starts."
     sources = [
         *active_rules.get("positioning_rules", []),
         *(section.content for section in bundle.positioning_sections),
@@ -1121,7 +1383,7 @@ def workspace_anchor_line(anchor: str, bundle: ContextBundle, active_rules: dict
                     sentence = f"{prefix}."
             if len(sentence) <= 120:
                 return sentence
-    return f"{anchor} is the intent layer for sales AI."
+    return f"For {anchor}, the useful layer starts with proprietary context and timing."
 
 
 def first_sentence_or_line(text: str) -> str:
@@ -1160,10 +1422,15 @@ def build_rule_repair_prompt(
     violations: list[str],
     request: DraftRequest,
     bundle: ContextBundle,
+    active_rules: dict[str, list[str]] | None = None,
     max_chars: int,
 ) -> str:
     context = "\n".join(f"- {section.kind}/{section.name}: {section.content}" for section in bundle.positioning_sections)
     length_section = length_prompt_section(request, max_chars)
+    anchor = workspace_anchor_name(bundle, active_rules or {})
+    natural_voice_section = natural_voice_prompt_section(bundle, anchor=anchor)
+    product_mention_section = product_mention_prompt_section(anchor)
+    structure_section = structure_variation_prompt_section(request, [])
     return f"""Repair this X post so it follows the active Voice and context rules.
 
 Return only the revised post text.
@@ -1180,10 +1447,18 @@ Request:
 Facts & Context:
 {context or "- No saved facts/context available."}
 
+{natural_voice_section}
+
+{structure_section}
+
+{product_mention_section}
+
 Rules:
 - Keep the same core point.
 - Make it sound natural and founder-written.
 - Do not make it more polished or corporate.
+- Prefer one concrete mechanism or situation over a polished summary.
+- If a violation mentions a product-definition sentence, rewrite that sentence into a mechanism, scene, or consequence instead of another "Leadpoet is..." line.
 - Do not add unsupported claims, anecdotes, proof, metrics, or customer stories.
 - Do not include the exact words "not just".
 - Do not refuse, caveat, or ask for more details. Return a publishable post.
@@ -1319,6 +1594,7 @@ Rules:
 - Stay under {max_chars} characters.
 - Use the saved Facts & Context.
 - {anchor_instruction}
+- Make it sound like a specific person writing plainly, not an AI recap or brand post.
 - Do not include avoid phrases, em dashes, markdown, numbering labels, or commentary.
 - Do not invent shipped features, customer stories, product metrics, launch timing, or private proof.
 - Do not refuse or ask the user for missing details. If product specifics are thin, write a product belief from saved context."""

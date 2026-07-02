@@ -7,6 +7,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
@@ -25,7 +26,7 @@ from leadpoet_social_brain.content_queue import create_post_x, plan_week_x, post
 from leadpoet_social_brain.cli import build_parser as build_cli_parser, main as cli_main
 from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.core.models import ContentQueueItem, ContextSection, DraftRequest, EngagementMetrics, Pattern, PostNote, SocialPost, SyncMetadata, TrendItem, utc_now
-from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator, clean_generated_text
+from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator, clean_generated_text, selected_structure_shapes
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
 from leadpoet_social_brain.openrouter_provider import OpenRouterProvider, create_provider
 from leadpoet_social_brain.pattern_scout import (
@@ -167,7 +168,7 @@ class RoleAwareProvider:
                         "warnings": [],
                         "suggested_final_version": (
                             "Most sales AI still acts like more volume is the product.\n\n"
-                            "Leadpoet is for knowing why this account cares today."
+                            "For Leadpoet, the useful question is why this account cares today."
                         ),
                     }
                 )
@@ -1138,6 +1139,10 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Use saved Facts & Context as the source of truth", prompt)
             self.assertIn("Do not frame another tool, agent, or case study as owning the workspace's core advantage", prompt)
             self.assertIn("explain the exact mechanism that transfers to saved Facts & Context", prompt)
+            self.assertIn("Natural Voice Calibration:", prompt)
+            self.assertIn("Sound like one specific founder noticing a real thing", prompt)
+            self.assertIn("Structure Variation:", prompt)
+            self.assertIn("Dynamic Product Mention:", prompt)
             store.close()
 
     def test_generation_prompt_is_example_first_not_label_heavy(self):
@@ -1178,6 +1183,49 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotIn("Labels:", prompt)
             self.assertLess(prompt.index("Study these selected Voice Examples first:"), prompt.index("Writing and review instructions:"))
             store.close()
+
+    def test_structure_variation_rotates_across_trends(self):
+        request_a = DraftRequest(
+            platform="x",
+            topic="sales AI",
+            post_type="founder_insight",
+            angle="buyer timing beats generic data",
+            trend_ids=["trend_a"],
+        )
+        request_b = DraftRequest(
+            platform="x",
+            topic="sales AI",
+            post_type="founder_insight",
+            angle="buyer timing beats generic data",
+            trend_ids=["trend_b"],
+        )
+        trend_a = TrendItem(
+            id="trend_a",
+            title="ZoomInfo context layer",
+            source_type="web",
+            topic="sales AI",
+            summary="Context layer",
+            why_it_matters="It proves context matters.",
+            leadpoet_angle="Buyer timing beats generic data.",
+            date=utc_now(),
+        )
+        trend_b = TrendItem(
+            id="trend_b",
+            title="Close launches AI agent",
+            source_type="web",
+            topic="sales AI",
+            summary="AI agent",
+            why_it_matters="It proves agents need better timing.",
+            leadpoet_angle="Account context should decide action.",
+            date=utc_now(),
+        )
+
+        structures_a = [name for name, _ in selected_structure_shapes(request_a, [trend_a], count=4)]
+        structures_b = [name for name, _ in selected_structure_shapes(request_b, [trend_b], count=4)]
+
+        self.assertEqual(len(structures_a), 4)
+        self.assertEqual(len(set(structures_a)), 4)
+        self.assertNotEqual(structures_a[0], structures_b[0])
 
     def test_ingest_x_post_stores_metrics_and_notes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1284,6 +1332,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("quality_notes", saved_draft.context_snapshot)
             self.assertIn("selected_patterns", saved_draft.context_snapshot)
             self.assertIn("selected_context_sections", saved_draft.context_snapshot)
+            self.assertGreaterEqual(len(saved_draft.context_snapshot["structure_variation_options"]), 1)
             self.assertIn("skills", saved_draft.context_snapshot)
             skill_paths = {skill["path"] for skill in saved_draft.context_snapshot["skills"]}
             self.assertIn("skills/global_voice.md", skill_paths)
@@ -1304,6 +1353,7 @@ class SocialBrainTest(unittest.TestCase):
                     "",
                     "Leadpoet is useful when sales AI knows which account is moving now.",
                     evaluation_json("Leadpoet is useful when sales AI knows which account is moving now."),
+                    "For Leadpoet, useful sales AI starts with knowing which account is moving now.",
                 ]
             )
 
@@ -1316,8 +1366,8 @@ class SocialBrainTest(unittest.TestCase):
                 )
             )
 
-            self.assertEqual(drafts[0].text, "Leadpoet is useful when sales AI knows which account is moving now.")
-            self.assertEqual(len(provider.prompts), 4)
+            self.assertEqual(drafts[0].text, "For Leadpoet, useful sales AI starts with knowing which account is moving now.")
+            self.assertEqual(len(provider.prompts), 5)
             self.assertIn("previous draft options were not usable", provider.prompts[2])
             store.close()
 
@@ -1591,7 +1641,7 @@ class SocialBrainTest(unittest.TestCase):
                     "The message is downstream of the account signal.",
                     "Most tools write before they know who is ready.",
                     evaluation_json(
-                        "Sales AI needs timing before copy.\n\nLeadpoet is the intent layer before outreach.",
+                        "Sales AI needs timing before copy.\n\nFor Leadpoet, the intent layer comes before outreach.",
                         warnings=[
                             "positioning_gap: no draft names Leadpoet explicitly as the intent layer owner",
                             "All drafts stop at generic 'intent layer' concept without claiming Leadpoet wedge",
@@ -1671,9 +1721,11 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("source_bridge", provider.calls[0]["prompt"])
             self.assertIn("shallow topical pegs", provider.calls[0]["prompt"])
             self.assertIn("Hidden Post Intent from the strategist", provider.calls[1]["prompt"])
+            self.assertIn("Natural Voice Calibration:", provider.calls[1]["prompt"])
             self.assertIn("unsupported first-person setups", provider.calls[1]["prompt"])
             self.assertIn("make the bridge explicit", provider.calls[1]["prompt"])
             self.assertIn("evidence safety", provider.calls[2]["prompt"])
+            self.assertIn("natural voice", provider.calls[2]["prompt"])
             self.assertIn("post-worthiness", provider.calls[2]["prompt"])
             self.assertIn("generic swap test", provider.calls[2]["prompt"])
             self.assertIn("Final evaluator should check", provider.calls[2]["prompt"])
@@ -1705,6 +1757,315 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("- Length form: Long", provider.calls[0]["prompt"])
             self.assertIn("- Character limit: 1200", provider.calls[1]["prompt"])
             self.assertIn("match the requested length form", provider.calls[2]["prompt"])
+            store.close()
+
+    def test_generation_repairs_ai_polish_across_prompt_and_trend_shapes(self):
+        scenarios = [
+            {
+                "name": "trend_response",
+                "request": DraftRequest(
+                    platform="x",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="buyer timing beats generated email volume",
+                    use_trends=True,
+                    length_mode="standard",
+                ),
+                "trend": TrendItem(
+                    title="AI SDR teams shift from volume to timing",
+                    source_type="news",
+                    topic="sales LLMs",
+                    summary="Sales teams are questioning high-volume outbound tools.",
+                    why_it_matters="It supports the idea that timing matters more than generated copy.",
+                    leadpoet_angle="Leadpoet should connect the trend to buyer timing and account context.",
+                    urgency="high",
+                    date=utc_now(),
+                ),
+                "bad_final": (
+                    "As AI continues to reshape outbound, the future of sales AI is buyer timing at scale.\n\n"
+                    "Leadpoet helps teams unlock it."
+                ),
+                "repair": (
+                    "Most sales AI still starts with the email.\n\n"
+                    "Leadpoet starts with whether this account has a reason to care now."
+                ),
+                "expected_violations": ["future of", "as X continues", "scale language"],
+                "disallowed": ["as ai continues", "the future of", "at scale", "unlock"],
+            },
+            {
+                "name": "product_update",
+                "request": DraftRequest(
+                    platform="x",
+                    topic="Leadpoet",
+                    post_type="product_update",
+                    angle="make account context show up before outreach",
+                    length_mode="standard",
+                ),
+                "bad_final": "Here's the thing: Leadpoet is a game changer for seamless account intelligence.",
+                "repair": "For Leadpoet, account context has to show up before the sequence starts.",
+                "expected_violations": [
+                    "stock setup",
+                    "avoid phrase: game changer",
+                    "corporate/AI-polish",
+                    "standalone 'Leadpoet is...' product definition",
+                ],
+                "disallowed": ["here's the thing", "game changer", "seamless", "leadpoet is"],
+            },
+            {
+                "name": "short_founder_insight",
+                "request": DraftRequest(
+                    platform="x",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="timing beats volume",
+                    length_mode="short",
+                ),
+                "bad_final": "It's not about more outbound. It's about better timing.\n\nLeadpoet makes that possible.",
+                "repair": "More outbound is the easy part.\n\nFor Leadpoet, timing means knowing when an account has a real reason to listen.",
+                "expected_violations": ["it's not about X"],
+                "disallowed": ["it's not about", "it's about", "leadpoet is"],
+            },
+            {
+                "name": "quote_tweet_with_fake_setup",
+                "request": DraftRequest(
+                    platform="x",
+                    topic="sales LLMs",
+                    post_type="quote_tweet",
+                    angle="use the quoted post as proof that account timing is the real constraint",
+                    length_mode="standard",
+                ),
+                "bad_final": (
+                    "I spent the morning reading every AI SDR thread.\n\n"
+                    "The takeaway is Leadpoet makes buyer timing the real workflow."
+                ),
+                "repair": (
+                    "The AI SDR debate keeps landing in the same place.\n\n"
+                    "The hard part is knowing why this account should hear from you now. Leadpoet starts there."
+                ),
+                "expected_violations": ["unsupported first-person", "thought-leadership"],
+                "disallowed": ["i spent the morning", "the takeaway"],
+            },
+        ]
+
+        for scenario in scenarios:
+            with self.subTest(name=scenario["name"]):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    store = self.make_store(tmpdir)
+                    store.seed_defaults()
+                    trend = scenario.get("trend")
+                    if trend:
+                        saved_trend = store.save_trend_item(trend)
+                        request = replace(scenario["request"], trend_ids=[saved_trend.id])
+                    else:
+                        request = scenario["request"]
+                    provider = SequentialProvider(
+                        [
+                            strategy_json(),
+                            "Leadpoet starts with buyer timing before generated copy.",
+                            "The useful sales AI layer knows why this account is ready now.",
+                            "Account context matters before the sequence starts.",
+                            evaluation_json(scenario["bad_final"]),
+                            scenario["repair"],
+                        ]
+                    )
+
+                    draft = SocialBrainGenerator(store, provider=provider).generate(request)[0]
+
+                    self.assertEqual(draft.text, scenario["repair"])
+                    self.assertLessEqual(len(draft.text), draft.context_snapshot["max_chars"])
+                    for disallowed in scenario["disallowed"]:
+                        self.assertNotIn(disallowed, draft.text.lower())
+                    self.assertIn("Natural Voice Calibration:", provider.prompts[1])
+                    self.assertIn("Violations to fix:", provider.prompts[-1])
+                    for expected in scenario["expected_violations"]:
+                        self.assertIn(expected, provider.prompts[-1])
+            store.close()
+
+    def test_generation_repairs_cookie_cutter_leadpoet_definition(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = SequentialProvider(
+                [
+                    strategy_json(
+                        thesis="Buyer timing needs account context.",
+                        concrete_detail="verified data versus buyer timing",
+                        source_bridge="ZoomInfo proves context matters, but not proprietary buyer timing.",
+                    ),
+                    "Verified data tells an agent who exists.\n\nLeadpoet is building the intent layer for who is worth action now.",
+                    "ZoomInfo proves context is moving into GTM.\n\nLeadpoet is the timing layer.",
+                    "The hard part is not the contact record. It is knowing why this account should hear from you now.",
+                    evaluation_json(
+                        "Verified data tells an agent who exists.\n\nLeadpoet is building the intent layer for buyer context and timing signals.",
+                    ),
+                    "Verified data tells an agent who exists.\n\nFor Leadpoet, the harder question is why this account is worth action now.",
+                ]
+            )
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle="ZoomInfo context layer proves intent matters.",
+                )
+            )[0]
+
+            self.assertEqual(
+                draft.text,
+                "Verified data tells an agent who exists.\n\nFor Leadpoet, the harder question is why this account is worth action now.",
+            )
+            self.assertNotIn("Leadpoet is building", draft.text)
+            self.assertIn("avoid default 'Leadpoet is building...' product definition", provider.prompts[-1])
+            store.close()
+
+    def test_generation_repairs_cookie_cutter_leadpoet_mentions_across_current_trend_batch(self):
+        class CookieCutterTrendProvider:
+            def __init__(self):
+                self.repair_count = 0
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Do not write the post yet" in prompt:
+                    return [
+                        strategy_json(
+                            thesis="Sales AI needs buyer timing, not static records.",
+                            concrete_detail="buyer timing",
+                            source_bridge="The source proves context matters; saved context turns that into buyer timing.",
+                            success_criteria="Avoid cookie-cutter product definitions.",
+                        )
+                    ]
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        "The market keeps moving from records to context.\n\nLeadpoet is building the intent layer for buyer timing.",
+                        "Verified data tells a rep who exists.\n\nLeadpoet is the layer for who is worth action now.",
+                        "The category wants context.\n\nLeadpoet's bet is proprietary buyer timing.",
+                    ][:variants]
+                if "Choose the best X post" in prompt:
+                    return [
+                        evaluation_json(
+                            "The market keeps moving from records to context.\n\n"
+                            "Leadpoet is building the intent layer for buyer timing and account qualification."
+                        )
+                    ]
+                if "Repair this X post" in prompt:
+                    self.repair_count += 1
+                    repairs = [
+                        "Static records answer who exists.\n\nFor Leadpoet, the harder question is why this account is worth action now.",
+                        "A rep does not need another prettier list.\n\nThey need the account where something changed. That is the Leadpoet lane.",
+                        "Context only matters when it changes action.\n\nFor Leadpoet, that means timing a rep can actually use.",
+                        "Buyer timing beats another warmed-up account score.\n\nFor Leadpoet, the signal has to explain why now.",
+                        "A contact record can be correct and still useless today.\n\nThe useful work is turning context into a reason to act.",
+                    ]
+                    return [repairs[(self.repair_count - 1) % len(repairs)]]
+                return ["Buyer timing beats static lists."]
+
+        trend_titles = [
+            "Stop Losing Pipeline to Slow Follow-Up: Meet Qualified",
+            "Salesforce Agentforce Prospecting Agent Now Powered by ZoomInfo's GTM.AI for AI Sales Prospecting",
+            "The Global Associates Closes the Process Gap in B2B Lead Generation with ISO Certification and AI",
+            "Aircall Acquires Piper AI to Expand Revenue Intelligence and Sales Automation Capabilities",
+            "Close Launches Chloe, an AI Sales Agent Built Directly Into the CRM",
+            "Right Now, We Run 4+ AI SDR Agents. Here’s Why.",
+            "Salesforce Puts an AI Marketing Team in Every Marketer’s Hands",
+            "Salesforce Acquires Contentful, Rolls Out New AI Agents for Marketers",
+            "Bombora: Interview CEO Mark Connon About The B2B Intent Data Company",
+            "From Lead Gen to Revenue Marketing",
+            "The Revenue Handoff Problem: Why CX Signals Still Don't Flow Cleanly Into RevTech Stacks",
+            "ZoomInfo, Recognized as One to Watch in Snowflake's Modern Marketing Data Stack Report",
+            "One Stalled Deal, One Automation, 10 New Prospects: Lightfield CEO Keith Peiris Demos the AI-Native GTM Loop Live",
+            "AI in CRM: Benefits, Use Cases, and Tools",
+            "Salesforce Makes Agentforce Commerce Generally Available Ahead of Peak Season",
+            "As AI Agents Transform Commerce, Salesforce Unleashes Its Biggest Agentforce Commerce Release Yet",
+            "Why LinkedIn engagement is becoming one of the most valuable sales signals",
+            "The four layers of winning GTM infrastructure",
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = CookieCutterTrendProvider()
+            trends = [
+                store.save_trend_item(
+                    TrendItem(
+                        title=title,
+                        source_type="web",
+                        topic="sales AI",
+                        summary="Current GTM trend fixture for generation audit.",
+                        why_it_matters="It shows the market moving toward context and timing.",
+                        leadpoet_angle="Buyer timing needs proprietary account context.",
+                        date=utc_now(),
+                    )
+                )
+                for title in trend_titles
+            ]
+
+            drafts = []
+            for index in range(20):
+                trend = trends[index % len(trends)]
+                drafts.append(
+                    SocialBrainGenerator(store, provider=provider).generate(
+                        DraftRequest(
+                            platform="x",
+                            topic=trend.topic,
+                            post_type="founder_insight",
+                            angle=trend.leadpoet_angle,
+                            use_trends=True,
+                            trend_ids=[trend.id],
+                            length_mode="standard",
+                        ),
+                        variants=1,
+                        save=False,
+                    )[0]
+                )
+
+            texts = [draft.text for draft in drafts]
+            lowered_text = "\n\n".join(texts).lower()
+            self.assertEqual(len(drafts), 20)
+            self.assertGreaterEqual(provider.repair_count, 20)
+            self.assertNotIn("leadpoet is building", lowered_text)
+            self.assertNotIn("leadpoet is the", lowered_text)
+            self.assertNotIn("leadpoet's bet", lowered_text)
+            self.assertGreaterEqual(len({text.split("\n\n", 1)[0] for text in texts}), 4)
+            self.assertGreaterEqual(
+                len({draft.context_snapshot["structure_variation_options"][0]["name"] for draft in drafts}),
+                5,
+            )
+            store.close()
+
+    def test_generation_allows_supported_first_person_context(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = SequentialProvider(
+                [
+                    strategy_json(
+                        source_material="User supplied a first-person research setup.",
+                        evidence_boundary="The writer can mention reading AI SDR posts because the request supplied it.",
+                    ),
+                    "I spent the morning reading AI SDR posts. The useful ones kept coming back to buyer timing.",
+                    "The better sales AI argument starts with why this account cares now.",
+                    "Leadpoet is for timing, not louder outbound.",
+                    evaluation_json(
+                        "I spent the morning reading AI SDR posts.\n\n"
+                        "The useful ones kept coming back to the same question: why this account, now?\n\n"
+                        "Leadpoet starts there."
+                    ),
+                ]
+            )
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="I spent the morning reading AI SDR posts",
+                    extra_context="I spent the morning reading AI SDR posts and noticed they all run into buyer timing.",
+                    length_mode="standard",
+                )
+            )[0]
+
+            self.assertIn("I spent the morning", draft.text)
+            self.assertEqual(len(provider.prompts), 3)
             store.close()
 
     def test_style_guide_rebuild_is_writing_guide_not_tag_report(self):
@@ -2692,7 +3053,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(
                 payload["generated_text"],
                 "Buyer timing is the real sales AI advantage. More email is not strategy.\n\n"
-                "Leadpoet is the core intent layer.",
+                "For Leadpoet, proprietary buyer context and timing signals are where useful sales AI starts.",
             )
             self.assertEqual(payload["item"]["status"], "needs_review")
             self.assertEqual(payload["item"]["scheduled_at"], "2026-06-30T10:00")

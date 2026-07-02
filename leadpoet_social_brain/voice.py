@@ -16,6 +16,14 @@ DEFAULT_AVOID_PHRASES = [
     "unlock",
     "supercharge",
     "AI is transforming",
+    "the future of",
+    "here's the thing",
+    "as AI continues",
+    "at scale",
+    "new era",
+    "paradigm shift",
+    "seamless",
+    "leverage",
     "not just X, but Y",
     "generic launch language",
     "overly polished thought leadership",
@@ -43,6 +51,9 @@ DEFAULT_VOICE_RULES = [
     "Plain, direct, and specific.",
     "Founder-led without sounding like a brand account.",
     "Practical enough that a buyer or investor can see the business point.",
+    "Use exact nouns from saved context instead of polished category language.",
+    "Sound like a useful thought the writer would actually post, not an AI recap.",
+    "Vary how the product is mentioned; avoid default product-definition sentences.",
 ]
 
 REQUIRED_REVIEW_RULES = [
@@ -51,6 +62,7 @@ REQUIRED_REVIEW_RULES = [
         "that transfers to saved Facts & Context; do not rely on 'same problem' or 'part to watch' shorthand."
     ),
     "Reject drafts that could apply to any workspace after swapping company or product names.",
+    "Reject cookie-cutter product closers that define the product the same way instead of earning the mention through the post.",
     (
         "A post-worthy draft must answer why this is worth posting now: concrete reader payoff, "
         "timely trigger, or saved-context proof."
