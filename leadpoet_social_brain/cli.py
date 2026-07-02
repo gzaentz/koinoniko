@@ -813,6 +813,9 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
     print("Primary layout target counts:")
     for key, value in sorted(payload["primary_layout_target_counts"].items()):
         print(f"- {key}: {value}")
+    print("Primary closing target counts:")
+    for key, value in sorted(payload["primary_closing_target_counts"].items()):
+        print(f"- {key}: {value}")
     print("Leadpoet mention pattern counts:")
     for key, value in sorted(payload["leadpoet_mention_pattern_counts"].items()):
         print(f"- {key}: {value}")
@@ -898,6 +901,14 @@ def build_naturalness_audit(
         )
         if isinstance(layout_option, dict):
             primary_layout_target = str(layout_option.get("name") or "")
+        primary_closing_target = ""
+        closing_option = (
+            draft.context_snapshot.get("primary_closing_target")
+            if isinstance(draft.context_snapshot, dict)
+            else None
+        )
+        if isinstance(closing_option, dict):
+            primary_closing_target = str(closing_option.get("name") or "")
         rows.append(
             {
                 "index": index + 1,
@@ -915,6 +926,7 @@ def build_naturalness_audit(
                 "primary_product_mention_lane": primary_product_lane,
                 "first_product_mention_lane": first_product_lane,
                 "primary_layout_target": primary_layout_target,
+                "primary_closing_target": primary_closing_target,
             }
         )
     text_blob = "\n\n".join(str(row["text"]) for row in rows).lower()
@@ -947,6 +959,9 @@ def build_naturalness_audit(
     primary_layout_target_counts = Counter(str(row["primary_layout_target"]) for row in rows if row["primary_layout_target"])
     if len(primary_layout_target_counts) < min(4, len(trends), count):
         warnings.append("Layout target guidance did not vary enough across trends.")
+    primary_closing_target_counts = Counter(str(row["primary_closing_target"]) for row in rows if row["primary_closing_target"])
+    if len(primary_closing_target_counts) < min(4, len(trends), count):
+        warnings.append("Closing target guidance did not vary enough across trends.")
     covered_trend_ids = {str(row["trend_id"]) for row in rows if row["trend_id"]}
     uncovered_trend_count = max(0, len(trends) - len(covered_trend_ids))
     if uncovered_trend_count:
@@ -981,6 +996,7 @@ def build_naturalness_audit(
         "primary_structure_option_counts": dict(primary_structure_counts),
         "primary_product_mention_lane_counts": dict(primary_product_lane_counts),
         "primary_layout_target_counts": dict(primary_layout_target_counts),
+        "primary_closing_target_counts": dict(primary_closing_target_counts),
         "first_structure_option_counts": dict(first_structure_counts or primary_structure_counts),
         "first_product_mention_lane_counts": dict(first_product_lane_counts or primary_product_lane_counts),
         "leadpoet_mention_pattern_counts": dict(mention_pattern_counts),

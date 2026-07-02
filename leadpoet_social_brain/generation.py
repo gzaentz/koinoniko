@@ -150,6 +150,37 @@ POST_LAYOUT_TARGETS = [
     ),
 ]
 
+POST_CLOSING_TARGETS = [
+    (
+        "mechanism stop",
+        "End on the concrete mechanism or signal. Do not add a summary sentence after it.",
+    ),
+    (
+        "operator consequence",
+        "End with what the rep, founder, or buyer can do differently because of the point.",
+    ),
+    (
+        "plain implication",
+        "End with one plain implication. No motivational lesson, CTA, or brand tagline.",
+    ),
+    (
+        "source boundary",
+        "End by naming what the trend proves and what it still does not solve.",
+    ),
+    (
+        "no product-name closer",
+        "If the product name appears, place it earlier; the final line should stand on the idea itself.",
+    ),
+    (
+        "short verdict",
+        "End with a short verdict that feels like a person deciding, not a slogan.",
+    ),
+    (
+        "open loop",
+        "End with the operational question the reader should now ask, without sounding like engagement bait.",
+    ),
+]
+
 PRODUCT_MENTION_LANES = [
     (
         "mechanism-first",
@@ -547,15 +578,18 @@ def structure_variation_prompt_section(request: DraftRequest, trends: list[Trend
     selected = selected_structure_shapes(request, trends, count=4)
     primary_name, primary_guidance = selected[0]
     layout_name, layout_guidance = primary_layout_target(request, trends)
+    closing_name, closing_guidance = primary_closing_target(request, trends)
     options = "\n".join(f"- {name}: {guidance}" for name, guidance in selected)
     return (
         "Structure Variation:\n"
         "Avoid the default template: trend recap -> generic product definition -> tidy closer.\n"
         f"Primary structure for this request: {primary_name}: {primary_guidance}\n"
         f"Primary layout target for this request: {layout_name}: {layout_guidance}\n"
+        f"Primary closing target for this request: {closing_name}: {closing_guidance}\n"
         "Use the primary structure unless another listed shape clearly fits the idea better. "
         "Use the primary layout target unless it would make the post worse. "
-        "In multi-option prompts, option 1 should use the primary structure/layout and each option must use a different shape.\n"
+        "Use the primary closing target unless it would make the post worse. "
+        "In multi-option prompts, option 1 should use the primary structure/layout/closing and each option must use a different shape.\n"
         f"{options}"
     )
 
@@ -637,6 +671,24 @@ def selected_layout_targets(
 
 def primary_layout_target(request: DraftRequest, trends: list[TrendItem]) -> tuple[str, str]:
     return selected_layout_targets(request, trends, count=1)[0]
+
+
+def selected_closing_targets(
+    request: DraftRequest,
+    trends: list[TrendItem],
+    *,
+    count: int,
+) -> list[tuple[str, str]]:
+    digest = hashlib.sha256(f"closing-target|{variation_seed_source(request, trends)}".encode("utf-8")).hexdigest()
+    start = int(digest[:8], 16) % len(POST_CLOSING_TARGETS)
+    return [
+        POST_CLOSING_TARGETS[(start + offset) % len(POST_CLOSING_TARGETS)]
+        for offset in range(min(count, len(POST_CLOSING_TARGETS)))
+    ]
+
+
+def primary_closing_target(request: DraftRequest, trends: list[TrendItem]) -> tuple[str, str]:
+    return selected_closing_targets(request, trends, count=1)[0]
 
 
 def variation_seed_source(request: DraftRequest, trends: list[TrendItem]) -> str:
@@ -1037,6 +1089,7 @@ def build_context_snapshot(
     primary_structure = primary_structure_shape(request, trends)
     primary_product_lane = primary_product_mention_lane(request, trends)
     primary_layout = primary_layout_target(request, trends)
+    primary_closing = primary_closing_target(request, trends)
     return {
         "workspace_id": bundle.workspace_id,
         "request": request.__dict__,
@@ -1067,6 +1120,10 @@ def build_context_snapshot(
             "name": primary_layout[0],
             "guidance": primary_layout[1],
         },
+        "primary_closing_target": {
+            "name": primary_closing[0],
+            "guidance": primary_closing[1],
+        },
         "structure_variation_options": [
             {"name": name, "guidance": guidance}
             for name, guidance in selected_structure_shapes(request, trends, count=4)
@@ -1074,6 +1131,10 @@ def build_context_snapshot(
         "layout_target_options": [
             {"name": name, "guidance": guidance}
             for name, guidance in selected_layout_targets(request, trends, count=4)
+        ],
+        "closing_target_options": [
+            {"name": name, "guidance": guidance}
+            for name, guidance in selected_closing_targets(request, trends, count=4)
         ],
         "product_mention_options": [
             {"name": name, "guidance": guidance}

@@ -35,9 +35,11 @@ from leadpoet_social_brain.generation import (
     MISSING_PROVIDER_MESSAGE,
     SocialBrainGenerator,
     clean_generated_text,
+    primary_closing_target,
     primary_layout_target,
     primary_product_mention_lane,
     primary_structure_shape,
+    selected_closing_targets,
     selected_layout_targets,
     selected_product_mention_lanes,
     selected_structure_shapes,
@@ -1171,6 +1173,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Structure Variation:", prompt)
             self.assertIn("Primary structure for this request:", prompt)
             self.assertIn("Primary layout target for this request:", prompt)
+            self.assertIn("Primary closing target for this request:", prompt)
             self.assertIn("Dynamic Product Mention:", prompt)
             self.assertIn("Primary product mention lane for this request:", prompt)
             self.assertIn("Product mention lanes for this request:", prompt)
@@ -1304,6 +1307,51 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotEqual(layouts_a[0], layouts_b[0])
         self.assertEqual(primary_layout_target(request_a, [trend_a])[0], layouts_a[0])
         self.assertEqual(primary_layout_target(request_b, [trend_b])[0], layouts_b[0])
+
+    def test_closing_targets_rotate_across_trends(self):
+        request_a = DraftRequest(
+            platform="x",
+            topic="sales AI",
+            post_type="founder_insight",
+            angle="buyer timing beats generic data",
+            trend_ids=["trend_a"],
+        )
+        request_b = DraftRequest(
+            platform="x",
+            topic="sales AI",
+            post_type="founder_insight",
+            angle="buyer timing beats generic data",
+            trend_ids=["trend_b"],
+        )
+        trend_a = TrendItem(
+            id="trend_a",
+            title="ZoomInfo context layer",
+            source_type="web",
+            topic="sales AI",
+            summary="Context layer",
+            why_it_matters="It proves context matters.",
+            leadpoet_angle="Buyer timing beats generic data.",
+            date=utc_now(),
+        )
+        trend_b = TrendItem(
+            id="trend_b",
+            title="Close launches AI agent",
+            source_type="web",
+            topic="sales AI",
+            summary="AI agent",
+            why_it_matters="It proves agents need better timing.",
+            leadpoet_angle="Account context should decide action.",
+            date=utc_now(),
+        )
+
+        closings_a = [name for name, _ in selected_closing_targets(request_a, [trend_a], count=4)]
+        closings_b = [name for name, _ in selected_closing_targets(request_b, [trend_b], count=4)]
+
+        self.assertEqual(len(closings_a), 4)
+        self.assertEqual(len(set(closings_a)), 4)
+        self.assertNotEqual(closings_a[0], closings_b[0])
+        self.assertEqual(primary_closing_target(request_a, [trend_a])[0], closings_a[0])
+        self.assertEqual(primary_closing_target(request_b, [trend_b])[0], closings_b[0])
 
     def test_product_mention_lanes_rotate_across_trends(self):
         request_a = DraftRequest(
@@ -1458,9 +1506,11 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("primary_structure_option", saved_draft.context_snapshot)
             self.assertIn("primary_product_mention_lane", saved_draft.context_snapshot)
             self.assertIn("primary_layout_target", saved_draft.context_snapshot)
+            self.assertIn("primary_closing_target", saved_draft.context_snapshot)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["structure_variation_options"]), 1)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["product_mention_options"]), 1)
             self.assertGreaterEqual(len(saved_draft.context_snapshot["layout_target_options"]), 1)
+            self.assertGreaterEqual(len(saved_draft.context_snapshot["closing_target_options"]), 1)
             self.assertEqual(
                 saved_draft.context_snapshot["primary_structure_option"]["name"],
                 saved_draft.context_snapshot["structure_variation_options"][0]["name"],
@@ -1472,6 +1522,10 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(
                 saved_draft.context_snapshot["primary_layout_target"]["name"],
                 saved_draft.context_snapshot["layout_target_options"][0]["name"],
+            )
+            self.assertEqual(
+                saved_draft.context_snapshot["primary_closing_target"]["name"],
+                saved_draft.context_snapshot["closing_target_options"][0]["name"],
             )
             self.assertIn("skills", saved_draft.context_snapshot)
             skill_paths = {skill["path"] for skill in saved_draft.context_snapshot["skills"]}
@@ -2112,6 +2166,7 @@ class SocialBrainTest(unittest.TestCase):
             for prefix in [
                 "Primary structure for this request:",
                 "Primary layout target for this request:",
+                "Primary closing target for this request:",
                 "Primary product mention lane for this request:",
             ]:
                 self.assertEqual(primary_line(writer_prompt, prefix), primary_line(evaluator_prompt, prefix))
@@ -2500,6 +2555,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertGreaterEqual(len(payload["primary_structure_option_counts"]), 5)
             self.assertGreaterEqual(len(payload["primary_product_mention_lane_counts"]), 5)
             self.assertGreaterEqual(len(payload["primary_layout_target_counts"]), 4)
+            self.assertGreaterEqual(len(payload["primary_closing_target_counts"]), 4)
             self.assertGreaterEqual(len(payload["first_structure_option_counts"]), 5)
             self.assertGreaterEqual(len(payload["first_product_mention_lane_counts"]), 5)
             self.assertGreaterEqual(len(payload["leadpoet_mention_pattern_counts"]), 5)
@@ -3645,6 +3701,7 @@ class SocialBrainTest(unittest.TestCase):
             for prefix in [
                 "Primary structure for this request:",
                 "Primary layout target for this request:",
+                "Primary closing target for this request:",
                 "Primary product mention lane for this request:",
             ]:
                 writer_line = next(line for line in provider.prompts[1].splitlines() if line.startswith(prefix))
