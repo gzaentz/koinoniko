@@ -1290,6 +1290,8 @@ def leadpoet_sentence_grammar_fingerprint(sentence: str) -> str:
         return "leadpoet_subject_verb"
     if re.search(r"\b(?:put|place|keep|carry|bring|move|tuck|embed|mention|name|use)\b[^.!?]{0,80}\bleadpoet\b", lowered):
         return "product_as_object"
+    if re.search(r"\bhandoff\s+(?:to|into)\s+leadpoet\b|\b(?:reaches?|reach|arrives?\s+at)\s+leadpoet\b", lowered):
+        return "product_destination"
     if re.match(r"(?:inside|in|into|through|within|around|near|next\s+to)\s+leadpoet\b", lowered):
         return "prepositional_leadpoet_open"
     if re.search(r"\b(?:inside|in|into|through|within|before|after|around|near|next\s+to)\s+leadpoet\b", lowered):
@@ -1319,6 +1321,16 @@ def leadpoet_phrase_pattern_fingerprint(sentence: str) -> str:
         return "that_is_where_leadpoet"
     if re.search(r"\bwhere\s+leadpoet\s+enters\b", lowered):
         return "where_leadpoet_enters"
+    if re.search(r"\bby the time [^.!?]{0,50}\breaches\s+leadpoet\b|\bby the time [^.!?]{0,50}\bleadpoet\b", lowered):
+        return "by_time_reaches_leadpoet"
+    if re.search(r"\b(?:reaches?|reach)\s+leadpoet\b|\bbefore [^.!?]{0,50}\breaches\s+leadpoet\b", lowered):
+        return "reaches_leadpoet"
+    if re.search(r"\bhandoff\s+(?:to|into)\s+leadpoet\b|\bat the handoff\s+(?:to|into)\s+leadpoet\b", lowered):
+        return "handoff_to_leadpoet"
+    if re.search(r"\bbring(?:s|ing)?\s+leadpoet\s+in\b|\bbring(?:s|ing)?\s+in\s+leadpoet\b", lowered):
+        return "bring_in_leadpoet"
+    if re.search(r"\bleadpoet\s+(?:appears|enters)\b|\bbefore\s+leadpoet\s+(?:appears|enters)\b", lowered):
+        return "leadpoet_appears_or_enters"
     if re.search(r"\bbefore\s+leadpoet\s+earns\b", lowered):
         return "before_leadpoet_earns"
     if re.search(r"\binside\s+leadpoet\b", lowered):
@@ -2325,38 +2337,42 @@ def leadpoet_grammar_saturation_replacements(sentence: str) -> list[str]:
     lowered = " ".join(sentence.lower().replace("’", "'").split())
     if "explain why now" in lowered:
         return [
-            "Timing has to explain why now before the account reaches Leadpoet.",
-            "The account-change check should come before Leadpoet: timing has to explain why now.",
-            "By the time it reaches Leadpoet, timing has to explain why now.",
-            "The handoff to Leadpoet comes after timing explains why now.",
-            "Timing changes before Leadpoet earns the mention.",
-            "The account reason reaches Leadpoet when timing explains why now.",
+            "Timing has to explain why this account deserves action before copy starts.",
+            "When a rep opens Leadpoet, the why-now reason should be visible before the email.",
+            "The handoff is simple: why this account, why now, what changed.",
+            "The why-now signal belongs in the account choice, not the tagline.",
+            "At the handoff into Leadpoet, the signal should already say why this account now.",
+            "The sequence can wait until the account-change reason is clear.",
+            "Before any product mention, the signal has to name the account change.",
+            "The product name works only after the why-now reason is already doing the work.",
         ]
     if "account reason" in lowered:
         return [
-            "The account reason should be clear before it reaches Leadpoet.",
-            "The post should bring in Leadpoet after the account reason is clear.",
-            "By the time it reaches Leadpoet, the account reason should already have timing behind it.",
-            "The handoff to Leadpoet comes after the account reason is clear.",
-            "The account reason changes before Leadpoet earns the mention.",
-            "Timing reaches Leadpoet only after the account reason is clear.",
+            "The account reason should be clear before copy starts.",
+            "When a rep opens Leadpoet, the account reason should be visible before the email.",
+            "At the handoff into Leadpoet, the reason should be specific enough to change the next step.",
+            "The CRM record is not the point; the account-change reason is.",
+            "The reason has to survive the jump from signal to sequence.",
+            "The sentence earns its spot when it explains why this account moved.",
+            "The product name can stay quiet until the account reason has a job.",
         ]
     if "timing" in lowered:
         return [
-            "Timing should become useful before the account reaches Leadpoet.",
-            "The post should bring in Leadpoet where timing turns into the next account choice.",
-            "By the time it reaches Leadpoet, timing has to change the account choice.",
-            "The handoff to Leadpoet comes after timing is clear.",
-            "Timing changes before Leadpoet earns the mention.",
-            "The account change reaches Leadpoet after timing is clear.",
+            "Timing should change the account choice before the sequence gets louder.",
+            "When a rep opens Leadpoet, the timing signal should be visible before the copy.",
+            "At the handoff into Leadpoet, timing has to point to the next account choice.",
+            "The signal is not who fits; it is who changed.",
+            "Copy can wait until timing makes the account choice obvious.",
+            "The timing point should be clear without turning the final line into a tagline.",
+            "The handoff can point at Leadpoet, then let the timing signal do the work.",
         ]
     return [
-        "The account reason should reach Leadpoet only after the timing signal is clear.",
-        "The account-change check should come before Leadpoet, not after the category line.",
-        "By the time it reaches Leadpoet, the timing signal has to stay concrete.",
-        "The handoff to Leadpoet comes after timing is clear.",
-        "Timing changes before Leadpoet earns the mention.",
-        "Timing becomes useful before the account reaches Leadpoet.",
+        "The account-change check should happen before generated copy starts.",
+        "When a rep opens Leadpoet, the first thing should be what changed, not just who matches.",
+        "At the handoff into Leadpoet, the signal needs a concrete why-now reason.",
+        "The sharper question is which account deserves action this week.",
+        "The product name can stay quiet until the mechanism is clear.",
+        "Buyer timing should carry the point before any tagline appears.",
     ]
 
 

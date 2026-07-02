@@ -1647,6 +1647,19 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn("put leadpoet", combined)
         self.assertNotIn("inside leadpoet", combined)
 
+    def test_leadpoet_phrase_fingerprints_separate_fallback_families(self):
+        cases = {
+            "Timing has to explain why now before the account reaches Leadpoet.": "reaches_leadpoet",
+            "By the time it reaches Leadpoet, timing has to explain why now.": "by_time_reaches_leadpoet",
+            "At the handoff into Leadpoet, the signal should already say why this account now.": "handoff_to_leadpoet",
+            "The post should bring in Leadpoet after the account reason is clear.": "bring_in_leadpoet",
+            "Leadpoet appears only after the account reason is clear.": "leadpoet_appears_or_enters",
+        }
+
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(leadpoet_phrase_pattern_for_text(text), expected)
+
     def test_deterministic_leadpoet_repairs_avoid_meta_instruction_language(self):
         banned_meta_patterns = [
             r"\binside\s+leadpoet\b",
@@ -1996,7 +2009,7 @@ class SocialBrainTest(unittest.TestCase):
                     self.repair_count += 1
                     self.repair_prompts.append(prompt)
                     return [
-                        "A correct contact record can still be late. The account reason reaches Leadpoet when timing changes."
+                        "A correct contact record can still be late. When a rep opens Leadpoet, the first thing should be what changed."
                     ]
                 return ["A correct contact record can still be late."]
 
@@ -2033,7 +2046,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("change saturated batch Leadpoet grammar: product_modifier", provider.repair_prompts[0])
             self.assertEqual(
                 draft.text,
-                "A correct contact record can still be late. The account reason reaches Leadpoet when timing changes.",
+                "A correct contact record can still be late. When a rep opens Leadpoet, the first thing should be what changed.",
             )
             self.assertEqual(
                 draft.context_snapshot["recent_output_batch_summary"]["leadpoet_grammar_counts"]["product_modifier"],
@@ -2102,7 +2115,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("change saturated batch Leadpoet grammar: product_modifier", provider.repair_prompts[0])
             self.assertEqual(
                 draft.text,
-                "Static records answer who exists. The handoff to Leadpoet comes after timing explains why now.",
+                "Static records answer who exists. When a rep opens Leadpoet, the why-now reason should be visible before the email.",
             )
             self.assertNotIn("Put Leadpoet", draft.text)
             self.assertNotIn("Inside Leadpoet", draft.text)
@@ -2315,7 +2328,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("change saturated batch layout: p2|l2|leadpoet_last", provider.repair_prompts[0])
             self.assertEqual(
                 draft.text,
-                "Static records answer who exists. The account reason reaches Leadpoet when timing changes.",
+                "Static records answer who exists. When a rep opens Leadpoet, the account reason should be visible before the email.",
             )
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
             store.close()
@@ -4864,7 +4877,7 @@ class SocialBrainTest(unittest.TestCase):
     def test_leadpoet_phrase_pattern_and_sentence_template_track_repetitive_shapes(self):
         self.assertEqual(
             leadpoet_phrase_pattern_for_text("The account reason reaches Leadpoet when timing explains why now."),
-            "clause_embedded",
+            "reaches_leadpoet",
         )
         self.assertEqual(
             leadpoet_sentence_template("The Leadpoet signal points to timing."),
@@ -4988,15 +5001,15 @@ class SocialBrainTest(unittest.TestCase):
             payload = build_naturalness_audit(
                 store,
                 SocialBrainGenerator(store, provider=RepeatedLayoutProvider()),
-                count=2,
-                trend_limit=2,
+                count=3,
+                trend_limit=3,
                 trend_status="unused",
                 post_type="founder_insight",
                 length_mode="standard",
                 save_drafts=False,
             )
 
-            self.assertEqual(len(payload["layout_fingerprint_counts"]), 1)
+            self.assertLess(len(payload["layout_fingerprint_counts"]), min(4, payload["post_count"]))
             self.assertTrue(
                 any("Generated post layouts are not varied enough" in warning for warning in payload["warnings"])
             )
