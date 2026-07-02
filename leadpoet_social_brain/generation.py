@@ -312,6 +312,25 @@ PRODUCT_MENTION_LANES = [
     ),
 ]
 
+PRODUCT_NAME_OPTIONAL_LANES = [
+    (
+        "no-name wedge",
+        "Skip the product name if the saved-context wedge is already clear; make the proprietary timing/context point carry it.",
+    ),
+    (
+        "mechanism carries it",
+        "Do not use the product name. Make the concrete timing mechanism carry the saved-context wedge on its own.",
+    ),
+    (
+        "context-only wedge",
+        "Keep the post product-free and let account context, buyer timing, or the why-now signal make the positioning obvious.",
+    ),
+]
+
+PRODUCT_NAME_OPTIONAL_LANE_NAMES = {
+    name for name, _ in PRODUCT_NAME_OPTIONAL_LANES
+}
+
 PRODUCT_MENTION_PLACEMENT_TARGETS = [
     (
         "early embedded",
@@ -840,10 +859,22 @@ def selected_product_mention_lanes(
     seed_source = variation_seed_source(request, trends)
     digest = hashlib.sha256(f"product-mention|{seed_source}".encode("utf-8")).hexdigest()
     start = int(digest[:8], 16) % len(PRODUCT_MENTION_LANES)
-    return [
+    selected = [
         PRODUCT_MENTION_LANES[(start + offset) % len(PRODUCT_MENTION_LANES)]
-        for offset in range(min(count, len(PRODUCT_MENTION_LANES)))
+        for offset in range(len(PRODUCT_MENTION_LANES))
     ]
+    if should_prioritize_product_name_omission(digest):
+        optional_lane = PRODUCT_NAME_OPTIONAL_LANES[int(digest[8:12], 16) % len(PRODUCT_NAME_OPTIONAL_LANES)]
+        selected = [optional_lane, *[lane for lane in selected if lane[0] != optional_lane[0]]]
+    return selected[:min(count, len(PRODUCT_MENTION_LANES))]
+
+
+def should_prioritize_product_name_omission(digest: str) -> bool:
+    return int(digest[12:14], 16) % 3 == 0
+
+
+def product_lane_omits_name(product_lane: str) -> bool:
+    return product_lane in PRODUCT_NAME_OPTIONAL_LANE_NAMES
 
 
 def primary_product_mention_lane(request: DraftRequest, trends: list[TrendItem]) -> tuple[str, str]:
@@ -2187,16 +2218,25 @@ def deterministic_repair_candidate_score(
     text: str,
     violations: list[str],
     recent_output_batch_summary: dict[str, object] | None,
-) -> tuple[int, int, int, int, int, int]:
+) -> tuple[int, int, int, int, int, int, int]:
     grammar = leadpoet_sentence_grammar_fingerprint(first_sentence_with_word(text, "Leadpoet"))
     phrase_pattern = leadpoet_phrase_pattern_fingerprint(first_sentence_with_word(text, "Leadpoet"))
     sentence_template = leadpoet_sentence_template_fingerprint(first_sentence_with_word(text, "Leadpoet"))
     layout = recent_output_layout(clean_recent_output_text(text))
+    bad_phrase_count = leadpoet_definition_pattern_count(text)
     grammar_count = batch_summary_count(recent_output_batch_summary, "leadpoet_grammar_counts", grammar)
     phrase_count = batch_summary_count(recent_output_batch_summary, "leadpoet_phrase_pattern_counts", phrase_pattern)
     template_count = batch_summary_count(recent_output_batch_summary, "leadpoet_sentence_template_counts", sentence_template)
     layout_count = batch_summary_count(recent_output_batch_summary, "layout_counts", layout)
-    return (len(violations), template_count, phrase_count, grammar_count, layout_count, len(text))
+    return (len(violations), bad_phrase_count, template_count, phrase_count, grammar_count, layout_count, len(text))
+
+
+def leadpoet_definition_pattern_count(text: str) -> int:
+    return sum(
+        1
+        for pattern, _label in LEADPOET_DEFINITION_PATTERNS
+        if re.search(pattern, text, flags=re.I)
+    )
 
 
 def batch_summary_count(summary: dict[str, object] | None, key: str, value: str) -> int:
@@ -2415,11 +2455,13 @@ def leadpoet_definition_replacement(match: re.Match[str], *, product_lane: str) 
         "consequence-first": "A rep should know why this account, this week. That answer has to change the next action before Leadpoet earns the line.",
         "quiet embedded name": "The account reason should carry Leadpoet quietly: what changed, why now, and why copy comes after that.",
         "no-name wedge": "The useful wedge is buyer timing: why this account deserves action now.",
+        "mechanism carries it": "The mechanism can carry the point: timing decides which account deserves action now.",
         "operator scene": "A rep should see what changed at the account before a sequence asks for copy.",
         "boundary line": "Verified data can say who exists; the sharper signal says who is worth action now.",
         "signal language": "The signal has to explain why now, not only who fits. That account change is where the Leadpoet mention belongs.",
         "ownership without definition": "Before louder outbound, the account-timing question should stay close to Leadpoet.",
         "implicit product belief": "Timing should choose the account before copy writes the email. That belief reaches Leadpoet before another volume claim.",
+        "context-only wedge": "The useful context is the account change itself: why this account, why now, and what action follows.",
     }
     if product_lane in lane_replacements:
         return lane_replacements[product_lane]
@@ -2462,13 +2504,15 @@ def leadpoet_formulaic_intro_replacement(match: re.Match[str], *, product_lane: 
         "mechanism-first": "Start with the mechanism: {body} The Leadpoet line only helps if that becomes usable.",
         "consequence-first": "That only matters if the Leadpoet line makes it actionable: {body}",
         "quiet embedded name": "A useful Leadpoet mention sits inside the claim: {body}",
+        "mechanism carries it": "Let the mechanism carry the claim: {body}",
         "operator scene": "A rep should feel the account signal before copy starts: {body}",
         "boundary line": "That is the sharper side of the boundary for Leadpoet: {body}",
         "signal language": "The signal has to make this plain before the Leadpoet mention is earned: {body}",
         "ownership without definition": "The account-timing question can carry the name without a definition line: {body}",
         "implicit product belief": "Inside Leadpoet, keep the belief concrete: {body}",
+        "context-only wedge": "Keep the wedge in the account context itself: {body}",
     }
-    if product_lane == "no-name wedge":
+    if product_lane_omits_name(product_lane):
         template = "The useful wedge is buyer timing: {body}"
     else:
         template = lane_templates.get(product_lane, "A useful Leadpoet mention sits inside the claim: {body}")
@@ -2490,11 +2534,13 @@ def leadpoet_modal_leadin_replacement(match: re.Match[str], *, product_lane: str
         "consequence-first": "That only matters when Leadpoet turns it into action: {body}.",
         "quiet embedded name": "A useful Leadpoet mention sits next to the mechanism that can {body}.",
         "no-name wedge": "The useful signal has to {body}.",
+        "mechanism carries it": "The mechanism has to {body}.",
         "operator scene": "A rep should feel the account signal when that becomes usable in Leadpoet: {body}.",
         "boundary line": "Verified data is not enough; the Leadpoet side of the line is whether it can {body}.",
         "signal language": "The useful signal is the one that lets Leadpoet {body}.",
         "ownership without definition": "The account-timing question gets concrete inside Leadpoet when it can {body}.",
         "implicit product belief": "Inside Leadpoet, keep the belief concrete: {body}.",
+        "context-only wedge": "The account context has to {body}.",
     }
     replacement = templates.get(product_lane, templates["quiet embedded name"]).format(body=body)
     if ending != "." and replacement.endswith("."):
@@ -2514,7 +2560,7 @@ def leadpoet_subject_verb_replacement(match: re.Match[str], *, product_lane: str
     body = body or "buyer timing visible"
     lowered_body = body.lower()
     action = leadpoet_subject_verb_action(body, verb=verb)
-    if product_lane == "no-name wedge":
+    if product_lane_omits_name(product_lane):
         replacement = f"The useful wedge is buyer timing: {action}."
     elif product_syntax == "product as object":
         replacement = f"Put Leadpoet behind the account-change check: {action}."
@@ -3009,11 +3055,13 @@ def leadpoet_anchor_line(product_lane: str, product_syntax: str | None = None) -
         "consequence-first": "The account choice gets better when the why-now reason is visible inside Leadpoet.",
         "quiet embedded name": "Put Leadpoet inside the account reason before the copy starts.",
         "no-name wedge": "The account reason can carry the post; the last line does not need Leadpoet as a tagline.",
+        "mechanism carries it": "The timing mechanism can carry the post without turning the last line into a product mention.",
         "operator scene": "A rep should see the changed account before the generated email. Put Leadpoet at that handoff.",
         "boundary line": "Verified data can say who exists; the Leadpoet side of the boundary asks who is worth action now.",
         "signal language": "The useful account signal ties timing, context, and the next account before Leadpoet enters the copy.",
         "ownership without definition": "Before outbound gets louder, the account-timing question is the work to get right inside Leadpoet.",
         "implicit product belief": "Inside Leadpoet, the belief stays practical: timing should pick the account before copy writes the email.",
+        "context-only wedge": "Account context can carry the post when it names what changed, why now, and what action follows.",
     }
     return lines.get(product_lane, lines["signal language"])
 
@@ -3054,7 +3102,12 @@ def product_lane_allows_omitting_anchor(
     *,
     anchor: str | None = None,
 ) -> bool:
-    if primary_product_mention_lane(request, trends)[0] == "no-name wedge":
+    if (
+        bool(anchor)
+        and anchor.lower() == "leadpoet"
+        and trends
+        and product_lane_omits_name(primary_product_mention_lane(request, trends)[0])
+    ):
         return True
     return (
         bool(anchor)

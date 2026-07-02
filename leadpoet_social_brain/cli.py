@@ -32,6 +32,7 @@ from leadpoet_social_brain.core.models import (
 )
 from leadpoet_social_brain.generation import (
     MISSING_PROVIDER_MESSAGE,
+    PRODUCT_NAME_OPTIONAL_LANE_NAMES,
     SocialBrainGenerator,
     leadpoet_phrase_pattern_fingerprint,
     leadpoet_sentence_template_fingerprint,
@@ -1003,6 +1004,12 @@ def build_naturalness_plan_audit(
     primary_product_lane_counts = Counter(str(row["primary_product_mention_lane"]) for row in rows)
     primary_product_placement_counts = Counter(str(row["primary_product_mention_placement_target"]) for row in rows)
     primary_product_syntax_counts = Counter(str(row["primary_product_mention_syntax_target"]) for row in rows)
+    product_name_optional_guidance_count = sum(
+        1
+        for row in rows
+        if str(row["primary_product_mention_lane"]) in PRODUCT_NAME_OPTIONAL_LANE_NAMES
+        or str(row["primary_product_mention_syntax_target"]) == "name omitted"
+    )
     primary_layout_target_counts = Counter(str(row["primary_layout_target"]) for row in rows)
     primary_closing_target_counts = Counter(str(row["primary_closing_target"]) for row in rows)
     primary_human_rhythm_target_counts = Counter(str(row["primary_human_rhythm_target"]) for row in rows)
@@ -1015,6 +1022,8 @@ def build_naturalness_plan_audit(
         warnings.append("Product mention placement guidance did not vary enough across trends.")
     if len(primary_product_syntax_counts) < min(4, len(trends), count):
         warnings.append("Product mention syntax guidance did not vary enough across trends.")
+    if len(rows) >= 8 and product_name_optional_guidance_count < max(2, len(rows) // 5):
+        warnings.append("Product-name-optional guidance did not appear often enough across trends.")
     if len(primary_layout_target_counts) < min(4, len(trends), count):
         warnings.append("Layout target guidance did not vary enough across trends.")
     if len(primary_closing_target_counts) < min(4, len(trends), count):
@@ -1056,6 +1065,7 @@ def build_naturalness_plan_audit(
         "primary_product_mention_lane_counts": dict(primary_product_lane_counts),
         "primary_product_mention_placement_target_counts": dict(primary_product_placement_counts),
         "primary_product_mention_syntax_target_counts": dict(primary_product_syntax_counts),
+        "product_name_optional_guidance_count": product_name_optional_guidance_count,
         "primary_layout_target_counts": dict(primary_layout_target_counts),
         "primary_closing_target_counts": dict(primary_closing_target_counts),
         "primary_human_rhythm_target_counts": dict(primary_human_rhythm_target_counts),
@@ -1266,8 +1276,16 @@ def build_naturalness_audit(
         for row in rows
         if row["primary_product_mention_syntax_target"]
     )
+    product_name_optional_guidance_count = sum(
+        1
+        for row in rows
+        if str(row["primary_product_mention_lane"]) in PRODUCT_NAME_OPTIONAL_LANE_NAMES
+        or str(row["primary_product_mention_syntax_target"]) == "name omitted"
+    )
     if len(primary_product_syntax_counts) < min(4, len(trends), count):
         warnings.append("Product mention syntax guidance did not vary enough across trends.")
+    if len(rows) >= 8 and product_name_optional_guidance_count < max(2, len(rows) // 5):
+        warnings.append("Product-name-optional guidance did not appear often enough across trends.")
     primary_layout_target_counts = Counter(str(row["primary_layout_target"]) for row in rows if row["primary_layout_target"])
     if len(primary_layout_target_counts) < min(4, len(trends), count):
         warnings.append("Layout target guidance did not vary enough across trends.")
@@ -1429,6 +1447,7 @@ def build_naturalness_audit(
         "primary_product_mention_lane_counts": dict(primary_product_lane_counts),
         "primary_product_mention_placement_target_counts": dict(primary_product_placement_counts),
         "primary_product_mention_syntax_target_counts": dict(primary_product_syntax_counts),
+        "product_name_optional_guidance_count": product_name_optional_guidance_count,
         "primary_layout_target_counts": dict(primary_layout_target_counts),
         "primary_closing_target_counts": dict(primary_closing_target_counts),
         "primary_human_rhythm_target_counts": dict(primary_human_rhythm_target_counts),
