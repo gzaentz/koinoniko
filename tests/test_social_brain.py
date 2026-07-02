@@ -5708,6 +5708,83 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(counts["leadpoet bet/job/role"], 1)
         self.assertEqual(counts["the layer worth building"], 1)
 
+    def test_deterministic_repair_covers_active_leadpoet_bad_phrase_samples(self):
+        samples = [
+            "Leadpoet is building the intent layer.",
+            "Leadpoet is built for account timing.",
+            "Leadpoet is the timing layer.",
+            "For Leadpoet, timing comes before copy.",
+            "Leadpoet should explain why now.",
+            "Leadpoet can make timing visible.",
+            "Leadpoet needs to make timing visible.",
+            "Leadpoet has to make timing visible.",
+            "This is where Leadpoet focuses: timing before copy.",
+            "That's where Leadpoet focuses on account context.",
+            "That is the Leadpoet point.",
+            "The Leadpoet signal is buyer timing.",
+            "Leadpoet belongs close to account timing.",
+            "Leadpoet only matters when timing is visible.",
+            "Leadpoet must make timing useful.",
+            "Leadpoet owns the timing question.",
+            "Leadpoet helps teams act on buyer timing.",
+            "Leadpoet gives reps buyer timing.",
+            "Leadpoet answers who is worth action now.",
+            "Leadpoet shows buyer timing.",
+            "Leadpoet lets reps choose accounts.",
+            "Leadpoet finds account timing.",
+            "Leadpoet enables teams to act on buyer timing.",
+            "Leadpoet provides reps buyer timing.",
+            "Leadpoet delivers account context.",
+            "Leadpoet powers teams to act on buyer timing.",
+            "Leadpoet unlocks buyer timing.",
+            "Leadpoet brings buyer context into prioritization.",
+            "Leadpoet drives account prioritization.",
+            "Leadpoet creates buyer timing.",
+            "Leadpoet's job is account timing.",
+            "Leadpoet's bet starts before sequence copy.",
+            "The layer worth building starts before sequence copy.",
+        ]
+        request_slots = []
+        for index in range(120):
+            trend = TrendItem(
+                id=f"repair_coverage_trend_{index}",
+                title=f"Repair coverage trend {index}",
+                source_type="web",
+                topic="sales AI",
+                summary="Context layer",
+                why_it_matters="It proves context matters.",
+                leadpoet_angle="Buyer timing beats generic data.",
+                date=utc_now(),
+            )
+            request = DraftRequest(
+                platform="x",
+                topic="sales AI",
+                post_type="founder_insight",
+                angle="buyer timing beats generic data",
+                trend_ids=[trend.id],
+            )
+            request_slots.append((trend, request, primary_product_mention_lane(request, [trend])[0]))
+
+        for sample in samples:
+            with self.subTest(sample=sample):
+                self.assertTrue(any(leadpoet_bad_phrase_counts(sample.lower()).values()), sample)
+                outputs_by_lane = {}
+                for trend, request, lane in request_slots:
+                    outputs_by_lane.setdefault(
+                        lane,
+                        deterministic_leadpoet_definition_repair(
+                            sample,
+                            request=request,
+                            trends=[trend],
+                            max_chars=280,
+                        ),
+                    )
+
+                self.assertEqual(len(outputs_by_lane), 11)
+                for repaired in outputs_by_lane.values():
+                    self.assertNotEqual(repaired, sample)
+                    self.assertFalse(any(leadpoet_bad_phrase_counts(repaired.lower()).values()), repaired)
+
     def test_leadpoet_sentence_position_tracks_actual_sentence_slot(self):
         cases = {
             "Leadpoet owns the timing question. Copy comes later.": ("first_sentence", True),
