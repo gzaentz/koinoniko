@@ -814,14 +814,14 @@ python3 -m leadpoet_social_brain.cli audit-naturalness-x \
   --fail-on-warning
 ```
 
-By default, `audit-naturalness-x` loads all matching current trends (`--trend-limit 0`) and generates 20 reviewed posts against them. Each generated audit post feeds into the next prompt as anti-sameness context, so the batch actively avoids repeating its own openings, closers, layouts, and Leadpoet grammar fingerprints. It reports bad phrase counts for cookie-cutter Leadpoet definitions and formulaic Leadpoet lead-ins, repeated stock phrases, first-line and closing-line variety, primary structure counts, primary layout target counts, primary closing target counts, primary human rhythm target counts, primary product mention lane, placement, and syntax guidance counts, guidance concentration warnings, actual Leadpoet paragraph/sentence placement, actual Leadpoet syntax counts, Leadpoet grammar fingerprint counts, Leadpoet mention pattern counts, generated layout fingerprints, and trend coverage. If there are more loaded trends than generated posts, the audit warns; raise `--count` or pass `--cover-all-trends` to cover every current trend. Use `--json` when you want the full rows and generated text for manual review.
+By default, `audit-naturalness-x` loads all matching current trends (`--trend-limit 0`) and generates 20 reviewed posts against them. Each generated audit post feeds into the next prompt as anti-sameness context, so the batch actively avoids repeating its own openings, closers, layouts, and Leadpoet grammar fingerprints. It reports bad phrase counts for cookie-cutter Leadpoet definitions and formulaic Leadpoet lead-ins, repeated stock phrases, first-line and closing-line variety, primary structure counts, primary layout target counts, primary closing target counts, primary human rhythm target counts, request angle counts, primary product mention lane, placement, and syntax guidance counts, guidance concentration warnings, actual Leadpoet paragraph/sentence placement, actual Leadpoet syntax counts, Leadpoet grammar fingerprint counts, Leadpoet mention pattern counts, generated layout fingerprints, and trend coverage. Generic saved Leadpoet trend angles are expanded into trend-specific request angles before generation so old stored defaults do not collapse the batch back into one positioning line. If there are more loaded trends than generated posts, the audit warns; raise `--count` or pass `--cover-all-trends` to cover every current trend. Use `--json` when you want the full rows and generated text for manual review.
 
 This command uses the configured LLM provider, so a live audit sends the selected trends, saved context, and generation prompts to that provider. Run it only in an environment where that is acceptable.
 
 Use `--plan-only` for a no-provider preflight that checks the deterministic prompt plan
-against current trends. It reports trend coverage plus planned structure, layout, closing,
-rhythm, and product mention variation without sending prompts to an LLM provider. It also
-warns when one planned assignment is too concentrated across the batch.
+against current trends. It reports trend coverage plus planned request angle, structure,
+layout, closing, rhythm, and product mention variation without sending prompts to an LLM
+provider. It also warns when one planned assignment is too concentrated across the batch.
 
 In the web UI, `Create Post` includes:
 

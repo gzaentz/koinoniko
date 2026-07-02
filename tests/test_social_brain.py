@@ -62,6 +62,7 @@ from leadpoet_social_brain.generation import (
     selected_product_mention_placement_targets,
     selected_product_mention_syntax_targets,
     selected_structure_shapes,
+    trend_angle_for_generation,
     workspace_anchor_candidates,
 )
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
@@ -4218,6 +4219,62 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("primary_structure_option", payload["rows"][0])
             self.assertIn("primary_product_mention_syntax_target", payload["rows"][0])
             self.assertTrue(any("were not covered" in warning for warning in payload["warnings"]))
+            store.close()
+
+    def test_generic_trend_angles_are_made_specific_for_generation_and_audit(self):
+        generic_angle = "Tie the signal back to buyer timing, proprietary context, and why generic sales automation is not enough."
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            trends = []
+            for index, title in enumerate(
+                [
+                    "HubSpot Acquires Warmly for Buyer Intent",
+                    "Salesforce Adds Agentforce Prospecting",
+                    "Close Launches CRM-Native Sales Agent",
+                    "Aircall Buys Piper for Revenue Intelligence",
+                    "LinkedIn Engagement Becomes Sales Signal",
+                    "Arobis Finds Silent Demand Gap",
+                ]
+            ):
+                trend = store.save_trend_item(
+                    TrendItem(
+                        id=f"generic-angle-trend-{index}",
+                        title=title,
+                        source_type="web",
+                        topic="sales AI",
+                        summary=f"Current trend fixture {index}.",
+                        why_it_matters="It shows context and timing moving closer to action.",
+                        leadpoet_angle=generic_angle,
+                        date=utc_now(),
+                    )
+                )
+                trends.append(trend)
+
+            prompt = SocialBrainGenerator(store).build_prompt(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    use_trends=True,
+                    trend_ids=[trends[0].id],
+                )
+            )
+            payload = build_naturalness_plan_audit(
+                store,
+                count=6,
+                trend_limit=0,
+                trend_status="unused",
+                post_type="founder_insight",
+                length_mode="standard",
+                cover_all_trends=True,
+            )
+
+            self.assertNotEqual(trend_angle_for_generation(trends[0]), generic_angle)
+            self.assertIn("Use HubSpot Acquires Warmly for Buyer Intent as market proof", prompt)
+            self.assertNotIn(generic_angle, prompt)
+            self.assertEqual(len(payload["request_angle_counts"]), 6)
+            self.assertFalse(any("Request angle" in warning for warning in payload["warnings"]))
             store.close()
 
     def test_audit_naturalness_x_cover_all_trends_expands_plan_count(self):

@@ -3434,6 +3434,7 @@ def _format_trend(trend: TrendItem) -> str:
     key_points = _trend_json_list(trend.key_points_json)
     claims = _trend_json_list(trend.important_claims_json)
     post_angles = _trend_json_list(trend.post_angles_json)
+    saved_angle = trend_angle_for_generation(trend)
     what_is_new = claims[0] if claims else (key_points[1] if len(key_points) > 1 else trend.source_excerpt or "The timing or market context around this signal has changed.")
     why_gtm = key_points[2] if len(key_points) > 2 else trend.why_it_matters
     source_label = " ".join(
@@ -3460,7 +3461,7 @@ def _format_trend(trend: TrendItem) -> str:
         why_gtm,
         "",
         "Saved angle:",
-        trend.leadpoet_angle,
+        saved_angle,
         "",
         "Suggested hooks:",
         "\n".join(f"- {hook}" for hook in hooks) if hooks else "- No hooks stored.",
@@ -3472,6 +3473,29 @@ def _format_trend(trend: TrendItem) -> str:
         source_label,
     ]
     return "\n".join(parts)
+
+
+GENERIC_TREND_ANGLE_TEXTS = {
+    "tie the signal back to buyer timing, proprietary context, and why generic sales automation is not enough.",
+    "use the source as market proof, then make the angle specific to the account-timing question it raises before copy or outreach.",
+}
+
+
+def trend_angle_for_generation(trend: TrendItem) -> str:
+    angle = " ".join(str(trend.leadpoet_angle or "").split())
+    if angle and angle.lower() not in GENERIC_TREND_ANGLE_TEXTS:
+        return angle
+    return trend_specific_generation_angle(trend)
+
+
+def trend_specific_generation_angle(trend: TrendItem) -> str:
+    title = " ".join(str(trend.title or "").split())
+    topic = " ".join(str(trend.topic or "").split())
+    proof = title or topic or "this source"
+    return (
+        f"Use {proof} as market proof; make the post about the specific account-timing "
+        "question it raises before copy, outreach, or account selection."
+    )
 
 
 def _trend_json_list(value: str | None) -> list[str]:

@@ -44,6 +44,7 @@ from leadpoet_social_brain.generation import (
     primary_product_mention_placement_target,
     primary_product_mention_syntax_target,
     primary_structure_shape,
+    trend_angle_for_generation,
 )
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
 from leadpoet_social_brain.pattern_scout import (
@@ -919,6 +920,9 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
     print("Primary human rhythm target counts:")
     for key, value in sorted(payload["primary_human_rhythm_target_counts"].items()):
         print(f"- {key}: {value}")
+    print("Request angle counts:")
+    for key, value in sorted(payload["request_angle_counts"].items()):
+        print(f"- {key}: {value}")
     if payload.get("mode") != "plan_only":
         print("Leadpoet mention pattern counts:")
         for key, value in sorted(payload["leadpoet_mention_pattern_counts"].items()):
@@ -989,6 +993,7 @@ def build_naturalness_plan_audit(
                 "trend_id": trend.id,
                 "trend_title": trend.title,
                 "topic": trend.topic,
+                "request_angle": request.angle or "",
                 **assignment,
             }
         )
@@ -998,6 +1003,7 @@ def build_naturalness_plan_audit(
     primary_product_lane_counts = Counter(str(row["primary_product_mention_lane"]) for row in rows)
     primary_product_placement_counts = Counter(str(row["primary_product_mention_placement_target"]) for row in rows)
     primary_product_syntax_counts = Counter(str(row["primary_product_mention_syntax_target"]) for row in rows)
+    request_angle_counts = Counter(str(row["request_angle"]) for row in rows if row["request_angle"])
     product_name_optional_guidance_count = sum(
         1
         for row in rows
@@ -1024,6 +1030,8 @@ def build_naturalness_plan_audit(
         warnings.append("Closing target guidance did not vary enough across trends.")
     if len(primary_human_rhythm_target_counts) < min(4, len(trends), count):
         warnings.append("Human rhythm guidance did not vary enough across trends.")
+    if len(covered_trend_ids) > 1 and len(request_angle_counts) < min(5, len(covered_trend_ids), count):
+        warnings.append("Request angles did not vary enough across covered trends.")
     append_plan_concentration_warning(warnings, "Structure guidance", primary_structure_counts, len(rows))
     append_plan_concentration_warning(warnings, "Product mention guidance", primary_product_lane_counts, len(rows))
     append_plan_concentration_warning(
@@ -1041,6 +1049,8 @@ def build_naturalness_plan_audit(
     append_plan_concentration_warning(warnings, "Layout target guidance", primary_layout_target_counts, len(rows))
     append_plan_concentration_warning(warnings, "Closing target guidance", primary_closing_target_counts, len(rows))
     append_plan_concentration_warning(warnings, "Human rhythm guidance", primary_human_rhythm_target_counts, len(rows))
+    if len(covered_trend_ids) > 1:
+        append_plan_concentration_warning(warnings, "Request angle guidance", request_angle_counts, len(rows))
     if uncovered_trend_count:
         warnings.append(
             f"{uncovered_trend_count} loaded trend(s) were not covered; raise --count or lower --trend-limit for full coverage."
@@ -1060,6 +1070,7 @@ def build_naturalness_plan_audit(
         "primary_product_mention_placement_target_counts": dict(primary_product_placement_counts),
         "primary_product_mention_syntax_target_counts": dict(primary_product_syntax_counts),
         "product_name_optional_guidance_count": product_name_optional_guidance_count,
+        "request_angle_counts": dict(request_angle_counts),
         "primary_layout_target_counts": dict(primary_layout_target_counts),
         "primary_closing_target_counts": dict(primary_closing_target_counts),
         "primary_human_rhythm_target_counts": dict(primary_human_rhythm_target_counts),
@@ -1199,7 +1210,7 @@ def naturalness_audit_request_for_trend(
         platform="x",
         topic=trend.topic or "sales AI",
         post_type=post_type,
-        angle=trend.leadpoet_angle or trend.title,
+        angle=trend_angle_for_generation(trend),
         extra_context=extra_context,
         use_trends=True,
         trend_ids=[trend.id],
@@ -1318,6 +1329,7 @@ def build_naturalness_audit(
                 "trend_title": trend.title,
                 "text": draft.text,
                 "chars": len(draft.text),
+                "request_angle": draft.request.angle or "",
                 "leadpoet_shape": leadpoet_mention_shape(draft.text),
                 "leadpoet_mention_pattern": leadpoet_mention_pattern(draft.text),
                 "leadpoet_actual_syntax": leadpoet_actual_syntax(draft.text),
@@ -1345,6 +1357,8 @@ def build_naturalness_audit(
         batch_recent_outputs.append(draft.text)
     text_blob = "\n\n".join(str(row["text"]) for row in rows).lower()
     warnings: list[str] = []
+    covered_trend_ids = {str(row["trend_id"]) for row in rows if row["trend_id"]}
+    uncovered_trend_count = max(0, len(trends) - len(covered_trend_ids))
     bad_phrase_counts = leadpoet_bad_phrase_counts(text_blob)
     if any(bad_phrase_counts.values()):
         warnings.append("Cookie-cutter or formulaic Leadpoet phrasing still appeared.")
@@ -1376,6 +1390,7 @@ def build_naturalness_audit(
         for row in rows
         if row["primary_product_mention_syntax_target"]
     )
+    request_angle_counts = Counter(str(row["request_angle"]) for row in rows if row["request_angle"])
     product_name_optional_guidance_count = sum(
         1
         for row in rows
@@ -1397,6 +1412,8 @@ def build_naturalness_audit(
     )
     if len(primary_human_rhythm_target_counts) < min(4, len(trends), count):
         warnings.append("Human rhythm guidance did not vary enough across trends.")
+    if len(covered_trend_ids) > 1 and len(request_angle_counts) < min(5, len(covered_trend_ids), count):
+        warnings.append("Request angles did not vary enough across covered trends.")
     append_plan_concentration_warning(warnings, "Structure guidance", primary_structure_counts, len(rows))
     append_plan_concentration_warning(warnings, "Product mention guidance", primary_product_lane_counts, len(rows))
     append_plan_concentration_warning(
@@ -1414,8 +1431,8 @@ def build_naturalness_audit(
     append_plan_concentration_warning(warnings, "Layout target guidance", primary_layout_target_counts, len(rows))
     append_plan_concentration_warning(warnings, "Closing target guidance", primary_closing_target_counts, len(rows))
     append_plan_concentration_warning(warnings, "Human rhythm guidance", primary_human_rhythm_target_counts, len(rows))
-    covered_trend_ids = {str(row["trend_id"]) for row in rows if row["trend_id"]}
-    uncovered_trend_count = max(0, len(trends) - len(covered_trend_ids))
+    if len(covered_trend_ids) > 1:
+        append_plan_concentration_warning(warnings, "Request angle guidance", request_angle_counts, len(rows))
     if uncovered_trend_count:
         warnings.append(
             f"{uncovered_trend_count} loaded trend(s) were not covered; raise --count or lower --trend-limit for full coverage."
@@ -1548,6 +1565,7 @@ def build_naturalness_audit(
         "primary_product_mention_placement_target_counts": dict(primary_product_placement_counts),
         "primary_product_mention_syntax_target_counts": dict(primary_product_syntax_counts),
         "product_name_optional_guidance_count": product_name_optional_guidance_count,
+        "request_angle_counts": dict(request_angle_counts),
         "primary_layout_target_counts": dict(primary_layout_target_counts),
         "primary_closing_target_counts": dict(primary_closing_target_counts),
         "primary_human_rhythm_target_counts": dict(primary_human_rhythm_target_counts),

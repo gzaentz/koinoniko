@@ -302,7 +302,7 @@ class TrendScoutProfile:
     @property
     def default_angle(self) -> str:
         if self.workspace_name == "Leadpoet":
-            return "Tie the signal back to buyer timing, proprietary context, and why generic sales automation is not enough."
+            return "Use the source as market proof, then make the angle specific to the account-timing question it raises before copy or outreach."
         return f"Tie the signal back to {self.workspace_name}'s saved positioning and why this market shift matters now."
 
 
