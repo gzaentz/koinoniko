@@ -76,12 +76,12 @@ UNSUPPORTED_FIRST_PERSON_PATTERNS = [
 ]
 
 LEADPOET_DEFINITION_PATTERNS = [
-    (r"\bleadpoet is building\b", "avoid default 'Leadpoet is building...' product definition"),
-    (r"\bleadpoet is built\b", "avoid default 'Leadpoet is built for...' product definition"),
-    (r"\bleadpoet is\b", "avoid standalone 'Leadpoet is...' product definition"),
+    (r"\bleadpoet is building\b", "avoid product name followed by 'is building'"),
+    (r"\bleadpoet is built\b", "avoid product name followed by 'is built'"),
+    (r"\bleadpoet is\b", "avoid product name followed by 'is' as a standalone definition"),
     (r"(?m)(?:^|\n\n)\s*for leadpoet,\s+", "avoid formulaic 'For Leadpoet...' product lead-in"),
     (r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:should|can|needs?|has\s+to)\b", "avoid formulaic Leadpoet modal lead-in"),
-    (r"\b(?:that|this)\s+is\s+where\s+leadpoet\b|\bthat['’]?s\s+where\s+leadpoet\b", "avoid formulaic 'that is where Leadpoet...' product lead-in"),
+    (r"\b(?:that|this)\s+is\s+where\s+leadpoet\b|\bthat['’]?s\s+where\s+leadpoet\b", "avoid formulaic 'this is where' product lead-in"),
     (r"\bthat\s+is\s+the\s+leadpoet\s+(?:job|bar|point|constraint|product belief)\b", "avoid formulaic 'That is the Leadpoet...' closer"),
     (r"\bthe\s+leadpoet\s+(?:product belief|signal|point|constraint|job|bar|part)\s+is\b", "avoid formulaic 'The Leadpoet ... is...' product definition"),
     (r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:belongs|only\s+matters|must)\b", "avoid formulaic Leadpoet fallback lead-in"),
@@ -754,7 +754,6 @@ def natural_voice_prompt_section(bundle: ContextBundle | None = None, anchor: st
         if bundle and bundle.examples
         else "- With thin examples, use saved Facts & Context and keep the language plainer than feels necessary."
     )
-    product_label = anchor or "the product"
     return (
         "Natural Voice Calibration:\n"
         "- Sound like one specific founder noticing a real thing, not a brand explaining a category.\n"
@@ -763,7 +762,7 @@ def natural_voice_prompt_section(bundle: ContextBundle | None = None, anchor: st
         "- Let the point land without a motivational closer, generic lesson, or forced CTA.\n"
         "- If a sentence feels smooth enough for a launch page, shorten it and make it more concrete.\n"
         "- Avoid stock contrast frames like \"it's not about X, it's about Y\" and \"not just X, but Y\".\n"
-        f"- Do not default to standalone product-definition sentences like \"{product_label} is...\" or \"{product_label} is building...\".\n"
+        "- Do not default to standalone product-definition sentences that put the product name before 'is' or 'is building'.\n"
         "- If the product name appears, earn it through the specific mechanism, scene, or consequence in the post.\n"
         f"{example_line}"
     )
@@ -808,8 +807,6 @@ def product_mention_prompt_section(
     request: DraftRequest | None = None,
     trends: list[TrendItem] | None = None,
 ) -> str:
-    product_label = anchor or "the product"
-    example_prefix = anchor or "the product"
     selected = selected_product_mention_lanes(request, trends or [], count=4) if request else PRODUCT_MENTION_LANES[:4]
     primary_name, primary_guidance = selected[0]
     lane_options = "\n".join(f"- {name}: {guidance}" for name, guidance in selected)
@@ -830,11 +827,11 @@ def product_mention_prompt_section(
     return (
         "Dynamic Product Mention:\n"
         "- Do not make the product mention the same final paragraph every time.\n"
-        f"- Avoid standalone sentences beginning \"{product_label} is...\", \"{product_label} is building...\", or \"{product_label}'s bet...\".\n"
-        f"- Avoid letting every product sentence use the same grammar, especially direct \"{product_label} owns/can/makes/starts...\" lead-ins.\n"
-        f"- Avoid product-subject helper/tagline lead-ins like \"{product_label} helps...\", \"{product_label} enables...\", \"{product_label} unlocks...\", or \"{product_label} provides...\"; let the mechanism, account change, or consequence lead instead.\n"
+        "- Avoid standalone sentences that start with the product name plus 'is', 'is building', or possessive bet/job/role phrasing.\n"
+        "- Avoid letting every product sentence use the same grammar, especially direct product-name-as-subject verbs like owns, can, makes, or starts.\n"
+        "- Avoid product-subject helper/tagline lead-ins using verbs like helps, enables, unlocks, or provides; let the mechanism, account change, or consequence lead instead.\n"
         "- Prefer varied human phrasing: \"the part we care about...\", \"the mechanism has to start before copy...\", "
-        f"\"the timing signal {example_prefix} cares about is...\", or no product name if the saved-context mechanism is already clear.\n"
+        "\"the timing signal this product cares about is...\", or no product name if the saved-context mechanism is already clear.\n"
         "- If the post needs the name for positioning, embed it in a concrete sentence rather than defining the company.\n"
         f"Primary product mention lane for this request: {primary_name}: {primary_guidance}\n"
         f"Primary product mention placement target for this request: {placement_name}: {placement_guidance}\n"
@@ -1781,7 +1778,7 @@ Final evaluator should check:
 - evidence safety: no invented first-person anecdote, fake customer story, fake quote, fake metric, unsupported reading/research session, or unsupported product claim
 - natural voice: sounds like a specific person posting a useful thought, not an AI recap, brand post, or launch page
 - structure freshness: does not use the default trend recap -> generic Leadpoet definition -> tidy closer template
-- dynamic product mention: avoids standalone "Leadpoet is..." or "Leadpoet is building..." phrasing unless quoted from source
+- dynamic product mention: avoids standalone product-name-plus-definition phrasing unless quoted from source
 - specificity: at least one concrete noun, situation, mechanism, or contrast
 - substance: the draft has a real point, not a vibe, joke, or generic AI take
 - no avoid phrases
@@ -3231,10 +3228,10 @@ Rules:
 - Make it sound natural and founder-written.
 - Do not make it more polished or corporate.
 - Prefer one concrete mechanism or situation over a polished summary.
-- If a violation mentions a product-definition sentence, rewrite that sentence into a mechanism, scene, or consequence instead of another "Leadpoet is..." line.
+- If a violation mentions a product-definition sentence, rewrite that sentence into a mechanism, scene, or consequence instead of another product-name-plus-definition line.
 - If a violation mentions a formulaic product lead-in, remove the preface and make the product name part of the actual claim.
 - If a violation mentions a formulaic Leadpoet modal lead-in, make Leadpoet the object, mechanism, or constraint inside the sentence instead of the sentence subject.
-- If a violation mentions "that is where Leadpoet...", make the point concrete without using that wrapper.
+- If a violation mentions a "that is where" product wrapper, make the point concrete without using that wrapper.
 - If a violation mentions a formulaic Leadpoet closer, move the product name inside a concrete mechanism or remove it.
 - If a violation mentions saturated batch layout, change the post structure: paragraph count, line breaks, opener shape, or product placement.
 - Do not add unsupported claims, anecdotes, proof, metrics, or customer stories.

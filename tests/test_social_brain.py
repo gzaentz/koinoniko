@@ -1204,7 +1204,10 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("Primary product mention placement target for this request:", prompt)
             self.assertIn("Product mention lanes for this request:", prompt)
             self.assertIn("Product mention placement targets for this request:", prompt)
-            self.assertIn("Avoid product-subject helper/tagline lead-ins like \"Leadpoet helps...\"", prompt)
+            self.assertIn("Avoid product-subject helper/tagline lead-ins using verbs like helps", prompt)
+            self.assertNotIn("\"Leadpoet is...\"", prompt)
+            self.assertNotIn("\"Leadpoet is building...\"", prompt)
+            self.assertNotIn("\"Leadpoet helps...\"", prompt)
             store.close()
 
     def test_generation_prompt_is_example_first_not_label_heavy(self):
@@ -3138,7 +3141,7 @@ class SocialBrainTest(unittest.TestCase):
                     "stock setup",
                     "avoid phrase: game changer",
                     "corporate/AI-polish",
-                    "standalone 'Leadpoet is...' product definition",
+                    "avoid product name followed by 'is' as a standalone definition",
                 ],
                 "disallowed": ["here's the thing", "game changer", "seamless", "leadpoet is"],
             },
@@ -3254,9 +3257,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotIn("Leadpoet is building", draft.text)
             self.assertNotIn("For Leadpoet", draft.text)
             self.assertNotIn("By the time Leadpoet appears", draft.text)
-            self.assertTrue(
-                any("avoid default 'Leadpoet is building...' product definition" in prompt for prompt in provider.prompts)
-            )
+            self.assertTrue(any("avoid product name followed by 'is building'" in prompt for prompt in provider.prompts))
             self.assertIn("avoid formulaic 'For Leadpoet...' product lead-in", provider.prompts[-1])
             store.close()
 
@@ -3470,7 +3471,7 @@ class SocialBrainTest(unittest.TestCase):
             )
             self.assertNotIn("That is where Leadpoet", draft.text)
             self.assertNotIn("by the time it reaches Leadpoet", draft.text)
-            self.assertIn("avoid formulaic 'that is where Leadpoet...' product lead-in", provider.prompts[-1])
+            self.assertIn("avoid formulaic 'this is where' product lead-in", provider.prompts[-1])
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
             store.close()
 
@@ -3561,7 +3562,7 @@ class SocialBrainTest(unittest.TestCase):
             writer_prompt = provider.prompts[1]
             evaluator_prompt = provider.prompts[2]
             repair_prompt = provider.prompts[-1]
-            product_helper_guidance = "Avoid product-subject helper/tagline lead-ins like \"Leadpoet helps...\""
+            product_helper_guidance = "Avoid product-subject helper/tagline lead-ins using verbs like helps"
             self.assertIn(product_helper_guidance, writer_prompt)
             self.assertIn(product_helper_guidance, evaluator_prompt)
             self.assertIn(product_helper_guidance, repair_prompt)
