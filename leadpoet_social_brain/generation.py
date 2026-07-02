@@ -2326,35 +2326,35 @@ def leadpoet_grammar_saturation_replacements(sentence: str) -> list[str]:
     if "explain why now" in lowered:
         return [
             "Timing has to explain why now before the account reaches Leadpoet.",
-            "Put Leadpoet behind the account-change check: timing has to explain why now.",
-            "Inside Leadpoet, timing only matters when it explains why now.",
-            "The handoff is where Leadpoet enters: timing has to explain why now.",
+            "The account-change check should come before Leadpoet: timing has to explain why now.",
+            "By the time it reaches Leadpoet, timing has to explain why now.",
+            "The handoff to Leadpoet comes after timing explains why now.",
             "Timing changes before Leadpoet earns the mention.",
             "The account reason reaches Leadpoet when timing explains why now.",
         ]
     if "account reason" in lowered:
         return [
             "The account reason should be clear before it reaches Leadpoet.",
-            "Put Leadpoet after the account reason, not before it.",
-            "Inside Leadpoet, the account reason only matters when timing is clear.",
-            "The handoff is where Leadpoet enters after the account reason is clear.",
+            "The post should bring in Leadpoet after the account reason is clear.",
+            "By the time it reaches Leadpoet, the account reason should already have timing behind it.",
+            "The handoff to Leadpoet comes after the account reason is clear.",
             "The account reason changes before Leadpoet earns the mention.",
             "Timing reaches Leadpoet only after the account reason is clear.",
         ]
     if "timing" in lowered:
         return [
             "Timing should become useful before the account reaches Leadpoet.",
-            "Put Leadpoet where timing turns into the next account choice.",
-            "Inside Leadpoet, timing has to change the account choice.",
-            "The handoff is where Leadpoet enters after timing is clear.",
+            "The post should bring in Leadpoet where timing turns into the next account choice.",
+            "By the time it reaches Leadpoet, timing has to change the account choice.",
+            "The handoff to Leadpoet comes after timing is clear.",
             "Timing changes before Leadpoet earns the mention.",
             "The account change reaches Leadpoet after timing is clear.",
         ]
     return [
         "The account reason should reach Leadpoet only after the timing signal is clear.",
-        "Put Leadpoet behind the account-change check, not in the category line.",
-        "Inside Leadpoet, the timing signal has to stay concrete.",
-        "The handoff is where Leadpoet enters after timing is clear.",
+        "The account-change check should come before Leadpoet, not after the category line.",
+        "By the time it reaches Leadpoet, the timing signal has to stay concrete.",
+        "The handoff to Leadpoet comes after timing is clear.",
         "Timing changes before Leadpoet earns the mention.",
         "Timing becomes useful before the account reaches Leadpoet.",
     ]

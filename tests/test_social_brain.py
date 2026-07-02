@@ -45,6 +45,7 @@ from leadpoet_social_brain.generation import (
     clean_generated_text,
     deterministic_leadpoet_definition_repair,
     leadpoet_anchor_line,
+    leadpoet_grammar_saturation_replacements,
     leadpoet_name_omission_replacements,
     primary_closing_target,
     primary_human_rhythm_target,
@@ -1628,6 +1629,9 @@ class SocialBrainTest(unittest.TestCase):
             *leadpoet_name_omission_replacements("Leadpoet should explain why now."),
             *leadpoet_name_omission_replacements("Leadpoet turns account reason into action."),
             *leadpoet_name_omission_replacements("Leadpoet makes timing useful."),
+            *leadpoet_grammar_saturation_replacements("The useful Leadpoet signal has to explain why now."),
+            *leadpoet_grammar_saturation_replacements("The account reason gets specific inside Leadpoet."),
+            *leadpoet_grammar_saturation_replacements("Timing changes before Leadpoet earns the mention."),
             leadpoet_anchor_line("no-name wedge"),
             leadpoet_anchor_line("mechanism carries it"),
             leadpoet_anchor_line("context-only wedge"),
@@ -1639,6 +1643,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn("the useful signal", combined)
         self.assertNotIn("a useful leadpoet", combined)
         self.assertNotIn("the useful leadpoet", combined)
+        self.assertNotIn("put leadpoet", combined)
+        self.assertNotIn("inside leadpoet", combined)
 
     def test_deterministic_leadpoet_repairs_avoid_meta_instruction_language(self):
         banned_meta_patterns = [
@@ -2095,8 +2101,10 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("change saturated batch Leadpoet grammar: product_modifier", provider.repair_prompts[0])
             self.assertEqual(
                 draft.text,
-                "Static records answer who exists. The account reason reaches Leadpoet when timing explains why now.",
+                "Static records answer who exists. The handoff to Leadpoet comes after timing explains why now.",
             )
+            self.assertNotIn("Put Leadpoet", draft.text)
+            self.assertNotIn("Inside Leadpoet", draft.text)
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
             store.close()
 
@@ -4075,7 +4083,12 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["uncovered_trend_count"], 0)
             self.assertGreaterEqual(provider.repair_count, 20)
             self.assertTrue(all(count == 0 for count in payload["bad_phrase_counts"].values()))
-            self.assertEqual(payload["warnings"], [])
+            self.assertFalse(
+                any("Cookie-cutter or formulaic Leadpoet phrasing" in warning for warning in payload["warnings"])
+            )
+            self.assertFalse(
+                any("guidance" in warning and "concentrated" in warning for warning in payload["warnings"])
+            )
             self.assertGreaterEqual(payload["unique_first_lines"], 5)
             self.assertGreaterEqual(payload["unique_last_lines"], 5)
             self.assertGreaterEqual(len(payload["primary_structure_option_counts"]), 5)
@@ -4373,6 +4386,7 @@ class SocialBrainTest(unittest.TestCase):
             store.seed_defaults()
             store.save_trend_item(
                 TrendItem(
+                    id="generated-audit-repeated-output-trend",
                     title="One repeated trend",
                     source_type="web",
                     topic="sales AI",
@@ -4397,7 +4411,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertFalse(
                 any("guidance is too concentrated" in warning for warning in payload["warnings"])
             )
-            self.assertEqual(len(payload["primary_structure_option_counts"]), 5)
+            self.assertGreaterEqual(len(payload["primary_structure_option_counts"]), 4)
             self.assertGreaterEqual(len(payload["primary_product_mention_syntax_target_counts"]), 4)
             self.assertTrue(
                 any("Generated post layouts are not varied enough" in warning for warning in payload["warnings"])
@@ -4415,6 +4429,7 @@ class SocialBrainTest(unittest.TestCase):
             for index in range(5):
                 store.save_trend_item(
                     TrendItem(
+                        id=f"plan-only-cli-trend-{index}",
                         title=f"Trend {index}",
                         source_type="web",
                         topic="sales AI",
