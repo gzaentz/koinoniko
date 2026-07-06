@@ -118,6 +118,7 @@ LEADPOET_AUDIT_BAD_PATTERNS = [
     ("leadpoet is building", r"\bleadpoet\s+is\s+building\b"),
     ("leadpoet is built", r"\bleadpoet\s+is\s+built\b"),
     ("leadpoet is", r"\bleadpoet\s+is\b"),
+    ("awkward spatial leadpoet phrasing", r"\b(?:near|around)\s+leadpoet\b"),
     ("for leadpoet", r"(?m)(?:^|\n\n)\s*for\s+leadpoet,\s+"),
     ("leadpoet modal lead-in", r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:should|can|needs?|has\s+to)\b"),
     ("that/this is where leadpoet", r"\b(?:that|this)\s+is\s+where\s+leadpoet\b|\bthat['’]?s\s+where\s+leadpoet\b"),
@@ -1924,6 +1925,20 @@ def leadpoet_mention_pattern(text: str) -> str:
         return "leadpoet_only_matters"
     if re.search(r"\bleadpoet\s+must\b", text, flags=re.I):
         return "leadpoet_must"
+    if re.search(r"\bleadpoet\s+question\b", text, flags=re.I):
+        return "leadpoet_question"
+    if re.search(r"\bleadpoet\s+handoff\b|\bhandoff\s+into\s+leadpoet\b", text, flags=re.I):
+        return "leadpoet_handoff"
+    if re.search(r"\bleadpoet\s+pressure\s+test\b|\bpressure\s+test\s+in\s+leadpoet\b", text, flags=re.I):
+        return "leadpoet_pressure_test"
+    if re.search(r"\bleadpoet\s+comes\s+after\b|\bdestination\s+can\s+be\s+leadpoet\b", text, flags=re.I):
+        return "leadpoet_destination"
+    if re.search(r"\bbelief\s+stays\s+practical\s+in\s+leadpoet\b", text, flags=re.I):
+        return "in_leadpoet_belief"
+    if re.search(r"\bnext\s+account\s+choice\s+in\s+leadpoet\b", text, flags=re.I):
+        return "leadpoet_consequence"
+    if re.search(r"\b(?:specific|concrete)\s+in\s+leadpoet\b", text, flags=re.I):
+        return "specific_in_leadpoet"
     if re.search(r"\bleadpoet\s+lane\b|\bleadpoet's\s+lane\b|\bleadpoet’s\s+lane\b", text, flags=re.I):
         return "leadpoet_lane"
     if re.search(r"\bleadpoet\s+signal\b|\bleadpoet's\s+signal\b|\bleadpoet’s\s+signal\b", text, flags=re.I):

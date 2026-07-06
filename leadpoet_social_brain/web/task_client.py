@@ -115,9 +115,22 @@ def post_task(
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body_text = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Task request failed ({exc.code}): {body_text}") from exc
+        raise RuntimeError(task_request_failure_message(task, body_text, status_code=exc.code)) from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"Task request failed: {exc.reason}") from exc
+        raise RuntimeError(task_request_failure_message(task, str(exc.reason))) from exc
+
+
+def task_request_failure_message(task: str, detail: str, *, status_code: int | None = None) -> str:
+    prefix = f"Task {task} request failed"
+    if status_code is not None:
+        prefix = f"{prefix} ({status_code})"
+    message = f"{prefix}: {detail}"
+    if status_code == 524:
+        message = (
+            f"{message}. The hosted task request timed out before the app returned a response; "
+            "reduce the task payload/batch size or split the cron job into smaller tasks."
+        )
+    return message
 
 
 if __name__ == "__main__":

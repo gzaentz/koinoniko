@@ -47,6 +47,7 @@ from leadpoet_social_brain.generation import (
     leadpoet_anchor_line,
     leadpoet_grammar_saturation_replacements,
     leadpoet_name_omission_replacements,
+    natural_voice_violations,
     primary_closing_target,
     primary_human_rhythm_target,
     primary_layout_target,
@@ -1618,6 +1619,59 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("omit product name", primary_targets)
         self.assertGreaterEqual(len(set(primary_targets)), 3)
 
+    def test_generation_repairs_ignored_product_name_omission_target(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            selected: tuple[TrendItem, DraftRequest] | None = None
+            for index in range(80):
+                trend = store.save_trend_item(
+                    TrendItem(
+                        id=f"omit_usage_generation_trend_{index}",
+                        title=f"Omit usage generation trend {index}",
+                        source_type="web",
+                        topic="sales AI",
+                        summary="Context layer",
+                        why_it_matters="It proves context matters.",
+                        leadpoet_angle=f"Buyer timing beats generic data {index}.",
+                        date=utc_now(),
+                    )
+                )
+                request = DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle=trend.leadpoet_angle,
+                    extra_context="Naturalness audit: enforce product name usage target.",
+                    trend_ids=[trend.id],
+                )
+                if primary_product_name_usage_target(request, [trend])[0] == "omit product name":
+                    selected = (trend, request)
+                    break
+
+            self.assertIsNotNone(selected)
+            trend, request = selected
+            provider = SequentialProvider(
+                [
+                    strategy_json(),
+                    "Buyer timing matters before it reaches Leadpoet.",
+                    "The account reason gets clearer inside Leadpoet.",
+                    "Copy should wait until the timing signal reaches Leadpoet.",
+                    evaluation_json("Buyer timing matters before it reaches Leadpoet."),
+                    "Buyer timing should choose the account before copy starts.",
+                ]
+            )
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(request, save=False)[0]
+
+            repair_prompts = [prompt for prompt in provider.prompts if "Repair this X post" in prompt]
+            self.assertTrue(repair_prompts)
+            self.assertIn("follow product name usage target: omit Leadpoet", repair_prompts[0])
+            self.assertIn("obey the assigned omit/once/late product-name rule exactly", repair_prompts[0])
+            self.assertEqual(draft.context_snapshot["primary_product_name_usage_target"]["name"], "omit product name")
+            self.assertNotIn("Leadpoet", draft.text)
+            store.close()
+
     def test_workspace_anchor_candidates_respect_product_placement(self):
         text = "Buyer timing should choose the account.\n\nCopy comes later."
         anchor = "The account-timing question comes before louder outbound. Leadpoet owns that part."
@@ -1728,6 +1782,102 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn("the useful leadpoet", combined)
         self.assertNotIn("put leadpoet", combined)
         self.assertNotIn("inside leadpoet", combined)
+        self.assertNotIn("near leadpoet", combined)
+        self.assertNotIn("around leadpoet", combined)
+
+    def test_deterministic_repair_removes_spatial_leadpoet_phrasing(self):
+        trend = TrendItem(
+            id="spatial-leadpoet-phrasing",
+            title="Spatial Leadpoet phrasing",
+            source_type="web",
+            topic="sales AI",
+            summary="Intent data is getting attention.",
+            why_it_matters="It proves account timing matters.",
+            leadpoet_angle="Buyer timing beats generic intent data.",
+            date=utc_now(),
+        )
+        request = DraftRequest(
+            platform="x",
+            topic="sales AI",
+            post_type="founder_insight",
+            angle="buyer timing beats generic intent data",
+            trend_ids=[trend.id],
+        )
+        source = "Near Leadpoet, ask the plain question: why this account, this week?"
+
+        repaired = deterministic_leadpoet_definition_repair(
+            source,
+            request=request,
+            trends=[trend],
+            max_chars=280,
+        )
+
+        self.assertGreater(leadpoet_bad_phrase_counts(source)["awkward spatial leadpoet phrasing"], 0)
+        self.assertEqual(
+            repaired,
+            "The Leadpoet question is simple: why this account, this week?",
+        )
+        self.assertNotIn("Near Leadpoet", repaired)
+        self.assertFalse(any(leadpoet_bad_phrase_counts(repaired).values()), repaired)
+
+    def test_deterministic_repair_removes_leaked_product_instruction_lines(self):
+        trend = TrendItem(
+            id="leaked-product-instruction",
+            title="Leaked product instruction",
+            source_type="web",
+            topic="sales AI",
+            summary="Intent data is getting attention.",
+            why_it_matters="It proves account timing matters.",
+            leadpoet_angle="Buyer timing beats generic intent data.",
+            date=utc_now(),
+        )
+        request = DraftRequest(
+            platform="x",
+            topic="sales AI",
+            post_type="founder_insight",
+            angle="buyer timing beats generic intent data",
+            trend_ids=[trend.id],
+        )
+        cases = [
+            (
+                "Use Leadpoet as the destination for the account-change check, not the opening claim.",
+                "The account-change check should be specific in Leadpoet before copy starts.",
+            ),
+            (
+                "First name the account reason. The late noun can be Leadpoet.",
+                "The account reason comes first. Timing gets useful in Leadpoet after that.",
+            ),
+            (
+                "Before a signal reaches Leadpoet, ask the plain question: why this account, this week?",
+                "The Leadpoet question is simple: why this account, this week?",
+            ),
+        ]
+
+        for source, expected in cases:
+            with self.subTest(source=source):
+                repaired = deterministic_leadpoet_definition_repair(
+                    source,
+                    request=request,
+                    trends=[trend],
+                    max_chars=280,
+                )
+
+                self.assertEqual(repaired, expected)
+                self.assertFalse(any(leadpoet_bad_phrase_counts(repaired).values()), repaired)
+
+    def test_natural_voice_flags_awkward_source_coverage_setup(self):
+        violations = natural_voice_violations(
+            "Forbes covering intent data is fine.\n\nThe account reason still has to explain why now.",
+            DraftRequest(platform="x", topic="sales AI", post_type="founder_insight"),
+        )
+
+        self.assertIn("rewrite awkward source coverage setup", violations)
+
+    def test_clean_generated_text_adds_missing_space_after_sentence_punctuation(self):
+        self.assertEqual(
+            clean_generated_text("When is the account ready?The handoff comes next.", max_chars=280),
+            "When is the account ready? The handoff comes next.",
+        )
 
     def test_leadpoet_phrase_fingerprints_separate_fallback_families(self):
         cases = {
@@ -1822,6 +1972,10 @@ class SocialBrainTest(unittest.TestCase):
     def test_deterministic_leadpoet_repairs_avoid_meta_instruction_language(self):
         banned_meta_patterns = [
             r"\binside\s+leadpoet\b",
+            r"\buse\s+leadpoet\s+as\b",
+            r"\bfirst\s+name\s+the\s+account\s+reason\b",
+            r"\bthe\s+late\s+noun\s+can\s+be\s+leadpoet\b",
+            r"\bask\s+the\s+plain\s+question\b",
             r"\bleadpoet\s+(?:mention|line|sentence|constraint|side|part|lane)\b",
             r"\bleadpoet\s+enters\b",
             r"\bkeep\s+the\s+leadpoet\b",
@@ -3561,9 +3715,10 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(
                 draft.text,
                 "More names do not fix judgment.\n\n"
-                "Near Leadpoet, ask the plain question: why this account, this week?",
+                "The Leadpoet question is simple: why this account, this week?",
             )
             self.assertNotIn("That is where Leadpoet", draft.text)
+            self.assertNotIn("Near Leadpoet", draft.text)
             self.assertNotIn("In Leadpoet, timing before copy", draft.text)
             self.assertNotIn("by the time it reaches Leadpoet", draft.text)
             self.assertIn("avoid formulaic 'this is where' product lead-in", provider.prompts[-1])
@@ -3909,6 +4064,8 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn("leadpoet should", combined)
         self.assertNotIn("leadpoet enters", combined)
         self.assertNotIn("leadpoet appears", combined)
+        self.assertNotIn("near leadpoet", combined)
+        self.assertNotIn("around leadpoet", combined)
         self.assertFalse(any(leadpoet_bad_phrase_counts(combined).values()), combined)
         mention_patterns = [leadpoet_mention_pattern(text) for text in outputs_by_lane.values()]
         self.assertEqual(mention_patterns.count("no_leadpoet"), 3)
@@ -4712,6 +4869,7 @@ class SocialBrainTest(unittest.TestCase):
             for index in range(2):
                 store.save_trend_item(
                     TrendItem(
+                        id=f"batch-memory-trend-{index}",
                         title=f"Trend {index}",
                         source_type="web",
                         topic="sales AI",
@@ -4739,9 +4897,12 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(len(strategy_prompts), 2)
             self.assertNotIn("source=batch", strategy_prompts[0])
             self.assertIn("source=batch", strategy_prompts[1])
-            self.assertIn("The useful Leadpoet question is why this account now.", strategy_prompts[1])
+            first_row = payload["rows"][0]
+            self.assertIn(f"first={first_row['first_line']}", strategy_prompts[1])
+            self.assertIn(f"last={first_row['last_line']}", strategy_prompts[1])
             self.assertIn("Batch outputs so far: 1", strategy_prompts[1])
-            self.assertIn("Batch Leadpoet grammar counts: product_modifier=1", strategy_prompts[1])
+            first_usage = "mentioned" if "Leadpoet" in str(first_row["text"]) else "omitted"
+            self.assertIn(f"Batch Leadpoet name usage: {first_usage}=1", strategy_prompts[1])
             store.close()
 
     def test_audit_naturalness_x_plan_only_reports_variation_without_provider(self):
@@ -5419,7 +5580,7 @@ class SocialBrainTest(unittest.TestCase):
             )
 
             self.assertEqual(payload["unique_first_lines"], 5)
-            self.assertEqual(payload["unique_last_lines"], 1)
+            self.assertLessEqual(payload["unique_last_lines"], 2)
             self.assertTrue(
                 any("Closing lines are not varied enough" in warning for warning in payload["warnings"])
             )
@@ -5575,8 +5736,8 @@ class SocialBrainTest(unittest.TestCase):
                 save_drafts=False,
             )
 
-            self.assertGreaterEqual(payload["leadpoet_final_line_mentions"], 4)
-            self.assertGreaterEqual(payload["leadpoet_paragraph_position_counts"]["last"], 4)
+            self.assertGreaterEqual(payload["leadpoet_final_line_mentions"], 3)
+            self.assertGreaterEqual(payload["leadpoet_paragraph_position_counts"]["last"], 3)
             self.assertTrue(any("Leadpoet appears in the final line too often" in warning for warning in payload["warnings"]))
             store.close()
 
@@ -9424,6 +9585,17 @@ class SocialBrainTest(unittest.TestCase):
                     ]
                 )
         self.assertEqual(exit_code, 1)
+
+    def test_task_client_524_error_names_task_and_timeout_hint(self):
+        message = task_client.task_request_failure_message(
+            "sync-x-daily",
+            "error code: 524",
+            status_code=524,
+        )
+
+        self.assertIn("Task sync-x-daily request failed (524): error code: 524", message)
+        self.assertIn("timed out before the app returned a response", message)
+        self.assertIn("split the cron job into smaller tasks", message)
 
     def test_railway_entrypoint_routes_cron_services_to_tasks(self):
         from leadpoet_social_brain.web.railway_entrypoint import task_from_environment

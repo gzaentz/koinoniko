@@ -54,6 +54,7 @@ NATURAL_VOICE_POLISH_PATTERNS = [
     (r"\bhere'?s the thing\b", "remove stock setup phrase"),
     (r"\bin today'?s (?:world|market|landscape)\b", "remove generic topical setup"),
     (r"\btoday'?s rapidly evolving\b", "remove generic topical setup"),
+    (r"\b[A-Z][A-Za-z0-9&.,' -]{0,60}\s+covering\s+[^.\n]{1,80}\s+is\s+fine\b", "rewrite awkward source coverage setup"),
     (r"\bas (?:ai|the market|the industry|technology|sales|gtm)[^.\n]{0,80}\bcontinues to\b", "remove polished 'as X continues to' setup"),
     (r"\b(?:new era|paradigm shift|next wave)\b", "remove generic trend language"),
     (r"\b(?:leverage|harness|seamless|cutting-edge|transformative)\b", "replace corporate/AI-polish language with plain words"),
@@ -79,6 +80,9 @@ LEADPOET_DEFINITION_PATTERNS = [
     (r"\bleadpoet is building\b", "avoid product name followed by 'is building'"),
     (r"\bleadpoet is built\b", "avoid product name followed by 'is built'"),
     (r"\bleadpoet is\b", "avoid product name followed by 'is' as a standalone definition"),
+    (r"\b(?:near|around)\s+leadpoet\b", "avoid awkward spatial Leadpoet phrasing"),
+    (r"(?m)(?:^|[.!?]\s+|\n\n)\s*use\s+leadpoet\s+as\b", "avoid instruction-style Leadpoet phrasing"),
+    (r"\bfirst name the account reason\b|\bthe late noun can be leadpoet\b|\bask the plain question\b", "avoid leaked product-placement instruction"),
     (r"(?m)(?:^|\n\n)\s*for leadpoet,\s+", "avoid formulaic 'For Leadpoet...' product lead-in"),
     (r"(?m)(?:^|[.!?]\s+|\n\n)\s*leadpoet\s+(?:should|can|needs?|has\s+to)\b", "avoid formulaic Leadpoet modal lead-in"),
     (r"\b(?:that|this)\s+is\s+where\s+leadpoet\b|\bthat['’]?s\s+where\s+leadpoet\b", "avoid formulaic 'this is where' product lead-in"),
@@ -851,6 +855,11 @@ def product_mention_prompt_section(
     usage_selected = selected_product_name_usage_targets(request, trends or [], count=4) if request else PRODUCT_NAME_USAGE_TARGETS[:4]
     usage_name, usage_guidance = usage_selected[0]
     usage_options = "\n".join(f"- {name}: {guidance}" for name, guidance in usage_selected)
+    usage_constraint_line = (
+        "Use the product name usage target as a hard constraint for whether the name appears and how many times it appears."
+        if request and should_enforce_product_name_usage_target(request)
+        else "Use the product name usage target as guidance, but keep the product anchor when it is needed for meaning."
+    )
     return (
         "Dynamic Product Mention:\n"
         "- Do not make the product mention the same final paragraph every time.\n"
@@ -865,7 +874,7 @@ def product_mention_prompt_section(
         f"Primary product mention syntax target for this request: {syntax_name}: {syntax_guidance}\n"
         f"Primary product name usage target for this request: {usage_name}: {usage_guidance}\n"
         "Use the lane for the rhetorical job, the placement target for where the name enters, and the syntax target for the grammar of the product mention.\n"
-        "Use the product name usage target as a hard constraint for whether the name appears and how many times it appears.\n"
+        f"{usage_constraint_line}\n"
         "Product mention lanes for this request:\n"
         f"{lane_options}\n"
         "Product mention placement targets for this request:\n"
@@ -992,6 +1001,10 @@ def product_name_usage_target_for_assignment(
 
 def primary_product_name_usage_target(request: DraftRequest, trends: list[TrendItem]) -> tuple[str, str]:
     return selected_product_name_usage_targets(request, trends, count=1)[0]
+
+
+def should_enforce_product_name_usage_target(request: DraftRequest) -> bool:
+    return "naturalness audit:" in (request.extra_context or "").lower()
 
 
 def selected_structure_shapes(
@@ -2327,7 +2340,11 @@ def apply_deterministic_rule_repair(
         )
     ):
         candidates.extend(deterministic_leadpoet_grammar_saturation_repair_candidates(text, max_chars=max_chars))
-    if any("saturated batch leadpoet name usage" in violation.lower() for violation in previous_violations):
+    if any(
+        "saturated batch leadpoet name usage" in violation.lower()
+        or "product name usage target" in violation.lower()
+        for violation in previous_violations
+    ):
         candidates.extend(deterministic_leadpoet_name_omission_repair_candidates(text, max_chars=max_chars))
     if any("saturated batch layout" in violation.lower() for violation in previous_violations):
         layout_bases = [text, *candidates]
@@ -2544,6 +2561,42 @@ def deterministic_leadpoet_definition_repair(
     repaired = text
     product_lane = primary_product_mention_lane(request, trends)[0]
     product_syntax = primary_product_mention_syntax_target(request, trends)[0]
+    repaired = re.sub(
+        r"(?m)(^|(?<=[.!?])\s+|\n\n)(\s*)Near\s+Leadpoet,\s*",
+        lambda match: f"{match.group(1) or ''}{match.group(2) or ''}At the Leadpoet handoff, ",
+        repaired,
+        flags=re.I,
+    )
+    repaired = re.sub(
+        r"\ba\s+signal\s+near\s+Leadpoet\b",
+        "a signal headed into Leadpoet",
+        repaired,
+        flags=re.I,
+    )
+    repaired = re.sub(
+        r"\baround\s+Leadpoet\b",
+        "at the Leadpoet handoff",
+        repaired,
+        flags=re.I,
+    )
+    repaired = re.sub(
+        r"(?m)(^|(?<=[.!?])\s+|\n\n)(\s*)Use\s+Leadpoet\s+as[^.!?\n]*(?:[.!?]|$)",
+        lambda match: f"{match.group(1) or ''}{match.group(2) or ''}The account-change check should be specific in Leadpoet before copy starts.",
+        repaired,
+        flags=re.I,
+    )
+    repaired = re.sub(
+        r"(?m)(^|(?<=[.!?])\s+|\n\n)(\s*)First\s+name\s+the\s+account\s+reason\.\s*The\s+late\s+noun\s+can\s+be\s+Leadpoet\.",
+        lambda match: f"{match.group(1) or ''}{match.group(2) or ''}The account reason comes first. Timing gets useful in Leadpoet after that.",
+        repaired,
+        flags=re.I,
+    )
+    repaired = re.sub(
+        r"(?m)(^|(?<=[.!?])\s+|\n\n)(\s*)(?:At\s+the\s+Leadpoet\s+handoff,\s*|Before\s+a\s+signal\s+reaches\s+Leadpoet,\s*)?ask\s+the\s+plain\s+question:\s*why\s+this\s+account,\s*this\s+week\?",
+        lambda match: f"{match.group(1) or ''}{match.group(2) or ''}The Leadpoet question is simple: why this account, this week?",
+        repaired,
+        flags=re.I,
+    )
     for pattern in [
         r"\bLeadpoet\s+is\s+building[^.!?\n]*(?:[.!?]|$)",
         r"\bLeadpoet\s+is\s+built[^.!?\n]*(?:[.!?]|$)",
@@ -2643,7 +2696,7 @@ def leadpoet_definition_replacement(match: re.Match[str], *, product_lane: str) 
         "mechanism carries it": "The mechanism can carry the point: timing decides which account deserves action now.",
         "operator scene": "When a rep opens Leadpoet, they should see what changed at the account before a sequence asks for copy.",
         "boundary line": "Verified data can say who exists; before Leadpoet, the sharper question is who is worth action now.",
-        "signal language": "The signal has to explain why now, not only who fits. Use Leadpoet as the place that reason turns into action.",
+        "signal language": "The signal has to explain why now, not only who fits. That reason should become usable in Leadpoet before action.",
         "ownership without definition": "Before louder outbound, the account-timing question has to be clear enough in Leadpoet.",
         "implicit product belief": "Timing should choose the account before copy writes the email; that belief stays practical in Leadpoet.",
         "context-only wedge": "Account context has to name what changed, why now, and what action follows.",
@@ -2692,7 +2745,7 @@ def leadpoet_formulaic_intro_replacement(match: re.Match[str], *, product_lane: 
         "mechanism carries it": "Let the mechanism carry the claim: {body}",
         "operator scene": "When a rep opens Leadpoet, the account signal should be felt before copy: {body}",
         "boundary line": "The boundary should stay concrete in Leadpoet: {body}",
-        "signal language": "Use Leadpoet as the pressure test before copy: {body}",
+        "signal language": "The pressure test in Leadpoet comes before copy: {body}",
         "ownership without definition": "The account-timing question should stay concrete in Leadpoet: {body}",
         "implicit product belief": "That belief stays practical in Leadpoet: {body}",
         "context-only wedge": "Account context can carry this on its own: {body}",
@@ -2725,9 +2778,9 @@ def leadpoet_modal_leadin_replacement(match: re.Match[str], *, product_lane: str
         "no-name wedge": "The signal has to {body}.",
         "mechanism carries it": "Let the mechanism carry the claim: {body}.",
         "operator scene": "When a rep opens Leadpoet, the account signal should already {body}.",
-        "boundary line": "Verified data is not enough; before Leadpoet, the sharper side asks whether the signal can {body} before copy.",
-        "signal language": "Near Leadpoet, the signal has to answer one question: can it {body}?",
-        "ownership without definition": "Use Leadpoet as the pressure test for the account-timing question: can the signal {body} before the sequence starts?",
+        "boundary line": "Verified data is not enough; the Leadpoet boundary asks whether the signal can {body} before copy.",
+        "signal language": "Before copy, the signal has one Leadpoet question: can it {body}?",
+        "ownership without definition": "The account-timing question becomes the Leadpoet pressure test: can the signal {body} before the sequence starts?",
         "implicit product belief": "That belief stays practical in Leadpoet when the signal can {body}.",
         "context-only wedge": "Account context can carry this on its own: {body}.",
     }
@@ -2774,9 +2827,9 @@ def leadpoet_fallback_leadin_replacement(match: re.Match[str], *, product_lane: 
         "no-name wedge": "Buyer timing should stay concrete: {body}.",
         "mechanism carries it": "Let the mechanism carry the claim: {body}.",
         "operator scene": "When a rep opens Leadpoet, the account signal should already make this obvious: {body}.",
-        "boundary line": "Around Leadpoet, the sharper boundary is this: {body}.",
-        "signal language": "A signal near Leadpoet has one job: {body}.",
-        "ownership without definition": "Use Leadpoet as the pressure test for the account-timing question: {body}.",
+        "boundary line": "At the Leadpoet handoff, the sharper boundary is this: {body}.",
+        "signal language": "A signal headed into Leadpoet has one job: {body}.",
+        "ownership without definition": "The account-timing question becomes the Leadpoet pressure test: {body}.",
         "implicit product belief": "That belief stays practical through Leadpoet: {body}.",
         "context-only wedge": "Account context can carry this on its own: {body}.",
     }
@@ -2818,30 +2871,30 @@ def leadpoet_subject_verb_replacement(match: re.Match[str], *, product_lane: str
     elif product_syntax == "product as object":
         replacement = f"Put Leadpoet after the account reason, not before it: {action}."
     elif product_syntax == "prepositional tuck-in":
-        replacement = f"In Leadpoet, the account reason should already be specific: {action}."
+        replacement = f"The account reason should already be specific in Leadpoet: {action}."
     elif product_syntax == "possessive modifier":
         replacement = f"The timing constraint should stay concrete in Leadpoet: {action}."
     elif product_syntax == "question-adjacent":
         replacement = f"The Leadpoet question is plain: can the signal {action}?"
     elif verb.startswith("own"):
         if "timing" in lowered_body or "account" in lowered_body:
-            replacement = "In Leadpoet, the account-timing question needs a specific answer before copy starts."
+            replacement = "The account-timing question needs a specific Leadpoet answer before copy starts."
         else:
             replacement = f"That part should stay concrete in Leadpoet: {body[0].lower() + body[1:]}{ending}"
     elif verb.startswith("make"):
-        replacement = f"In Leadpoet, the useful test is whether it can make {body[0].lower() + body[1:]}{ending}"
+        replacement = f"The useful Leadpoet test is whether it can make {body[0].lower() + body[1:]}{ending}"
     elif verb.startswith("start"):
         tail = body[5:].strip() if lowered_body.startswith("with ") else body
         tail = tail or "buyer timing"
-        replacement = f"In Leadpoet, the starting point is {tail[0].lower() + tail[1:]}{ending}"
+        replacement = f"The Leadpoet starting point is {tail[0].lower() + tail[1:]}{ending}"
     elif verb.startswith("keep"):
         replacement = f"Keep {body[0].lower() + body[1:]} concrete in Leadpoet{ending}"
     elif verb.startswith("turn"):
         if " into " in lowered_body:
             left, right = re.split(r"\s+into\s+", body, maxsplit=1, flags=re.I)
-            replacement = f"In Leadpoet, {left[0].lower() + left[1:]} becomes {right}{ending}"
+            replacement = f"Through Leadpoet, {left[0].lower() + left[1:]} becomes {right}{ending}"
         else:
-            replacement = f"In Leadpoet, that turn has to make {body[0].lower() + body[1:]}{ending}"
+            replacement = f"That Leadpoet turn has to make {body[0].lower() + body[1:]}{ending}"
     elif verb.startswith("focus"):
         if lowered_body.startswith("on "):
             tail = body[3:].strip()
@@ -2850,9 +2903,9 @@ def leadpoet_subject_verb_replacement(match: re.Match[str], *, product_lane: str
             tail = body[5:].strip()
             replacement = f"Use the product name near {tail}{ending}"
         else:
-            replacement = f"In Leadpoet, keep the focus on {body[0].lower() + body[1:]}{ending}"
+            replacement = f"Keep the Leadpoet focus on {body[0].lower() + body[1:]}{ending}"
     else:
-        replacement = f"In Leadpoet, keep the mechanism concrete: {body[0].lower() + body[1:]}{ending}"
+        replacement = f"Keep the Leadpoet mechanism concrete: {body[0].lower() + body[1:]}{ending}"
     if ending != "." and replacement.endswith("."):
         replacement = f"{replacement[:-1]}{ending}"
     return f"{prefix}{indent}{replacement}"
@@ -2866,7 +2919,7 @@ def leadpoet_subject_verb_lane_replacement(action: str, *, product_lane: str) ->
         "operator scene": "When a rep opens Leadpoet, the changed account should be obvious before the generated email: {action}.",
         "boundary line": "Verified data can stop at fit; the timing line has to stay sharper in Leadpoet: {action}.",
         "signal language": "A signal should be specific before it shows up in Leadpoet: {action}.",
-        "ownership without definition": "Use Leadpoet as the pressure test for the account reason: {action}.",
+        "ownership without definition": "The account reason has to pass the Leadpoet pressure test: {action}.",
         "implicit product belief": "The product belief stays practical in Leadpoet: {action}.",
     }
     template = lane_templates.get(product_lane)
@@ -2947,7 +3000,7 @@ def leadpoet_where_leadin_replacement(match: re.Match[str], *, product_lane: str
             "no-name wedge": "Buyer timing stays concrete: {body}.",
             "operator scene": "When a rep opens Leadpoet, the account signal should already be clear: {body}.",
             "boundary line": "Before Leadpoet, the sharper boundary stays concrete: {body}.",
-            "signal language": "Near Leadpoet, the account signal should stay specific: {body}.",
+            "signal language": "The account signal should stay specific in Leadpoet before copy: {body}.",
             "ownership without definition": "The account-timing question should stay grounded in Leadpoet: {body}.",
             "implicit product belief": "The product belief should stay concrete in Leadpoet: {body}.",
             "mechanism carries it": "Let the mechanism carry the claim: {body}.",
@@ -2972,9 +3025,9 @@ def leadpoet_where_focus_replacement(detail: str, *, product_lane: str) -> str:
         "no-name wedge": "Buyer timing stays concrete: {detail}.",
         "mechanism carries it": "Let the mechanism carry the claim: {detail}.",
         "operator scene": "When a rep opens Leadpoet, the account signal should already show {leadpoet_detail}.",
-        "boundary line": "Around Leadpoet, the sharper boundary is {leadpoet_detail}.",
-        "signal language": "A signal near Leadpoet has one job: make {leadpoet_detail} plain.",
-        "ownership without definition": "Use Leadpoet as the pressure test for the account-timing question: {leadpoet_detail}.",
+        "boundary line": "At the Leadpoet handoff, the sharper boundary is {leadpoet_detail}.",
+        "signal language": "A signal headed into Leadpoet has one job: make {leadpoet_detail} plain.",
+        "ownership without definition": "The account-timing question becomes the Leadpoet pressure test: {leadpoet_detail}.",
         "implicit product belief": "That belief stays practical through Leadpoet: {leadpoet_detail}.",
         "context-only wedge": "Account context can carry this on its own: {detail}.",
     }
@@ -3003,9 +3056,9 @@ def leadpoet_formulaic_closer_replacement(
         "no-name wedge": "Buyer timing should stay concrete: {detail}.",
         "mechanism carries it": "Let the mechanism carry the claim: {detail}.",
         "operator scene": "When a rep opens Leadpoet, the account signal should already make this obvious: {leadpoet_detail}.",
-        "boundary line": "Around Leadpoet, the sharper boundary is this: {leadpoet_detail}.",
-        "signal language": "A signal near Leadpoet has one job: {leadpoet_detail}.",
-        "ownership without definition": "Use Leadpoet as the pressure test for the account-timing question: {leadpoet_detail}.",
+        "boundary line": "At the Leadpoet handoff, the sharper boundary is this: {leadpoet_detail}.",
+        "signal language": "A signal headed into Leadpoet has one job: {leadpoet_detail}.",
+        "ownership without definition": "The account-timing question becomes the Leadpoet pressure test: {leadpoet_detail}.",
         "implicit product belief": "That belief stays practical through Leadpoet: {leadpoet_detail}.",
         "context-only wedge": "Account context can carry this on its own: {detail}.",
     }
@@ -3072,6 +3125,7 @@ def draft_rule_violations(
     anchor = workspace_anchor_name(bundle, active_rules)
     violations.extend(natural_voice_violations(text, request))
     violations.extend(recent_output_repetition_violations(text, recent_output_rows, recent_output_batch_summary))
+    violations.extend(product_name_usage_violations(text, request, trends, anchor=anchor))
     if (
         anchor
         and anchor.lower() == "leadpoet"
@@ -3090,6 +3144,46 @@ def draft_rule_violations(
     ):
         violations.append(f"anchor the point to {anchor} as the source of the core wedge")
     return dedupe_preserve_order(violations)
+
+
+def product_name_usage_violations(
+    text: str,
+    request: DraftRequest,
+    trends: list[TrendItem],
+    *,
+    anchor: str | None,
+) -> list[str]:
+    if not anchor or not should_enforce_product_name_usage_target(request):
+        return []
+    usage_target = primary_product_name_usage_target(request, trends)[0]
+    if not usage_target:
+        return []
+    count = anchor_name_count(text, anchor)
+    anchor_label = anchor.strip()
+    violations: list[str] = []
+    if usage_target == "omit product name":
+        if count:
+            violations.append(f"follow product name usage target: omit {anchor_label}")
+        return violations
+    if usage_target in {"mention once embedded", "mention once late", "name optional"} and count > 1:
+        violations.append(f"follow product name usage target: use {anchor_label} at most once")
+    if count != 1:
+        return violations
+    anchor_sentence = first_sentence_with_word(text, anchor_label)
+    cleaned_sentence = re.sub(r"^(?:[-*•]\s+|\d+[.)]\s+)", "", anchor_sentence.strip())
+    if usage_target == "mention once embedded" and re.match(rf"{re.escape(anchor_label)}\b", cleaned_sentence, flags=re.I):
+        violations.append(f"follow product name usage target: embed {anchor_label} inside the sentence")
+    if usage_target == "mention once late":
+        first_unit = first_sentence_or_line(text)
+        if re.search(rf"\b{re.escape(anchor_label)}\b", first_unit, flags=re.I):
+            violations.append(f"follow product name usage target: keep {anchor_label} out of the opening line")
+    return violations
+
+
+def anchor_name_count(text: str, anchor: str) -> int:
+    if not anchor:
+        return 0
+    return len(re.findall(rf"\b{re.escape(anchor)}\b", text, flags=re.I))
 
 
 def leadpoet_name_usage_is_saturated(recent_output_batch_summary: dict[str, object] | None) -> bool:
@@ -3395,13 +3489,13 @@ def workspace_anchor_line(
 
 def leadpoet_anchor_line(product_lane: str, product_syntax: str | None = None) -> str:
     syntax_lines = {
-        "product as object": "Use Leadpoet as the destination for the account-change check, not the opening claim.",
+        "product as object": "The account-change check should be specific in Leadpoet before copy starts.",
         "prepositional tuck-in": "The account reason should already be specific in Leadpoet.",
         "possessive modifier": "The timing question stays concrete in Leadpoet: why this account now.",
         "name omitted": "Buyer timing should answer why this account deserves action now.",
         "handoff point": "At the handoff into Leadpoet, the signal should already say why this account is worth action.",
-        "question-adjacent": "Near Leadpoet, ask the plain question: why this account, this week?",
-        "earned late noun": "First name the account reason. The late noun can be Leadpoet.",
+        "question-adjacent": "The Leadpoet question is simple: why this account, this week?",
+        "earned late noun": "The account reason comes first. Timing gets useful in Leadpoet after that.",
     }
     if product_syntax in syntax_lines:
         return syntax_lines[product_syntax]
@@ -3457,6 +3551,13 @@ def product_lane_allows_omitting_anchor(
     *,
     anchor: str | None = None,
 ) -> bool:
+    if (
+        bool(anchor)
+        and anchor.lower() == "leadpoet"
+        and should_enforce_product_name_usage_target(request)
+        and primary_product_name_usage_target(request, trends)[0] in {"omit product name", "name optional"}
+    ):
+        return True
     if (
         bool(anchor)
         and anchor.lower() == "leadpoet"
@@ -3531,6 +3632,7 @@ Rules:
 - If a violation mentions a formulaic Leadpoet modal lead-in, make Leadpoet the object, mechanism, or constraint inside the sentence instead of the sentence subject.
 - If a violation mentions a "that is where" product wrapper, make the point concrete without using that wrapper.
 - If a violation mentions a formulaic Leadpoet closer, move the product name inside a concrete mechanism or remove it.
+- If a violation mentions product name usage target, obey the assigned omit/once/late product-name rule exactly.
 - If a violation mentions saturated batch layout, change the post structure: paragraph count, line breaks, opener shape, or product placement.
 - Do not add unsupported claims, anecdotes, proof, metrics, or customer stories.
 - Do not include the exact words "not just".
@@ -3722,6 +3824,7 @@ def clean_generated_text(text: str, *, max_chars: int) -> str:
     cleaned = re.sub(r",\s*not just\s+", " instead of ", cleaned, flags=re.I)
     cleaned = re.sub(r"\b(game-changing|revolutionary|unlock|delve into|in today's world)\b", "", cleaned, flags=re.I)
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    cleaned = re.sub(r"([.!?])(?=[A-Z][a-z])", r"\1 ", cleaned)
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
