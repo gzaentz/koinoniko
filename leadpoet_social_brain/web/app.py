@@ -49,6 +49,7 @@ from leadpoet_social_brain.core.models import (
     QueuedPostVersion,
     SocialPost,
     SyncMetadata,
+    TopicIdea,
     TrendItem,
     ViralPattern,
     WebAuthUser,
@@ -89,6 +90,7 @@ from leadpoet_social_brain.storage.sqlite_store import (
     resolve_db_path,
 )
 from leadpoet_social_brain.trend_scout import refresh_web_trends, scrapingdog_configured, web_trend_groups
+from leadpoet_social_brain.topic_scout import refresh_topic_ideas
 from leadpoet_social_brain.voice import (
     DEFAULT_AVOID_PHRASES,
     DEFAULT_VOICE_RULES,
@@ -120,6 +122,8 @@ X_METRICS_SYNC_KEY = "x_metrics_sync"
 X_DAILY_SYNC_KEY = "x_daily_sync"
 TRENDS_SYNC_KEY = "trends_sync"
 PATTERNS_SYNC_KEY = "patterns_sync"
+TOPICS_SYNC_KEY = "topics_sync"
+AUTOPILOT_SYNC_KEY = "autopilot_weekly"
 VOICE_CONTEXT_NAME = "learned_from_high_performers"
 FACT_CONTEXT_FIELDS = [
     {
@@ -682,6 +686,10 @@ def route_api(
         return 200, refresh_patterns_task_payload(store, payload)
     if method == "POST" and parts == ["tasks", "refresh-patterns-weekly"]:
         return 200, refresh_pattern_windows_task_payload(store, payload, windows=["weekly", "monthly"])
+    if method == "POST" and parts == ["tasks", "refresh-topics"]:
+        return 200, refresh_topics_task_payload(store, payload)
+    if method == "POST" and parts == ["tasks", "autopilot-weekly"]:
+        return 200, autopilot_weekly_task_payload(store, payload)
     if not parts or parts[0] != "api":
         return 404, {"error": "Not found."}
 
@@ -753,6 +761,17 @@ def route_api(
         if not pattern:
             return 404, {"error": "Pattern not found."}
         return 200, {"pattern": pattern_payload(pattern)}
+    if method == "GET" and parts == ["api", "topics"]:
+        status = one(query, "status") or "suggested"
+        ideas = store.list_topic_ideas(status=None if status == "all" else status, limit=int(one(query, "limit") or 50))
+        return 200, {"items": [topic_idea_payload(idea) for idea in ideas]}
+    if method == "POST" and parts == ["api", "topics", "refresh"]:
+        return 200, refresh_topics_task_payload(store, payload)
+    if method == "POST" and len(parts) == 4 and parts[:2] == ["api", "topics"] and parts[3] == "dismiss":
+        idea = store.mark_topic_idea_status(parts[2], "dismissed")
+        if not idea:
+            return 404, {"error": "Topic idea not found."}
+        return 200, {"item": topic_idea_payload(idea)}
     if method == "POST" and len(parts) == 4 and parts[:2] == ["api", "patterns"] and parts[3] in {"archive", "ignore", "save", "unsave"}:
         status_by_action = {"archive": "archived", "ignore": "ignored", "save": "saved", "unsave": "active"}
         pattern = store.mark_viral_pattern_status(parts[2], status_by_action[parts[3]])
@@ -834,6 +853,7 @@ def route_api(
             pattern_ids=string_list_payload(payload.get("pattern_ids")),
             trend_ids=string_list_payload(payload.get("trend_ids")),
             length_mode=str(payload.get("length_mode") or "standard"),
+            topic_idea_id=clean_optional(payload.get("topic_idea_id")),
         )
         item_payload = queue_item_payload(store, result.item)
         return 200, {
@@ -848,11 +868,22 @@ def route_api(
         if not provider:
             raise ValueError(MISSING_PROVIDER_MESSAGE)
         generator = SocialBrainGenerator(store, provider=provider)
+        posts = int(payload.get("posts") or 5)
+        autopilot = bool_from_payload(payload, "autopilot", False)
+        topic_ideas: list[TopicIdea] | None = None
+        topic_warnings: list[str] = []
+        if autopilot:
+            available = store.list_topic_ideas(status="suggested", limit=posts)
+            if len(available) < posts or bool_from_payload(payload, "refresh_topics", True):
+                topic_result = refresh_topic_ideas(store, provider, limit=max(posts, int(payload.get("topic_limit") or 10)))
+                available = topic_result.ideas
+                topic_warnings.extend(topic_result.warnings)
+            topic_ideas = available[:posts]
         result = plan_week_x(
             store,
             generator,
             week_start=str(payload.get("week_start") or next_monday()),
-            posts=int(payload.get("posts") or 5),
+            posts=posts,
             use_trends=bool(payload.get("use_trends", False)),
             trend_window_days=int(payload.get("trend_window_days") or 14),
             topic_mix=clean_optional(payload.get("topic_mix")),
@@ -862,10 +893,13 @@ def route_api(
             allow_evergreen=bool(payload.get("allow_evergreen", True)),
             use_patterns=bool(payload.get("use_patterns", False)),
             length_mode=str(payload.get("length_mode") or "standard"),
+            topic_ideas=topic_ideas,
+            extra_instruction=clean_optional(payload.get("instruction")),
         )
         return 200, {
             "queued": [queue_item_payload(store, item) for item in result.queued],
-            "warnings": result.warnings,
+            "warnings": [*topic_warnings, *result.warnings],
+            "autopilot": autopilot,
         }
     if method == "POST" and parts == ["api", "publish-due"]:
         return 200, publish_due_payload(store, payload)
@@ -1385,6 +1419,145 @@ def refresh_pattern_windows_task_payload(store: SQLiteStore, payload: dict[str, 
                 last_completed_at=completed_at,
                 status="failed",
                 summary=summary,
+                error_message=str(exc),
+            )
+        )
+        raise
+
+
+def refresh_topics_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    started_at = utc_now()
+    try:
+        provider = load_configured_provider(store)
+        if not provider:
+            raise ValueError("No LLM provider configured. Set a provider before refreshing topics.")
+        result = refresh_topic_ideas(store, provider, limit=int(payload.get("limit") or 10))
+        completed_at = utc_now()
+        summary = {
+            "stored": len(result.ideas),
+            "warnings": result.warnings,
+            "completed_at": completed_at,
+        }
+        metadata = store.save_sync_metadata(
+            SyncMetadata(
+                key=TOPICS_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=completed_at,
+                status="partial" if result.warnings else "success",
+                summary=summary,
+                error_message="\n".join(result.warnings[:5]) if result.warnings else None,
+            )
+        )
+        return {
+            **summary,
+            "items": [topic_idea_payload(idea) for idea in result.ideas],
+            "sync": sync_metadata_payload(metadata),
+        }
+    except Exception as exc:  # noqa: BLE001 - task persists provider failures for account status.
+        completed_at = utc_now()
+        store.save_sync_metadata(
+            SyncMetadata(
+                key=TOPICS_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=completed_at,
+                status="failed",
+                summary={"stored": 0, "warnings": [str(exc)], "completed_at": completed_at},
+                error_message=str(exc),
+            )
+        )
+        raise
+
+
+def autopilot_weekly_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    started_at = utc_now()
+    try:
+        week_start = str(payload.get("week_start") or next_monday())
+        start_date = date.fromisoformat(week_start)
+        posts = max(1, int(payload.get("posts") or 5))
+        existing = [
+            item
+            for item in store.list_content_queue(platform="x", limit=500)
+            if item.scheduled_at
+            and start_date <= parse_dt(item.scheduled_at).astimezone(timezone.utc).date() < start_date + timedelta(days=7)
+            and item.status not in {"skipped", "failed"}
+        ]
+        if existing:
+            completed_at = utc_now()
+            summary = {
+                "skipped": True,
+                "reason": f"{len(existing)} queue item(s) already exist for this week.",
+                "queued": 0,
+                "completed_at": completed_at,
+            }
+            metadata = store.save_sync_metadata(
+                SyncMetadata(
+                    key=AUTOPILOT_SYNC_KEY,
+                    last_started_at=started_at,
+                    last_completed_at=completed_at,
+                    status="success",
+                    summary=summary,
+                )
+            )
+            return {**summary, "items": [], "sync": sync_metadata_payload(metadata)}
+
+        provider = load_configured_provider(store)
+        if not provider:
+            raise ValueError(MISSING_PROVIDER_MESSAGE)
+        topic_result = refresh_topic_ideas(
+            store,
+            provider,
+            limit=max(posts, int(payload.get("topic_limit") or 10)),
+        )
+        result = plan_week_x(
+            store,
+            SocialBrainGenerator(store, provider=provider),
+            week_start=week_start,
+            posts=posts,
+            use_trends=bool_from_payload(payload, "use_trends", True),
+            trend_window_days=int(payload.get("trend_window_days") or 14),
+            topic_mix=clean_optional(payload.get("topic_mix")),
+            cadence=str(payload.get("cadence") or "weekday_mornings"),
+            default_post_type=str(payload.get("default_post_type") or "founder_insight"),
+            variants_per_slot=1,
+            allow_evergreen=True,
+            use_patterns=bool_from_payload(payload, "use_patterns", True),
+            length_mode=str(payload.get("length_mode") or "standard"),
+            topic_ideas=topic_result.ideas,
+            extra_instruction=clean_optional(payload.get("instruction")),
+        )
+        completed_at = utc_now()
+        warnings = [*topic_result.warnings, *result.warnings]
+        summary = {
+            "skipped": False,
+            "queued": len(result.queued),
+            "topics_generated": len(topic_result.ideas),
+            "warnings": warnings,
+            "completed_at": completed_at,
+        }
+        metadata = store.save_sync_metadata(
+            SyncMetadata(
+                key=AUTOPILOT_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=completed_at,
+                status="partial" if warnings else "success",
+                summary=summary,
+                error_message="\n".join(warnings[:5]) if warnings else None,
+            )
+        )
+        return {
+            **summary,
+            "items": [queue_item_payload(store, item) for item in result.queued],
+            "sync": sync_metadata_payload(metadata),
+        }
+    except Exception as exc:  # noqa: BLE001 - task persists failures for the next cron run.
+        completed_at = utc_now()
+        store.save_sync_metadata(
+            SyncMetadata(
+                key=AUTOPILOT_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=completed_at,
+                status="failed",
+                summary={"queued": 0, "warnings": [str(exc)], "completed_at": completed_at},
                 error_message=str(exc),
             )
         )
@@ -2464,6 +2637,7 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
     trends = [*trend_groups.daily, *trend_groups.weekly]
     patterns = pattern_groups(store)
     saved_patterns = store.list_viral_patterns(status="saved", limit=100)
+    topic_ideas = store.list_topic_ideas(status="suggested", limit=12)
     return {
         "status": status_payload(store),
         "queue_counts": counts,
@@ -2477,6 +2651,7 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
         "trend_groups": trend_groups_payload(trend_groups),
         "pattern_groups": pattern_groups_payload(patterns),
         "saved_patterns": [pattern_payload(pattern) for pattern in saved_patterns],
+        "topic_ideas": [topic_idea_payload(idea) for idea in topic_ideas],
         "sync": account_sync_payload(store),
         "analytics_hints": analytics.hints,
         "best_examples": [post_payload(post) for post in analytics.best_examples[:5]],
@@ -2827,6 +3002,7 @@ def queue_item_payload(store: SQLiteStore, item: ContentQueueItem, *, include_ve
         "id": item.id,
         "platform": item.platform,
         "draft_id": item.draft_id,
+        "topic_idea_id": item.topic_idea_id,
         "text": item.text,
         "focus": post_summary(item.angle or item.text, max_length=80),
         "topic": item.topic,
@@ -2952,6 +3128,23 @@ def trend_payload(trend: TrendItem, *, include_raw: bool = False) -> dict[str, A
     if include_raw:
         payload["raw_text"] = truncate_payload_text(trend.raw_text, 4000)
     return payload
+
+
+def topic_idea_payload(idea: TopicIdea) -> dict[str, Any]:
+    return {
+        "id": idea.id,
+        "title": idea.title,
+        "topic": idea.topic,
+        "angle": idea.angle,
+        "why_now": idea.why_now,
+        "source_type": idea.source_type,
+        "source_refs": idea.source_refs,
+        "post_type": idea.post_type,
+        "priority": idea.priority,
+        "status": idea.status,
+        "created_at": idea.created_at,
+        "updated_at": idea.updated_at,
+    }
 
 
 def pattern_groups_payload(groups: dict[str, list[ViralPattern]]) -> dict[str, Any]:

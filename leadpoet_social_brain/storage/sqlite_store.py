@@ -25,6 +25,7 @@ from leadpoet_social_brain.core.models import (
     QueuedPostVersion,
     SocialPost,
     SyncMetadata,
+    TopicIdea,
     TrendItem,
     ViralPattern,
     WebAuthUser,
@@ -267,11 +268,31 @@ class SQLiteStore:
             CREATE INDEX IF NOT EXISTS idx_trend_items_lookup
             ON trend_items(workspace_id, status, urgency, topic, date);
 
+            CREATE TABLE IF NOT EXISTS topic_ideas (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                title TEXT NOT NULL,
+                topic TEXT NOT NULL,
+                angle TEXT NOT NULL,
+                why_now TEXT NOT NULL,
+                source_type TEXT NOT NULL DEFAULT 'evergreen',
+                source_refs_json TEXT NOT NULL DEFAULT '[]',
+                post_type TEXT NOT NULL DEFAULT 'founder_insight',
+                priority INTEGER NOT NULL DEFAULT 50,
+                status TEXT NOT NULL DEFAULT 'suggested',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_topic_ideas_lookup
+            ON topic_ideas(workspace_id, status, priority DESC, created_at DESC);
+
             CREATE TABLE IF NOT EXISTS content_queue (
                 id TEXT PRIMARY KEY,
                 workspace_id TEXT NOT NULL DEFAULT 'default',
                 platform TEXT NOT NULL DEFAULT 'x',
                 draft_id TEXT,
+                topic_idea_id TEXT,
                 text TEXT NOT NULL,
                 topic TEXT NOT NULL,
                 post_type TEXT NOT NULL,
@@ -346,6 +367,7 @@ class SQLiteStore:
         for column in ["hook", "structure", "tone", "cta", "formatting"]:
             self._ensure_column("post_notes", column, "TEXT")
         self._ensure_column("generated_drafts", "context_snapshot_json", "TEXT NOT NULL DEFAULT '{}'")
+        self._ensure_column("content_queue", "topic_idea_id", "TEXT")
         for column in [
             "source_title",
             "source_published_at",
@@ -369,6 +391,7 @@ class SQLiteStore:
             "context_sections",
             "generated_drafts",
             "trend_items",
+            "topic_ideas",
             "content_queue",
             "web_auth_users",
             "app_settings",
@@ -409,6 +432,14 @@ class SQLiteStore:
             """
             CREATE INDEX IF NOT EXISTS idx_content_queue_status_scheduled
             ON content_queue(workspace_id, status, scheduled_at)
+            """,
+        )
+        self._ensure_index(
+            "idx_topic_ideas_lookup",
+            ["workspace_id", "status", "priority", "created_at"],
+            """
+            CREATE INDEX IF NOT EXISTS idx_topic_ideas_lookup
+            ON topic_ideas(workspace_id, status, priority DESC, created_at DESC)
             """,
         )
 
@@ -466,6 +497,7 @@ class SQLiteStore:
             workspace_id=self.workspace_id,
             platform=item.platform,
             draft_id=item.draft_id,
+            topic_idea_id=item.topic_idea_id,
             text=item.text,
             topic=item.topic,
             post_type=item.post_type,
@@ -485,16 +517,17 @@ class SQLiteStore:
         self.conn.execute(
             """
             INSERT INTO content_queue (
-                id, workspace_id, platform, draft_id, text, topic, post_type, angle,
+                id, workspace_id, platform, draft_id, topic_idea_id, text, topic, post_type, angle,
                 trend_ids_json, scheduled_at, status, reviewer_notes,
                 created_at, updated_at, approved_at, posted_at, x_post_id,
                 x_url, failure_reason
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 workspace_id = excluded.workspace_id,
                 platform = excluded.platform,
                 draft_id = excluded.draft_id,
+                topic_idea_id = excluded.topic_idea_id,
                 text = excluded.text,
                 topic = excluded.topic,
                 post_type = excluded.post_type,
@@ -515,6 +548,7 @@ class SQLiteStore:
                 saved.workspace_id,
                 saved.platform,
                 saved.draft_id,
+                saved.topic_idea_id,
                 saved.text,
                 saved.topic,
                 saved.post_type,
@@ -534,6 +568,95 @@ class SQLiteStore:
         )
         self.conn.commit()
         return saved
+
+    def save_topic_idea(self, idea: TopicIdea) -> TopicIdea:
+        now = utc_now()
+        saved = TopicIdea(
+            id=idea.id,
+            workspace_id=self.workspace_id,
+            title=idea.title,
+            topic=idea.topic,
+            angle=idea.angle,
+            why_now=idea.why_now,
+            source_type=idea.source_type,
+            source_refs=list(idea.source_refs),
+            post_type=idea.post_type,
+            priority=max(0, min(100, int(idea.priority))),
+            status=idea.status,
+            created_at=idea.created_at,
+            updated_at=now,
+        )
+        self.conn.execute(
+            """
+            INSERT INTO topic_ideas (
+                id, workspace_id, title, topic, angle, why_now, source_type,
+                source_refs_json, post_type, priority, status, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                workspace_id = excluded.workspace_id,
+                title = excluded.title,
+                topic = excluded.topic,
+                angle = excluded.angle,
+                why_now = excluded.why_now,
+                source_type = excluded.source_type,
+                source_refs_json = excluded.source_refs_json,
+                post_type = excluded.post_type,
+                priority = excluded.priority,
+                status = excluded.status,
+                updated_at = excluded.updated_at
+            """,
+            (
+                saved.id,
+                saved.workspace_id,
+                saved.title,
+                saved.topic,
+                saved.angle,
+                saved.why_now,
+                saved.source_type,
+                json.dumps(saved.source_refs),
+                saved.post_type,
+                saved.priority,
+                saved.status,
+                saved.created_at,
+                saved.updated_at,
+            ),
+        )
+        self.conn.commit()
+        return saved
+
+    def get_topic_idea(self, idea_id: str) -> TopicIdea | None:
+        row = self.conn.execute(
+            "SELECT * FROM topic_ideas WHERE id = ? AND workspace_id = ?",
+            (idea_id, self.workspace_id),
+        ).fetchone()
+        return self._row_to_topic_idea(row) if row else None
+
+    def list_topic_ideas(self, *, status: str | None = "suggested", limit: int = 50) -> list[TopicIdea]:
+        clauses = ["workspace_id = ?"]
+        params: list[object] = [self.workspace_id]
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        rows = self.conn.execute(
+            f"""
+            SELECT *
+            FROM topic_ideas
+            WHERE {' AND '.join(clauses)}
+            ORDER BY priority DESC, created_at DESC
+            LIMIT ?
+            """,
+            (*params, limit),
+        ).fetchall()
+        return [self._row_to_topic_idea(row) for row in rows]
+
+    def mark_topic_idea_status(self, idea_id: str, status: str) -> TopicIdea | None:
+        self.conn.execute(
+            "UPDATE topic_ideas SET status = ?, updated_at = ? WHERE id = ? AND workspace_id = ?",
+            (status, utc_now(), idea_id, self.workspace_id),
+        )
+        self.conn.commit()
+        return self.get_topic_idea(idea_id)
 
     def get_content_queue_item(self, queue_id: str) -> ContentQueueItem | None:
         row = self.conn.execute(
@@ -2040,12 +2163,30 @@ class SQLiteStore:
             updated_at=row["updated_at"],
         )
 
+    def _row_to_topic_idea(self, row: sqlite3.Row) -> TopicIdea:
+        return TopicIdea(
+            id=row["id"],
+            workspace_id=row["workspace_id"],
+            title=row["title"],
+            topic=row["topic"],
+            angle=row["angle"],
+            why_now=row["why_now"],
+            source_type=row["source_type"],
+            source_refs=json.loads(row["source_refs_json"] or "[]"),
+            post_type=row["post_type"],
+            priority=int(row["priority"] or 0),
+            status=row["status"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
     def _row_to_queue_item(self, row: sqlite3.Row) -> ContentQueueItem:
         return ContentQueueItem(
             id=row["id"],
             workspace_id=row["workspace_id"],
             platform=row["platform"],
             draft_id=row["draft_id"],
+            topic_idea_id=row["topic_idea_id"],
             text=row["text"],
             topic=row["topic"],
             post_type=row["post_type"],

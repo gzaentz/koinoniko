@@ -863,6 +863,7 @@ def cmd_generate_x(store: SQLiteStore, args: argparse.Namespace) -> int:
         use_trends=args.use_trends,
         use_patterns=args.use_patterns,
         pattern_ids=args.pattern_ids,
+        prompt_profile="natural",
     )
     drafts = generator.generate(request)
     for index, draft in enumerate(drafts, start=1):

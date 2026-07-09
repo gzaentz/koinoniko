@@ -12,6 +12,7 @@ from leadpoet_social_brain.core.models import (
     PostInfluence,
     QueuedPostVersion,
     SocialPost,
+    TopicIdea,
     TrendItem,
     utc_now,
 )
@@ -75,6 +76,8 @@ def plan_week_x(
     allow_evergreen: bool = False,
     use_patterns: bool = False,
     length_mode: str = "standard",
+    topic_ideas: list[TopicIdea] | None = None,
+    extra_instruction: str | None = None,
 ) -> PlanWeekResult:
     _ = variants_per_slot
     if posts <= 0:
@@ -82,6 +85,7 @@ def plan_week_x(
     get_x_adapter().validate_post_type(default_post_type)
     start_date = date.fromisoformat(week_start)
     topics = expand_topic_mix(topic_mix, posts)
+    selected_topic_ideas = [idea for idea in (topic_ideas or []) if idea.status == "suggested"][:posts]
     scheduled_times = schedule_slots(start_date, posts=posts, cadence=cadence)
     trends = recent_unused_trends(store, window_days=trend_window_days) if use_trends else []
     warnings: list[str] = []
@@ -94,27 +98,47 @@ def plan_week_x(
         )
     if use_trends and not trends:
         warnings.append("No recent unused trends found. Planning evergreen authority posts.")
+    if topic_ideas is not None and len(selected_topic_ideas) < posts:
+        warnings.append(
+            f"Only {len(selected_topic_ideas)} unused topic idea(s) were available; "
+            "remaining slots use the configured evergreen mix."
+        )
 
     used_trends: set[str] = set()
     queued: list[ContentQueueItem] = []
     for index in range(posts):
-        topic = topics[index % len(topics)]
-        trend = pick_trend_for_topic(trends, topic=topic, used_trend_ids=used_trends) if use_trends else None
+        topic_idea = selected_topic_ideas[index] if index < len(selected_topic_ideas) else None
+        topic = topic_idea.topic if topic_idea else topics[index % len(topics)]
+        post_type = topic_idea.post_type if topic_idea else default_post_type
+        referenced_trends = [
+            trend
+            for ref in (topic_idea.source_refs if topic_idea else [])
+            if (trend := store.get_trend_item(ref)) is not None and trend.id not in used_trends
+        ]
+        trend = referenced_trends[0] if referenced_trends else (
+            pick_trend_for_topic(trends, topic=topic, used_trend_ids=used_trends) if use_trends else None
+        )
         if trend:
             used_trends.add(trend.id)
         elif use_trends:
             warnings.append(f"No unused trend left for slot {index + 1}; planned evergreen post.")
-        angle = trend.leadpoet_angle if trend else evergreen_angle(topic, index)
+        angle = topic_idea.angle if topic_idea else (trend.leadpoet_angle if trend else evergreen_angle(topic, index))
+        context_lines = ["Weekly content calendar suggestion. Make it worth posting on its own."]
+        if topic_idea:
+            context_lines.append(f"Why this topic is worth posting now: {topic_idea.why_now}")
+        if extra_instruction and extra_instruction.strip():
+            context_lines.append(f"Weekly plan instruction: {extra_instruction.strip()}")
         request = DraftRequest(
             platform="x",
             topic=topic,
-            post_type=default_post_type,
+            post_type=post_type,
             angle=angle,
-            extra_context="Weekly content calendar suggestion. Make it worth posting on its own.",
+            extra_context="\n".join(context_lines),
             length_mode=length_mode,
             use_trends=bool(trend),
             trend_ids=[trend.id] if trend else [],
             use_patterns=use_patterns,
+            prompt_profile="natural",
         )
         drafts = generator.generate(
             request,
@@ -127,9 +151,10 @@ def plan_week_x(
             ContentQueueItem(
                 platform="x",
                 draft_id=draft.id,
+                topic_idea_id=topic_idea.id if topic_idea else None,
                 text=draft.text,
                 topic=topic,
-                post_type=default_post_type,
+                post_type=post_type,
                 angle=angle,
                 trend_ids=[trend.id] if trend else [],
                 scheduled_at=scheduled_times[index].isoformat(),
@@ -138,6 +163,8 @@ def plan_week_x(
             )
         )
         queued.append(item)
+        if topic_idea:
+            store.mark_topic_idea_status(topic_idea.id, "used")
     return PlanWeekResult(queued=queued, warnings=warnings)
 
 
@@ -155,22 +182,35 @@ def create_post_x(
     pattern_ids: list[str] | None = None,
     trend_ids: list[str] | None = None,
     length_mode: str = "standard",
+    topic_idea_id: str | None = None,
 ) -> CreatePostResult:
     instruction = instruction.strip()
+    topic_idea = store.get_topic_idea(topic_idea_id) if topic_idea_id else None
+    if topic_idea and not instruction:
+        instruction = topic_idea.angle
     if not instruction:
         raise ValueError("Post idea / instruction is required.")
-    topic = topic.strip() or "uncategorized"
-    post_type = post_type.strip() or "founder_insight"
+    topic = topic_idea.topic if topic_idea else (topic.strip() or "uncategorized")
+    post_type = topic_idea.post_type if topic_idea else (post_type.strip() or "founder_insight")
     adapter = get_x_adapter()
     post_type = adapter.normalize_post_type(post_type)
     adapter.validate_post_type(post_type)
 
     warnings: list[str] = []
+    if topic_idea_id and not topic_idea:
+        warnings.append("The selected topic idea was not found; used the typed instruction instead.")
     selected_trends = [
         trend for trend_id in trend_ids or []
         if (trend := store.get_trend_item(trend_id)) is not None
     ]
     missing_trend_count = len(trend_ids or []) - len(selected_trends)
+    if topic_idea:
+        selected_ids = {trend.id for trend in selected_trends}
+        selected_trends.extend(
+            trend
+            for ref in topic_idea.source_refs
+            if (trend := store.get_trend_item(ref)) is not None and trend.id not in selected_ids
+        )
     if missing_trend_count:
         warnings.append("Some selected trends were not found and were skipped.")
     if not selected_trends and use_trends:
@@ -184,6 +224,8 @@ def create_post_x(
     ]
     if extra_context and extra_context.strip():
         context_parts.append(f"Extra instruction: {extra_context.strip()}")
+    if topic_idea:
+        context_parts.append(f"Why this topic is worth posting now: {topic_idea.why_now}")
     request = DraftRequest(
         platform="x",
         topic=topic,
@@ -195,6 +237,7 @@ def create_post_x(
         trend_ids=[trend.id for trend in selected_trends],
         use_patterns=use_patterns,
         pattern_ids=pattern_ids or [],
+        prompt_profile="natural",
     )
     draft = generator.generate(request, variants=1)[0]
     warnings.extend(f"Quality warning: {warning}" for warning in draft_quality_warnings(draft))
@@ -203,6 +246,7 @@ def create_post_x(
         ContentQueueItem(
             platform="x",
             draft_id=draft.id,
+            topic_idea_id=topic_idea.id if topic_idea else None,
             text=draft.text,
             topic=topic,
             post_type=post_type,
@@ -217,6 +261,8 @@ def create_post_x(
             ),
         )
     )
+    if topic_idea:
+        store.mark_topic_idea_status(topic_idea.id, "used")
     return CreatePostResult(item=item, draft=draft, warnings=warnings)
 
 

@@ -121,40 +121,60 @@ class ContextManager:
         post_type: str,
         max_examples: int,
     ):
-        exact = self.store.top_examples(
+        selected = self.store.top_examples(
             platform=platform,
             topic=topic,
             post_type=post_type,
             limit=max_examples,
             imitate_only=True,
         )
-        if len(exact) >= max_examples:
-            return exact
-        broader = self.store.top_examples(
-            platform=platform,
-            post_type=post_type,
-            limit=max_examples,
-            imitate_only=True,
-        )
-        seen = {post.id for post in exact}
-        for post in broader:
-            if post.id not in seen:
-                exact.append(post)
-                seen.add(post.id)
-            if len(exact) >= max_examples:
-                return exact
-        broad_examples = self.store.top_examples(
-            platform=platform,
-            limit=max_examples,
-            imitate_only=True,
-        )
-        for post in broad_examples:
-            if post.id not in seen:
-                exact.append(post)
-                seen.add(post.id)
-            if len(exact) >= max_examples:
+        seen = {post.id for post in selected}
+
+        def add(posts) -> bool:
+            for post in posts:
+                if post.id not in seen:
+                    selected.append(post)
+                    seen.add(post.id)
+                if len(selected) >= max_examples:
+                    return True
+            return False
+
+        explicit_pools = [
+            self.store.top_examples(
+                platform=platform,
+                post_type=post_type,
+                limit=max_examples,
+                imitate_only=True,
+            ),
+            self.store.top_examples(platform=platform, limit=max_examples, imitate_only=True),
+        ]
+        for pool in explicit_pools:
+            if add(pool):
+                return selected
+
+        # Autopilot fallback: authored posts still carry far more voice signal than a
+        # generic style prompt. Explicit Voice Examples always win; high-performing
+        # relevant posts only fill uncovered slots.
+        observed_pools = [
+            self.store.top_examples(
+                platform=platform,
+                topic=topic,
+                post_type=post_type,
+                limit=max_examples,
+                imitate_only=False,
+            ),
+            self.store.top_examples(
+                platform=platform,
+                post_type=post_type,
+                limit=max_examples,
+                imitate_only=False,
+            ),
+            self.store.top_examples(platform=platform, limit=max_examples, imitate_only=False),
+        ]
+        for pool in observed_pools:
+            if add(pool):
                 break
-        return exact
+        return selected
 
 
 def _writing_shapes_from_notes(notes) -> list[str]:

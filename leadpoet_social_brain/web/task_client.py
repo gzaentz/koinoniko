@@ -27,6 +27,14 @@ TASK_DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "refresh-patterns": {"limit": 5, "window": "weekly"},
     "refresh-patterns-weekly": {"limit": 5, "windows": ["weekly", "monthly"]},
+    "refresh-topics": {"limit": 10},
+    "autopilot-weekly": {
+        "posts": 5,
+        "topic_limit": 10,
+        "use_trends": True,
+        "use_patterns": True,
+        "length_mode": "standard",
+    },
 }
 
 

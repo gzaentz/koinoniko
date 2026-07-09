@@ -29,14 +29,16 @@ Koinoniko currently supports:
 - tracking compact Voice Coverage and Active Writing Rules
 - generating X drafts through a configured LLM provider
 - using OpenRouter as the built-in provider
-- routing the default quality pipeline through configurable strategy, writing, and review models
+- routing the default two-call writing/review pipeline through configurable models, with strategist routing retained for Topic Scout and legacy audits
 - planning a weekly queue of X posts for review
 - editing, revising, approving, scheduling, and posting approved queue items
 - storing draft-to-post linkage and generation influences
 - refreshing AI, sales, and lead generation trends through ScrapingDog
+- generating a ranked Topics feed from saved context, authored posts, performance, trends, and recent queue coverage
 - showing compact trend cards with a short "what happened" summary and deeper source details in the modal
 - storing optional Pattern Scout examples for reusable post mechanics
-- selecting a trend or saved Pattern Scout mechanic when creating a post
+- selecting a Topic, trend, or saved Pattern Scout mechanic when creating a post
+- planning a review-ready week on autopilot, including topic and angle selection, without publishing automatically
 - asking Koinoniko questions about posts, Voice, trends, patterns, queue quality, and what is working
 - showing Account connection status without exposing secret values
 - running protected Railway Cron tasks for publishing due posts, post sync, metrics sync, trend refresh, and pattern refresh
@@ -184,7 +186,7 @@ The command prompts for the password and stores only a salted PBKDF2 hash. Reset
 
 The UI has four main areas:
 
-- `Dashboard`: daily/weekly trends, daily/weekly patterns, and the full X posts table
+- `Dashboard`: daily/weekly trends, ranked Topics, daily/weekly patterns, and the full X posts table
 - `Queue`: review, edit, AI revise, approve, schedule, and post approved content
 - `Voice`: compact status chips, current Koinoniko Voice, selected Voice Examples, and collapsed suggested examples
 - `Account`: connection status, data sync actions, model routing, and account/security controls
@@ -334,7 +336,7 @@ Then open `Account -> Model Routing` and set:
 - Natural writer model
 - Evaluator model
 
-All generation uses one quality-reviewed pipeline: strategist -> natural writer -> evaluator. The strategist turns the request and selected context into a compact Post Intent, the writer drafts naturally from that intent, and the evaluator chooses or revises the final version before it is saved.
+Normal Create Post, CLI generation, and Autopilot planning use a two-call natural pipeline: natural writer -> evaluator. The writer gets the original brief, authored examples, saved facts, selected sources, and evidence limits without the legacy structure/rhythm/product-placement matrices. The evaluator ranks the options and preserves a passing winner verbatim; it rewrites only when every option has a concrete defect. Strategist routing remains available for Topic Scout and the legacy naturalness-audit pipeline.
 
 Role models are optional. If a role is blank, it falls back to the default model. If no Account model is saved, env fallbacks such as `SOCIAL_BRAIN_DEFAULT_MODEL` or legacy `OPENROUTER_MODEL` are used.
 
@@ -470,6 +472,8 @@ POST /tasks/publish-due-x
 POST /tasks/refresh-trends
 POST /tasks/refresh-patterns
 POST /tasks/refresh-patterns-weekly
+POST /tasks/refresh-topics
+POST /tasks/autopilot-weekly
 ```
 
 They require:
@@ -488,6 +492,8 @@ X metrics sync:    every 2 hours           15 */2 * * *
 Publish due posts: every 5 minutes        */5 * * * *
 Trend refresh:     daily, 06:25 UTC        25 6 * * *
 Pattern refresh:   weekly, Mon 06:40 UTC   40 6 * * 1
+Topic refresh:     weekly, Mon 06:50 UTC   50 6 * * 1
+Autopilot planning: weekly, Mon 07:00 UTC    0 7 * * 1
 ```
 
 Create Railway Cron services that run and exit:
@@ -778,7 +784,7 @@ Length forms are format presets, not separate quality modes:
 - `standard`: default X shape, target around 140-260 chars, max 280 chars
 - `long`: long-form X post, target around 400-900 chars, max 1200 chars
 
-The same strategist -> writer -> evaluator pipeline runs for every length form. In the web UI, choose the form from the Create Post or Weekly Plan modal.
+The same natural writer -> evaluator pipeline runs for every length form. In the web UI, choose the form from the Create Post or Weekly Plan modal.
 Long-form drafts can be reviewed and queued inside Koinoniko; actual posting depends on the connected X account and API permissions accepting longer text.
 
 Use `--max-chars` only when you want to override the default X length behavior:
@@ -826,24 +832,22 @@ provider. It also warns when one planned assignment is too concentrated across t
 In the web UI, `Create Post` includes:
 
 - topic and post type combo inputs
+- `Topic idea to use`, generated from the workspace's own evidence
 - optional schedule time
 - `Trend to build from`
 - `Pattern to use`
 - selected source chips that can be removed before generation
 
-Create Post uses the same quality-reviewed pipeline. A hidden strategist first turns the
-user's idea and selected context into a structured Post Intent, including the thesis,
-concrete detail, post shape, and evidence boundary. The natural writer drafts from that
-intent, and the evaluator rewrites if the result is generic, unsupported, or too polished.
-Active Writing Rules also repair obvious violations such as missing Leadpoet positioning,
-blocked phrases, formulaic `Leadpoet is...` / `For Leadpoet...` / `Leadpoet should...`
-style modal phrasing, `That is where Leadpoet...` wrappers, `That is the Leadpoet...`
-closers, `The Leadpoet ... is...` definitions, repeated `Leadpoet belongs...` style
-fallback lead-ins, repeated direct `Leadpoet owns...` / `Leadpoet makes...` style
-subject-verb lead-ins, or em dashes.
-The natural writer also receives a per-option variation map so draft options use different
-structures, layouts, rhythms, product mention lanes, product placement targets, and
-product mention syntax targets before the evaluator chooses the final post.
+Create Post uses the two-call natural writer -> evaluator pipeline. The original idea and
+authored examples control expression; saved context and the compact intent object set the
+evidence boundary. When no posts have been explicitly marked as Voice Examples, the system
+automatically fills the calibration set with the most relevant high-performing authored
+posts. Explicit Voice Examples always take precedence.
+
+The evaluator selects before editing. A passing writer option is saved verbatim. It only
+rewrites when every option has a concrete factual, clarity, avoid-phrase, or length defect.
+The detailed structure/rhythm/product-placement matrix and automatic style-repair loop remain
+available to the legacy naturalness audit, but they no longer shape normal or Autopilot copy.
 Recent queued and published posts, including cross-topic queue context after same-topic
 matches, add anti-sameness context so new drafts avoid repeating their openings, closers,
 layouts, and Leadpoet grammar fingerprints. Newer queue items are prioritized so fresh batch
@@ -853,9 +857,13 @@ During batch audits, the generator also summarizes all prior batch output gramma
 layout, then treats any Leadpoet grammar or layout fingerprint used 3+ times as saturated.
 The user only reviews the final queued post, not the internal brief.
 
-`Use in Post` on a trend or `Use Pattern` on a pattern opens Create Post with that source preselected. Generated output still enters the review queue; it does not publish automatically.
+`Use in Post` on a Topic or trend, or `Use Pattern` on a pattern, opens Create Post with that source preselected. Generated output still enters the review queue; it does not publish automatically.
 
 ## Weekly Content Queue
+
+The web planner defaults to `Autopilot: choose topics and angles`. With Autopilot on, Koinoniko refreshes the Topics feed, selects the highest-priority unused ideas, carries any referenced trends into generation, and creates the scheduled week in `needs_review`. The user can still set post count, cadence, length, trends/pattern use, or an optional instruction. Turn Autopilot off to use a manual topic mix.
+
+The protected `autopilot-weekly` task provides the same low-touch workflow for Railway Cron. It is idempotent for a calendar week: if non-skipped queue items already exist in that week, it returns without creating duplicates. It never approves or publishes posts.
 
 Create a reviewable weekly queue:
 

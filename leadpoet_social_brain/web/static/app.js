@@ -25,6 +25,7 @@ const state = {
   selectedTrendWindow: "daily",
   selectedPatternWindow: "weekly",
   selectedTrendForCreate: null,
+  selectedTopicIdeaForCreate: null,
   selectedPatternForCreate: null,
   patternDetail: null,
   draggedQueueId: "",
@@ -325,7 +326,7 @@ function updateGlobalControls() {
   $("reviewNavBadge").textContent = String(reviewCount);
   $("reviewNavBadge").classList.toggle("muted-badge", reviewCount === 0);
 
-  [$("reviewAddButton"), $("generatePostButton")].forEach((button) => {
+  [$("reviewAddButton"), $("generatePostButton"), $("refreshTopicsButton"), $("planWeekButton")].forEach((button) => {
     button.disabled = !state.status?.provider_configured;
     button.title = state.status?.provider_configured ? "" : "Provider-backed generation is not connected.";
   });
@@ -345,6 +346,7 @@ function renderDashboard() {
   }
   renderRecentPosts();
   renderDashboardTrends();
+  renderDashboardTopics();
   renderDashboardPatterns();
 }
 
@@ -1045,6 +1047,70 @@ function renderDashboardTrends() {
   renderTrendList("trendList", trends, `No ${state.selectedTrendWindow} trends loaded yet.`);
 }
 
+function renderDashboardTopics() {
+  const list = $("topicIdeaList");
+  if (!list) return;
+  if (!state.dashboard) {
+    list.innerHTML = skeletonCards(2, "topic-idea-card");
+    return;
+  }
+  const ideas = state.dashboard.topic_ideas || [];
+  list.innerHTML = ideas.length
+    ? ideas.slice(0, 6).map(topicIdeaCard).join("")
+    : `<p class="muted">No topic ideas yet. Refresh once and Koinoniko will turn your posts, context, and trends into angles.</p>`;
+  list.querySelectorAll("[data-topic-action]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      if (button.dataset.topicAction === "use") openTopicIdeaInPost(button.dataset.topicId, event);
+      if (button.dataset.topicAction === "dismiss") window.dismissTopicIdea(event, button.dataset.topicId);
+    });
+  });
+}
+
+function topicIdeaCard(idea) {
+  return `
+    <article class="topic-idea-card">
+      <div class="meta-row">
+        <span>${escapeHtml(topicLabel(idea.topic || ""))}</span>
+        <span>${escapeHtml(label(idea.source_type || "evergreen"))}</span>
+        <span>Priority ${escapeHtml(String(idea.priority || 0))}</span>
+      </div>
+      <h3>${escapeHtml(idea.title || "Untitled topic")}</h3>
+      <p class="topic-angle">${escapeHtml(idea.angle || "")}</p>
+      ${idea.why_now ? `<p class="topic-why"><strong>Why now:</strong> ${escapeHtml(idea.why_now)}</p>` : ""}
+      <div class="actions left">
+        <button class="secondary" data-topic-action="use" data-topic-id="${escapeAttr(idea.id)}">Use in Post</button>
+        <button class="quiet-button" data-topic-action="dismiss" data-topic-id="${escapeAttr(idea.id)}">Dismiss</button>
+      </div>
+    </article>
+  `;
+}
+
+async function refreshTopics() {
+  const payload = await api("/api/topics/refresh", {
+    method: "POST",
+    body: JSON.stringify({ limit: 10 }),
+  });
+  if (state.dashboard) state.dashboard.topic_ideas = payload.items || [];
+  renderDashboardTopics();
+  renderCreatePostSourceSelectors();
+  const warnings = payload.warnings || [];
+  showMessage(warnings[0] || `Generated ${(payload.items || []).length} topic ideas.`);
+}
+
+window.dismissTopicIdea = (event, id) => {
+  event?.preventDefault();
+  event?.stopPropagation();
+  runButton(event?.currentTarget, "Dismissing...", async () => {
+    await api(`/api/topics/${encodeURIComponent(id)}/dismiss`, { method: "POST", body: "{}" });
+    if (state.dashboard) {
+      state.dashboard.topic_ideas = (state.dashboard.topic_ideas || []).filter((idea) => idea.id !== id);
+    }
+    if (state.selectedTopicIdeaForCreate?.id === id) state.selectedTopicIdeaForCreate = null;
+    renderDashboardTopics();
+    renderCreatePostSourceSelectors();
+  });
+};
+
 function renderTrendList(targetId, trends, emptyText) {
   $(targetId).innerHTML = trends.length
     ? trends.slice(0, 5).map(dashboardTrendRow).join("")
@@ -1225,12 +1291,36 @@ window.useTrendInPost = (event, id) => {
   const trend = findTrendItem(id);
   if (!trend) return;
   state.selectedTrendForCreate = trend;
+  state.selectedTopicIdeaForCreate = null;
   state.selectedPatternForCreate = null;
   $("createPostInstruction").value = trend.leadpoet_angle || trend.title || "";
   $("createPostTopic").value = trend.topic || "uncategorized";
   renderCreatePostPatternHint();
   openCreatePostModal();
 };
+
+function openTopicIdeaInPost(id, event = null) {
+  event?.stopPropagation();
+  const idea = findTopicIdea(id);
+  if (!idea) return false;
+  state.selectedTopicIdeaForCreate = idea;
+  state.selectedTrendForCreate = null;
+  $("createPostInstruction").value = idea.angle || idea.title || "";
+  $("createPostTopic").value = idea.topic || "uncategorized";
+  $("createPostType").value = idea.post_type || "founder_insight";
+  renderCreatePostPatternHint();
+  openCreatePostModal();
+  return true;
+}
+
+window.useTopicIdeaInPost = (event, id) => {
+  openTopicIdeaInPost(id, event);
+};
+
+function findTopicIdea(id) {
+  if (!id) return null;
+  return (state.dashboard?.topic_ideas || []).find((idea) => idea.id === id) || null;
+}
 
 function findTrendItem(id) {
   if (!id) return null;
@@ -1264,6 +1354,13 @@ function allCreatePostTrends() {
   return uniqueById(trends);
 }
 
+function allCreatePostTopicIdeas() {
+  return uniqueById([
+    ...(state.selectedTopicIdeaForCreate ? [state.selectedTopicIdeaForCreate] : []),
+    ...(state.dashboard?.topic_ideas || []),
+  ]);
+}
+
 function savedCreatePostPatterns() {
   return uniqueById([
     ...(state.selectedPatternForCreate ? [state.selectedPatternForCreate] : []),
@@ -1285,9 +1382,19 @@ function optionHtml(value, text) {
 }
 
 function renderCreatePostSourceSelectors() {
+  const topicIdeaSelect = $("createPostTopicIdea");
   const trendSelect = $("createPostTrend");
   const patternSelect = $("createPostPattern");
-  if (!trendSelect || !patternSelect) return;
+  if (!topicIdeaSelect || !trendSelect || !patternSelect) return;
+
+  const selectedTopicIdeaId = state.selectedTopicIdeaForCreate?.id || topicIdeaSelect.value || "";
+  const topicIdeas = allCreatePostTopicIdeas();
+  topicIdeaSelect.innerHTML = [
+    optionHtml("", topicIdeas.length ? "No topic idea" : "No generated topic ideas"),
+    ...topicIdeas.map((idea) => optionHtml(idea.id, `${topicLabel(idea.topic || "")} - ${idea.title || "Untitled topic"}`)),
+  ].join("");
+  topicIdeaSelect.value = topicIdeas.some((idea) => idea.id === selectedTopicIdeaId) ? selectedTopicIdeaId : "";
+  topicIdeaSelect.disabled = !topicIdeas.length;
 
   const selectedTrendId = state.selectedTrendForCreate?.id || trendSelect.value || "";
   const trends = allCreatePostTrends();
@@ -1323,9 +1430,19 @@ function patternDropdownLabel(pattern) {
 }
 
 function syncCreatePostSelectionsFromInputs() {
+  state.selectedTopicIdeaForCreate = findTopicIdea($("createPostTopicIdea")?.value || "") || null;
   state.selectedTrendForCreate = findTrendItem($("createPostTrend")?.value || "") || null;
   state.selectedPatternForCreate = findPatternItem($("createPostPattern")?.value || "") || null;
   renderCreatePostPatternHint();
+}
+
+function applyTopicIdeaSelection() {
+  syncCreatePostSelectionsFromInputs();
+  const idea = state.selectedTopicIdeaForCreate;
+  if (!idea) return;
+  $("createPostInstruction").value = idea.angle || idea.title || "";
+  $("createPostTopic").value = idea.topic || "uncategorized";
+  $("createPostType").value = idea.post_type || "founder_insight";
 }
 
 window.openPatternDetailsFromKey = (event, id) => {
@@ -1391,8 +1508,18 @@ function renderCreatePostPatternHint() {
   const hint = $("createPostPatternHint");
   if (!hint) return;
   const trend = state.selectedTrendForCreate;
+  const topicIdea = state.selectedTopicIdeaForCreate;
   const pattern = state.selectedPatternForCreate;
   const rows = [];
+  if (topicIdea) {
+    rows.push(`
+      <div>
+        <strong>${escapeHtml(topicIdea.title || "Selected topic")}</strong>
+        <span>${escapeHtml(topicIdea.why_now || topicIdea.angle || "Generated topic idea")}</span>
+      </div>
+      <button class="quiet-button" type="button" onclick="clearSelectedTopicIdea(event)">Remove</button>
+    `);
+  }
   if (trend) {
     rows.push(`
       <div>
@@ -1424,6 +1551,13 @@ window.clearSelectedTrend = (event) => {
   event?.stopPropagation();
   state.selectedTrendForCreate = null;
   if ($("createPostTrend")) $("createPostTrend").value = "";
+  renderCreatePostPatternHint();
+};
+
+window.clearSelectedTopicIdea = (event) => {
+  event?.stopPropagation();
+  state.selectedTopicIdeaForCreate = null;
+  if ($("createPostTopicIdea")) $("createPostTopicIdea").value = "";
   renderCreatePostPatternHint();
 };
 
@@ -1969,6 +2103,7 @@ async function createPost() {
   const patternId = state.selectedPatternForCreate?.id || "";
   const requestBody = {
     instruction,
+    topic_idea_id: state.selectedTopicIdeaForCreate?.id || "",
     topic: $("createPostTopic").value || "uncategorized",
     post_type: $("createPostType").value || "founder_insight",
     length_mode: createPostLengthValue(),
@@ -2007,7 +2142,9 @@ async function createPost() {
   setCreatePostFieldValue("length", "standard");
   if ($("createPostTrend")) $("createPostTrend").value = "";
   if ($("createPostPattern")) $("createPostPattern").value = "";
+  if ($("createPostTopicIdea")) $("createPostTopicIdea").value = "";
   state.selectedTrendForCreate = null;
+  state.selectedTopicIdeaForCreate = null;
   state.selectedPatternForCreate = null;
   renderCreatePostPatternHint();
   if (createdQueueId) {
@@ -2025,6 +2162,8 @@ async function planWeek() {
     body: JSON.stringify({
       week_start: $("planWeekStart").value,
       posts: Number($("planPosts").value || 5),
+      autopilot: $("planAutopilot").checked,
+      refresh_topics: $("planAutopilot").checked,
       topic_mix: $("planTopicMix").value,
       default_post_type: $("planPostType").value,
       length_mode: $("planLength").value || "standard",
@@ -2045,6 +2184,16 @@ async function planWeek() {
   state.view = "reviewer";
   setView("reviewer");
   await refresh();
+}
+
+function syncPlanAutopilotState() {
+  const enabled = Boolean($("planAutopilot")?.checked);
+  const topicMix = $("planTopicMix");
+  if (topicMix) {
+    topicMix.disabled = enabled;
+    topicMix.title = enabled ? "Autopilot will choose specific topics and angles." : "";
+  }
+  $("planTopicMixField")?.classList.toggle("muted-control", enabled);
 }
 
 async function syncPosts() {
@@ -2171,6 +2320,7 @@ function renderDashboardLoading() {
   renderRecentPostSortHeaders();
   $("trendList").innerHTML = skeletonCards(2, "trend-row");
   $("patternList").innerHTML = skeletonCards(2, "pattern-card");
+  $("topicIdeaList").innerHTML = skeletonCards(2, "topic-idea-card");
   $("recentPostsTable").innerHTML = skeletonTableRows(6);
 }
 
@@ -3570,6 +3720,7 @@ function setup() {
   });
   $("reviewAddPlanButton").addEventListener("click", () => {
     closeReviewAddMenu();
+    syncPlanAutopilotState();
     openModal("planModal");
   });
   document.addEventListener("click", closeReviewAddMenu);
@@ -3608,6 +3759,8 @@ function setup() {
   document.addEventListener("keydown", handleGlobalEscape);
   $("generatePostButton").addEventListener("click", (event) => runButton(event.currentTarget, "Generating...", createPost));
   $("planWeekButton").addEventListener("click", (event) => runButton(event.currentTarget, "Creating...", planWeek));
+  $("planAutopilot").addEventListener("change", syncPlanAutopilotState);
+  $("refreshTopicsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Refreshing...", refreshTopics));
   $("trendDailyButton").addEventListener("click", () => {
     state.selectedTrendWindow = "daily";
     renderDashboardTrends();
@@ -3624,6 +3777,7 @@ function setup() {
     state.selectedPatternWindow = "monthly";
     renderDashboardPatterns();
   });
+  $("createPostTopicIdea").addEventListener("change", applyTopicIdeaSelection);
   $("createPostTrend").addEventListener("change", syncCreatePostSelectionsFromInputs);
   $("createPostPattern").addEventListener("change", syncCreatePostSelectionsFromInputs);
   $("loadTrendsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Loading...", loadTrends));

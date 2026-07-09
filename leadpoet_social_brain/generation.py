@@ -22,6 +22,7 @@ from leadpoet_social_brain.voice import (
     load_positioning_rules,
     load_review_rules,
     load_voice_rules_override,
+    prompt_safe_positioning_rule,
     review_filter_skill_content,
 )
 
@@ -484,34 +485,50 @@ class SocialBrainGenerator:
         assert self.provider is not None
         adapter = self._adapter_for(request.platform)
         recent_output_context = build_recent_output_context(self.store, request, extra_texts=recent_output_texts)
-        strategy_prompt = build_strategy_prompt(
-            request,
-            bundle,
-            trends=trends,
-            patterns=patterns,
-            avoid_phrases=avoid_phrases,
-            active_rules=active_rules,
-            recent_outputs_section=recent_output_context["section"],
-        )
-        strategy_raw = generate_with_provider(
-            self.provider,
-            strategy_prompt,
-            variants=1,
-            model=model_routing.strategist,
-        )[0]
-        strategy_summary = parse_strategy_summary(strategy_raw)
-        writer_prompt = build_best_writer_prompt(
-            request,
-            bundle,
-            skills=skills,
-            trends=trends,
-            patterns=patterns,
-            avoid_phrases=avoid_phrases,
-            active_rules=active_rules,
-            strategy_summary=strategy_summary,
-            max_chars=max_chars,
-            recent_outputs_section=recent_output_context["section"],
-        )
+        if request.prompt_profile == "natural":
+            strategy_summary = natural_strategy_summary(request, trends=trends, patterns=patterns)
+        else:
+            strategy_prompt = build_strategy_prompt(
+                request,
+                bundle,
+                trends=trends,
+                patterns=patterns,
+                avoid_phrases=avoid_phrases,
+                active_rules=active_rules,
+                recent_outputs_section=recent_output_context["section"],
+            )
+            strategy_raw = generate_with_provider(
+                self.provider,
+                strategy_prompt,
+                variants=1,
+                model=model_routing.strategist,
+            )[0]
+            strategy_summary = parse_strategy_summary(strategy_raw)
+        if request.prompt_profile == "natural":
+            writer_prompt = build_natural_writer_prompt(
+                request,
+                bundle,
+                trends=trends,
+                patterns=patterns,
+                avoid_phrases=avoid_phrases,
+                active_rules=active_rules,
+                strategy_summary=strategy_summary,
+                max_chars=max_chars,
+                recent_outputs_section=recent_output_context["section"],
+            )
+        else:
+            writer_prompt = build_best_writer_prompt(
+                request,
+                bundle,
+                skills=skills,
+                trends=trends,
+                patterns=patterns,
+                avoid_phrases=avoid_phrases,
+                active_rules=active_rules,
+                strategy_summary=strategy_summary,
+                max_chars=max_chars,
+                recent_outputs_section=recent_output_context["section"],
+            )
         draft_options = generate_with_provider(
             self.provider,
             writer_prompt,
@@ -545,24 +562,36 @@ class SocialBrainGenerator:
             )
             if not cleaned_options:
                 raise ValueError("Provider did not return usable draft text.")
-        evaluation_prompt = build_evaluation_prompt(
-            request,
-            skills=skills,
-            strategy_summary=strategy_summary,
-            draft_options=cleaned_options,
-            trends=trends,
-            avoid_phrases=avoid_phrases,
-            active_rules=active_rules,
-            max_chars=max_chars,
-            recent_outputs_section=recent_output_context["section"],
-        )
+        if request.prompt_profile == "natural":
+            evaluation_prompt = build_natural_evaluation_prompt(
+                request,
+                strategy_summary=strategy_summary,
+                draft_options=cleaned_options,
+                avoid_phrases=avoid_phrases,
+                max_chars=max_chars,
+            )
+        else:
+            evaluation_prompt = build_evaluation_prompt(
+                request,
+                skills=skills,
+                strategy_summary=strategy_summary,
+                draft_options=cleaned_options,
+                trends=trends,
+                avoid_phrases=avoid_phrases,
+                active_rules=active_rules,
+                max_chars=max_chars,
+                recent_outputs_section=recent_output_context["section"],
+            )
         evaluation_raw = generate_with_provider(
             self.provider,
             evaluation_prompt,
             variants=1,
             model=model_routing.evaluator,
         )[0]
-        final_text, quality_notes, evaluation = parse_evaluation_result(evaluation_raw, cleaned_options)
+        if request.prompt_profile == "natural":
+            final_text, quality_notes, evaluation = parse_natural_evaluation_result(evaluation_raw, cleaned_options)
+        else:
+            final_text, quality_notes, evaluation = parse_evaluation_result(evaluation_raw, cleaned_options)
         text = fit_generated_text_to_limit(
             self.provider,
             final_text,
@@ -570,20 +599,23 @@ class SocialBrainGenerator:
             model=model_routing.natural_writer,
             repair_context="quality-reviewed final X post",
         )
-        text, rule_warnings = repair_draft_against_rules(
-            self.provider,
-            text,
-            request,
-            bundle,
-            trends=trends,
-            avoid_phrases=avoid_phrases,
-            active_rules=active_rules,
-            max_chars=max_chars,
-            model=model_routing.natural_writer,
-            recent_outputs_section=recent_output_context["section"],
-            recent_output_rows=recent_output_context["rows"],
-            recent_output_batch_summary=recent_output_context["batch_summary"],
-        )
+        if request.prompt_profile == "natural":
+            rule_warnings: list[str] = []
+        else:
+            text, rule_warnings = repair_draft_against_rules(
+                self.provider,
+                text,
+                request,
+                bundle,
+                trends=trends,
+                avoid_phrases=avoid_phrases,
+                active_rules=active_rules,
+                max_chars=max_chars,
+                model=model_routing.natural_writer,
+                recent_outputs_section=recent_output_context["section"],
+                recent_output_rows=recent_output_context["rows"],
+                recent_output_batch_summary=recent_output_context["batch_summary"],
+            )
         repaired_successfully = text != final_text and not rule_warnings
         if rule_warnings:
             existing_warnings = evaluation.get("warnings") if isinstance(evaluation, dict) else []
@@ -631,7 +663,7 @@ class SocialBrainGenerator:
                 model_routing=model_routing,
                 models_used={
                     "default": model_routing.default,
-                    "strategist": model_routing.strategist,
+                    "strategist": None if request.prompt_profile == "natural" else model_routing.strategist,
                     "natural_writer": model_routing.natural_writer,
                     "evaluator": model_routing.evaluator,
                 },
@@ -1636,6 +1668,7 @@ def build_strategy_prompt(
 Do not write the post yet. Produce the structured Post Intent that the natural writer will use.
 
 Your job:
+- Keep the intent compact. Give the writer room to find natural phrasing instead of prescribing every sentence.
 - Turn the user's raw idea into a clear thesis, angle, and post shape.
 - Ground the post in supplied context, examples, trends, patterns, or the user's exact words.
 - If using a trend, company, product, or case study, name the exact mechanism that transfers into the saved context.
@@ -1730,7 +1763,13 @@ def build_best_writer_prompt(
     option_variation_section = draft_option_variation_matrix(request, trends, count=3)
     return f"""Write 3 X draft options for this workspace.
 
-Prioritize exact Voice Examples, worked-reason notes, and the writing skills below over generic marketing instincts.
+Writing north star:
+- Write from the user's actual idea and the author's examples, not from the prompt machinery.
+- The strategist supplies the factual boundary and core point, not a sentence-by-sentence outline.
+- A strong option should feel like a sharp founder opened ChatGPT, gave one good brief, and posted the result with minimal editing.
+- Prefer one memorable point over comprehensive coverage. Do not cram every style suggestion into one post.
+
+Prioritize authored examples, explicit Voice notes, and saved facts over generic marketing instincts.
 
 Hidden Post Intent from the strategist:
 {json.dumps(strategy_summary, indent=2)}
@@ -1797,6 +1836,117 @@ Each option must be {max_chars} characters or fewer and end as a complete though
 Return only draft post text variants. Separate variants with a line containing only ---."""
 
 
+def build_natural_writer_prompt(
+    request: DraftRequest,
+    bundle: ContextBundle,
+    *,
+    trends: list[TrendItem],
+    patterns: list[ViralPattern],
+    strategy_summary: dict[str, object],
+    max_chars: int,
+    avoid_phrases: list[str] | None = None,
+    active_rules: dict[str, list[str]] | None = None,
+    recent_outputs_section: str = "",
+) -> str:
+    examples_text = "\n\n".join(_format_example(post, bundle) for post in bundle.examples)
+    context = positioning_context_prompt_text(bundle.positioning_sections)
+    trends_text = "\n".join(
+        f"- {trend.title}: {trend.summary} Useful angle: {trend_angle_for_generation(trend)}"
+        for trend in trends
+    )
+    patterns_text = "\n".join(
+        f"- {(pattern.pattern_name or pattern.structure or 'Observed pattern')}: "
+        f"{pattern.adaptation_rule or pattern.why_it_worked or pattern.source_summary or 'Use the structure, not the wording.'}"
+        for pattern in patterns
+    )
+    positioning_rules = (active_rules or {}).get("positioning_rules", [])
+    positioning_text = "\n".join(f"- {prompt_safe_positioning_rule(rule)}" for rule in positioning_rules)
+    avoid_section = avoid_phrases_prompt_section(avoid_phrases or [])
+    return f"""Write 3 X draft options for this workspace.
+
+Goal: produce a post this founder would actually publish with little or no editing.
+
+Original brief:
+- Topic: {request.topic}
+- Post type: {request.post_type}
+- Idea: {request.angle or "choose the strongest grounded point"}
+- Extra context: {request.extra_context or "none"}
+- Maximum length: {max_chars} characters
+
+Use the strategist intent only as a fact boundary and a statement of the core point. The original brief and authored examples control the expression:
+{json.dumps(strategy_summary, indent=2)}
+
+Authored examples:
+{examples_text or "No authored examples are available. Keep the language plain and direct."}
+
+Saved facts and positioning:
+{context or "- No additional saved facts."}
+{positioning_text or "- No additional positioning rules."}
+
+Selected timely context:
+{trends_text or "- None selected."}
+
+Optional pattern mechanics:
+{patterns_text or "- None selected."}
+
+{recent_outputs_section}
+
+Writing standard:
+- Make one clear, specific point. Do not try to cover the whole category.
+- Match the authored examples' cadence and level of polish without copying their wording.
+- Prefer the user's direct framing when it is already strong.
+- Use only the few facts needed to make the point. Do not name the product unless it improves the post.
+- No invented anecdotes, quotes, metrics, customer claims, product claims, or first-person experiences.
+- Avoid brand voice, generic AI commentary, fake profundity, em dashes, forced CTAs, and tidy motivational endings.
+- Let the three options differ in the actual take or emphasis, not through arbitrary formatting assignments.
+
+{avoid_section}
+
+Each option must be {max_chars} characters or fewer and complete. Return only the three post options separated by a line containing only ---."""
+
+
+def build_natural_evaluation_prompt(
+    request: DraftRequest,
+    *,
+    strategy_summary: dict[str, object],
+    draft_options: list[str],
+    max_chars: int,
+    avoid_phrases: list[str] | None = None,
+) -> str:
+    options = "\n\n".join(f"Draft {index}:\n{text}" for index, text in enumerate(draft_options, start=1))
+    avoid_section = avoid_phrases_prompt_section(avoid_phrases or [])
+    return f"""Choose the best X post for this workspace.
+
+Original brief:
+- Topic: {request.topic}
+- Post type: {request.post_type}
+- Idea: {request.angle or "none"}
+- Maximum length: {max_chars} characters
+
+Fact boundary and core point:
+{json.dumps(strategy_summary, indent=2)}
+
+Draft options:
+{options}
+
+Judge the options on:
+- clarity: one sharp point that is immediately understandable
+- voice: sounds like a real founder, not a brand or content template
+- specificity: contains a concrete mechanism or consequence without cramming in nouns
+- usefulness: gives the reader a thought worth keeping
+- grounding: makes no unsupported claim and stays inside the brief
+
+Selection-first rule:
+- If one option passes, copy it exactly into suggested_final_version.
+- Rewrite only when every option has a concrete defect. Make the smallest possible fix.
+- Never combine drafts or add positioning merely to make the post sound more complete.
+- The product name is optional. Shorter and clearer beats more comprehensive.
+
+{avoid_section}
+
+Return compact JSON only with keys ranked_drafts, quality_notes, warnings, suggested_final_version. The final version must be a complete post no longer than {max_chars} characters."""
+
+
 def build_evaluation_prompt(
     request: DraftRequest,
     *,
@@ -1823,6 +1973,11 @@ def build_evaluation_prompt(
     structure_section = structure_variation_prompt_section(request, trends)
     product_mention_section = product_mention_prompt_section(anchor, request=request, trends=trends)
     return f"""Choose the best X post for this workspace and clean it up lightly.
+
+Selection-first rule:
+- Preserve the strongest writer option verbatim when it is specific, truthful, natural, and within the limit.
+- Rewrite only to fix a concrete failure such as unsupported evidence, missing saved-context meaning, a banned phrase, repetition, or length.
+- Do not combine candidates, add extra positioning, or make a natural draft more polished just to demonstrate editing.
 
 Original request:
 - Topic: {request.topic}
@@ -2084,6 +2239,40 @@ def build_context_snapshot(
     }
 
 
+def natural_strategy_summary(
+    request: DraftRequest,
+    *,
+    trends: list[TrendItem],
+    patterns: list[ViralPattern],
+) -> dict[str, object]:
+    idea = str(request.angle or request.topic or "").strip()
+    source_labels = ["user brief and saved workspace context"]
+    source_labels.extend(f"trend:{trend.title}" for trend in trends)
+    source_labels.extend(
+        f"pattern:{pattern.pattern_name or pattern.structure or pattern.id}"
+        for pattern in patterns
+    )
+    return {
+        "thesis": idea,
+        "angle": idea,
+        "core_point": idea,
+        "intended_audience": request.audience or "the saved target audience",
+        "reader_problem": "Use only what the brief and saved context establish.",
+        "why_this_is_worth_posting": request.extra_context or idea,
+        "concrete_detail": "Choose the single most useful concrete mechanism from the brief.",
+        "source_material": source_labels,
+        "source_bridge": "Use a selected source only when its concrete mechanism is necessary to the point.",
+        "evidence_boundary": "Do not invent anecdotes, metrics, quotes, customer claims, product claims, or first-person experiences.",
+        "post_shape": "Let the strongest natural expression of the idea determine the shape.",
+        "hook_direction": "Lead with the clearest useful thought; no forced hook format.",
+        "tone_direction": request.tone or "plain, sharp, founder-led",
+        "claims_to_make": [idea] if idea else [],
+        "claims_to_avoid": [],
+        "forbidden_moves": ["invented evidence", "generic AI recap", "forced product pitch"],
+        "success_criteria": "Clear, specific, grounded, natural, and easy to publish without another rewrite.",
+    }
+
+
 def parse_strategy_summary(raw: str) -> dict[str, object]:
     parsed = parse_json_object(raw)
     if isinstance(parsed, dict):
@@ -2142,6 +2331,25 @@ def parse_evaluation_result(raw: str, draft_options: list[str]) -> tuple[str, st
         notes = str(parsed.get("quality_notes") or "").strip()
         return final, notes, parsed
     return draft_options[0], raw.strip(), {"raw": raw.strip()}
+
+
+def parse_natural_evaluation_result(raw: str, draft_options: list[str]) -> tuple[str, str, dict[str, object]]:
+    final, notes, evaluation = parse_evaluation_result(raw, draft_options)
+    warnings = evaluation.get("warnings") if isinstance(evaluation, dict) else None
+    actionable_warnings = [str(value).strip() for value in warnings or [] if str(value).strip()]
+    if actionable_warnings:
+        return final, notes, evaluation
+
+    ranked = evaluation.get("ranked_drafts") if isinstance(evaluation, dict) else None
+    if isinstance(ranked, list):
+        for value in ranked:
+            try:
+                index = int(value) - 1
+            except (TypeError, ValueError):
+                continue
+            if 0 <= index < len(draft_options):
+                return draft_options[index], notes, evaluation
+    return draft_options[0], notes, evaluation
 
 
 STALE_REPAIRED_WARNING_LABELS = {
@@ -3865,12 +4073,24 @@ def build_quality_notes(
 def _format_example(post, bundle: ContextBundle) -> str:
     note = bundle.notes_by_post_id.get(post.id)
     performance = _performance_summary(bundle.metrics_by_post_id.get(post.id))
+    example_label = "Voice Example" if note and note.imitate else "Observed authored post"
+    worked_reason = (
+        note.worked_reason
+        if note and note.worked_reason
+        else (
+            "Explicitly selected Voice Example."
+            if note and note.imitate
+            else "Use this as evidence of the author's natural cadence and phrasing, not as a content template."
+        )
+    )
     parts = [
         "Example:",
         post.text,
         "",
+        f"Calibration source: {example_label}.",
+        "",
         "Why it worked:",
-        (note.worked_reason if note and note.worked_reason else "Strong Voice Example."),
+        worked_reason,
     ]
     if performance:
         parts.extend(["", "Performance:", performance])

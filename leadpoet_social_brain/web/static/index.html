@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260702-queue-generate-loading">
+    <link rel="stylesheet" href="/static/styles.css?v=20260709-topics-autopilot-5">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -104,6 +104,27 @@
                 <span class="skeleton-line medium"></span>
               </article>
               <article class="trend-row skeleton-card" aria-hidden="true">
+                <span class="skeleton-line short"></span>
+                <span class="skeleton-line long"></span>
+                <span class="skeleton-line medium"></span>
+              </article>
+            </div>
+          </section>
+
+          <section class="panel topics-panel">
+            <div class="panel-header">
+              <div>
+                <h2>Topics</h2>
+              </div>
+              <button class="secondary" id="refreshTopicsButton" type="button">Refresh</button>
+            </div>
+            <div id="topicIdeaList" class="topic-idea-list trend-scroll">
+              <article class="topic-idea-card skeleton-card" aria-hidden="true">
+                <span class="skeleton-line short"></span>
+                <span class="skeleton-line long"></span>
+                <span class="skeleton-line medium"></span>
+              </article>
+              <article class="topic-idea-card skeleton-card" aria-hidden="true">
                 <span class="skeleton-line short"></span>
                 <span class="skeleton-line long"></span>
                 <span class="skeleton-line medium"></span>
@@ -551,6 +572,9 @@
             </div>
           </label>
         </div>
+        <label>Topic idea to use
+          <select id="createPostTopicIdea"></select>
+        </label>
         <div class="form-grid">
           <label>Trend to build from
             <select id="createPostTrend"></select>
@@ -582,7 +606,7 @@
         <div class="form-grid">
           <label>Week start<input id="planWeekStart" type="date"></label>
           <label>Posts<input id="planPosts" type="number" min="1" max="14" value="5"></label>
-          <label>Topic mix<input id="planTopicMix" value="sales LLMs:3,Bittensor:2"></label>
+          <label id="planTopicMixField">Topic mix<input id="planTopicMix" value="sales LLMs:3,Bittensor:2"></label>
           <label>Post type<input id="planPostType" value="founder_insight"></label>
           <label>Length
             <select id="planLength">
@@ -599,8 +623,9 @@
           </label>
         </div>
         <div class="option-row">
-          <label class="inline-check"><input id="planUseTrends" type="checkbox"> Use trends</label>
-          <label class="inline-check"><input id="planUsePatterns" type="checkbox"> Use patterns</label>
+          <label class="inline-check"><input id="planAutopilot" type="checkbox" checked> Autopilot: choose topics and angles</label>
+          <label class="inline-check"><input id="planUseTrends" type="checkbox" checked> Use trends</label>
+          <label class="inline-check"><input id="planUsePatterns" type="checkbox" checked> Use patterns</label>
           <label class="inline-check"><input id="planAllowEvergreen" type="checkbox" checked> Allow evergreen</label>
         </div>
         <label>Optional instruction<textarea id="planInstruction" rows="3" placeholder="Example: make the sales posts sharper and more founder-led."></textarea></label>
@@ -694,6 +719,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260702-queue-generate-loading"></script>
+    <script src="/static/app.js?v=20260709-topics-autopilot-5"></script>
   </body>
 </html>

@@ -646,6 +646,8 @@ main {
 
 .dashboard-top-grid {
   align-items: stretch;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -654,6 +656,8 @@ main {
   flex-direction: column;
   min-height: 0;
   margin-top: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .table-tools {
@@ -800,6 +804,7 @@ main {
 }
 
 .trend-list,
+.topic-idea-list,
 .pattern-list,
 .signal-list,
 .stack,
@@ -811,16 +816,19 @@ main {
 }
 
 .trend-list,
+.topic-idea-list,
 .pattern-list,
 .signal-list {
   margin-top: 16px;
 }
 
 .trend-panel,
+.topics-panel,
 .patterns-panel {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -836,7 +844,12 @@ main {
   scrollbar-gutter: stable;
 }
 
+.topic-idea-list {
+  grid-auto-rows: max-content;
+}
+
 .trend-row,
+.topic-idea-card,
 .pattern-card,
 .trend-card,
 .queue-card,
@@ -849,6 +862,7 @@ main {
 }
 
 .trend-row,
+.topic-idea-card,
 .pattern-card {
   display: grid;
   gap: 7px;
@@ -857,6 +871,7 @@ main {
 }
 
 .trend-row,
+.topic-idea-card,
 .pattern-card {
   grid-template-rows: auto auto minmax(34px, auto) auto;
 }
@@ -890,6 +905,7 @@ main {
 }
 
 .trend-row p,
+.topic-idea-card p,
 .pattern-card p {
   color: var(--muted);
   font-size: 13px;
@@ -900,6 +916,7 @@ main {
 }
 
 .trend-row h3,
+.topic-idea-card h3,
 .pattern-card h3 {
   font-size: 14px;
   line-height: 1.22;
@@ -914,12 +931,14 @@ main {
 }
 
 .trend-row .actions,
+.topic-idea-card .actions,
 .pattern-card .actions {
   align-self: start;
   margin-top: 4px;
 }
 
 .trend-row .actions button,
+.topic-idea-card .actions button,
 .pattern-card .actions button {
   min-height: 32px;
   padding: 6px 10px;
@@ -931,8 +950,22 @@ main {
 }
 
 .trend-row strong,
+.topic-idea-card strong,
 .pattern-card strong {
   color: var(--ink);
+}
+
+.topic-idea-card .topic-angle {
+  color: var(--ink);
+  -webkit-line-clamp: 3;
+}
+
+.topic-idea-card .topic-why {
+  font-size: 12px;
+}
+
+.muted-control {
+  opacity: 0.55;
 }
 
 .trend-date {
@@ -1062,6 +1095,7 @@ main {
 
 #dashboardView.view.active {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(310px, 1fr) minmax(0, 1.35fr);
   gap: 16px;
   height: 100dvh;

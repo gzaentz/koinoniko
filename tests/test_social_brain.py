@@ -37,7 +37,7 @@ from leadpoet_social_brain.cli import (
     main as cli_main,
 )
 from leadpoet_social_brain.context import ContextManager
-from leadpoet_social_brain.core.models import ContentQueueItem, ContextSection, DraftRequest, EngagementMetrics, GeneratedDraft, Pattern, PostNote, SocialPost, SyncMetadata, TrendItem, utc_now
+from leadpoet_social_brain.core.models import ContentQueueItem, ContextSection, DraftRequest, EngagementMetrics, GeneratedDraft, Pattern, PostNote, SocialPost, SyncMetadata, TopicIdea, TrendItem, utc_now
 from leadpoet_social_brain.generation import (
     MISSING_PROVIDER_MESSAGE,
     PRODUCT_NAME_OPTIONAL_LANE_NAMES,
@@ -99,6 +99,7 @@ from leadpoet_social_brain.storage.sqlite_store import (
     resolve_db_path,
 )
 from leadpoet_social_brain.trend_scout import WebTrendGroups, build_trend_scout_profile, refresh_web_trends, web_trend_groups
+from leadpoet_social_brain.topic_scout import build_topic_ideas_prompt, parse_topic_ideas, refresh_topic_ideas
 from leadpoet_social_brain.voice import (
     DEFAULT_AVOID_PHRASES,
     load_avoid_phrases,
@@ -568,7 +569,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('rel="icon" type="image/svg+xml" href="/static/koinoniko-favicon.svg"', index_html)
         self.assertIn('href="/static/styles.css?v=', index_html)
         self.assertIn('src="/static/app.js?v=', index_html)
-        self.assertIn("20260702-queue-generate-loading", index_html)
+        self.assertIn("20260709-topics-autopilot-5", index_html)
         self.assertIn("skeleton-card", index_html)
         self.assertIn("skeleton-line", styles_css)
         self.assertIn("renderInitialLoadingState", app_js)
@@ -6506,16 +6507,6 @@ class SocialBrainTest(unittest.TestCase):
             )
             provider = SequentialProvider(
                 [
-                    json.dumps(
-                        {
-                            "thesis": "Account context matters.",
-                            "why_this_is_worth_posting": "weak topical bridge",
-                            "concrete_detail": "account context",
-                            "source_bridge": "weak",
-                            "evidence_boundary": "Do not invent proof.",
-                            "success_criteria": "Requires a real bridge.",
-                        }
-                    ),
                     "Company has AI agents. Sales has the same problem.",
                     "The part to watch is context.",
                     "More sending is easy.",
@@ -6718,7 +6709,6 @@ class SocialBrainTest(unittest.TestCase):
             )
             provider = SequentialProvider(
                 [
-                    strategy,
                     "Ericsson has AI agents. Sales has the same problem.",
                     "The part to watch is context.",
                     "More sending is easy. Timing is hard.",
@@ -10966,6 +10956,225 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(result.imported, 1)
             self.assertEqual(result.skipped, 0)
             self.assertEqual(trends[0].source_type, "Bittensor_update")
+            store.close()
+
+    def test_context_uses_authored_posts_when_explicit_voice_examples_are_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            ingest_x_post(
+                store,
+                text="Sending got cheaper. Knowing why this account cares did not.",
+                url="https://x.com/gavin/status/voice-fallback",
+                date="2026-07-01",
+                author="Gavin",
+                topic="sales LLMs",
+                post_type="founder_insight",
+                metrics=EngagementMetrics(impressions=4000, likes=90, replies=12),
+                imitate=False,
+            )
+
+            bundle = ContextManager(store).build_bundle(
+                platform="x",
+                topic="sales LLMs",
+                post_type="founder_insight",
+            )
+            prompt = SocialBrainGenerator(store, provider=FakeProvider()).build_prompt(
+                DraftRequest(platform="x", topic="sales LLMs", post_type="founder_insight")
+            )
+
+            self.assertEqual(len(bundle.examples), 1)
+            self.assertIn("Observed authored post", prompt)
+            self.assertIn("Sending got cheaper", prompt)
+            store.close()
+
+    def test_topic_scout_parses_persists_and_replaces_suggestions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            old = store.save_topic_idea(
+                TopicIdea(
+                    title="Old broad idea",
+                    topic="AI",
+                    angle="Talk about AI.",
+                    why_now="It is current.",
+                )
+            )
+            provider = FakeProvider(
+                [
+                    json.dumps(
+                        {
+                            "topics": [
+                                {
+                                    "title": "The missing field in every AI SDR demo",
+                                    "topic": "sales LLMs",
+                                    "angle": "Argue that demos show generation quality while hiding the account-level reason to act now.",
+                                    "why_now": "AI SDR teams are competing on output volume again.",
+                                    "source_type": "evergreen",
+                                    "source_refs": [],
+                                    "post_type": "founder_insight",
+                                    "priority": 92,
+                                }
+                            ]
+                        }
+                    )
+                ]
+            )
+
+            result = refresh_topic_ideas(store, provider, limit=3)
+            current = store.list_topic_ideas(status="suggested")
+
+            self.assertEqual(len(result.ideas), 1)
+            self.assertEqual(current[0].priority, 92)
+            self.assertEqual(store.get_topic_idea(old.id).status, "superseded")
+            self.assertIn("self-contained premise", provider.prompts[0])
+            store.close()
+
+    def test_parse_topic_ideas_normalizes_invalid_fields(self):
+        ideas = parse_topic_ideas(
+            """```json
+            {"topics":[{"title":"A real angle","topic":"GTM","angle":"Explain why timing data changes who gets contacted.","why_now":"Teams are automating before prioritizing.","source_type":"unknown lane","post_type":"not-real","priority":140}]}
+            ```"""
+        )
+
+        self.assertEqual(ideas[0].source_type, "evergreen")
+        self.assertEqual(ideas[0].post_type, "founder_insight")
+        self.assertEqual(ideas[0].priority, 100)
+
+    def test_plan_week_autopilot_uses_topic_idea_and_marks_it_used(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            idea = store.save_topic_idea(
+                TopicIdea(
+                    title="Volume is the easy AI SDR metric",
+                    topic="sales LLMs",
+                    angle="Make the case that account timing is harder and more valuable than send volume.",
+                    why_now="AI SDR launches keep leading with activity counts.",
+                    post_type="founder_insight",
+                    priority=95,
+                )
+            )
+            provider = FakeProvider(["Account timing is the hard part. Sending is already cheap."])
+
+            result = plan_week_x(
+                store,
+                SocialBrainGenerator(store, provider=provider),
+                week_start="2026-07-13",
+                posts=1,
+                use_trends=False,
+                trend_window_days=14,
+                topic_mix=None,
+                cadence="weekday_mornings",
+                default_post_type="product_update",
+                variants_per_slot=1,
+                topic_ideas=[idea],
+                extra_instruction="Keep the point blunt.",
+            )
+
+            self.assertEqual(result.queued[0].topic_idea_id, idea.id)
+            self.assertEqual(result.queued[0].topic, "sales LLMs")
+            self.assertEqual(result.queued[0].post_type, "founder_insight")
+            self.assertEqual(store.get_topic_idea(idea.id).status, "used")
+            self.assertIn("Why this topic is worth posting now", provider.prompts[0])
+            self.assertIn("Keep the point blunt", provider.prompts[0])
+            store.close()
+
+    def test_topics_api_and_dashboard_expose_dedicated_topic_section(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            idea = store.save_topic_idea(
+                TopicIdea(
+                    title="Buyer timing is a data product",
+                    topic="sales LLMs",
+                    angle="Show why timing must be assembled before copy is generated.",
+                    why_now="Outbound generation is no longer the bottleneck.",
+                    priority=88,
+                )
+            )
+            store.close()
+
+            status, payload = handle_api_request("GET", "/api/topics", db_path=db_path)
+            dashboard_status, dashboard = handle_api_request("GET", "/api/dashboard", db_path=db_path)
+            index_html = (Path("leadpoet_social_brain/web/static/index.html")).read_text(encoding="utf-8")
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["items"][0]["id"], idea.id)
+            self.assertEqual(dashboard_status, 200)
+            self.assertEqual(dashboard["topic_ideas"][0]["title"], idea.title)
+            self.assertIn("<h2>Topics</h2>", index_html)
+            self.assertIn("planAutopilot", index_html)
+
+    def test_autopilot_weekly_task_is_idempotent_when_week_is_already_planned(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.save_content_queue_item(
+                ContentQueueItem(
+                    text="Already planned.",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-07-13T13:00:00+00:00",
+                    status="needs_review",
+                )
+            )
+            store.close()
+
+            status, payload = handle_api_request(
+                "POST",
+                "/tasks/autopilot-weekly",
+                json.dumps({"week_start": "2026-07-13", "posts": 5}),
+                db_path=db_path,
+            )
+
+            self.assertEqual(status, 200)
+            self.assertTrue(payload["skipped"])
+            self.assertEqual(payload["queued"], 0)
+            self.assertIn("already exist", payload["reason"])
+
+    def test_writer_and_evaluator_prompts_prioritize_natural_selection(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = RoleAwareProvider()
+
+            SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    angle="Buyer timing beats send volume.",
+                ),
+                save=False,
+            )
+
+            self.assertIn("Writing north star:", provider.calls[1]["prompt"])
+            self.assertIn("not from the prompt machinery", provider.calls[1]["prompt"])
+            self.assertIn("Selection-first rule:", provider.calls[2]["prompt"])
+            self.assertIn("Preserve the strongest writer option verbatim", provider.calls[2]["prompt"])
+            store.close()
+
+    def test_create_post_uses_compact_two_call_natural_pipeline(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = RoleAwareProvider()
+
+            result = create_post_x(
+                store,
+                SocialBrainGenerator(store, provider=provider),
+                instruction="Explain why buyer timing matters more than send volume.",
+                topic="sales LLMs",
+                post_type="founder_insight",
+            )
+            saved = store.get_generated_draft(result.item.draft_id)
+
+            self.assertEqual(len(provider.calls), 2)
+            self.assertIn("Goal: produce a post this founder would actually publish", provider.calls[0]["prompt"])
+            self.assertNotIn("Produce the structured Post Intent", provider.calls[0]["prompt"])
+            self.assertNotIn("Draft Option Variation Map", provider.calls[0]["prompt"])
+            self.assertIn("Judge the options on:", provider.calls[1]["prompt"])
+            self.assertEqual(saved.request.prompt_profile, "natural")
+            self.assertIsNone(saved.context_snapshot["models_used"]["strategist"])
             store.close()
 
 

@@ -195,6 +195,23 @@ class TrendItem:
 
 
 @dataclass(frozen=True)
+class TopicIdea:
+    title: str
+    topic: str
+    angle: str
+    why_now: str
+    source_type: str = "evergreen"
+    source_refs: list[str] = field(default_factory=list)
+    post_type: str = "founder_insight"
+    priority: int = 50
+    status: str = "suggested"
+    id: str = field(default_factory=new_id)
+    workspace_id: str = DEFAULT_WORKSPACE_ID
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
 class ContentQueueItem:
     text: str
     topic: str
@@ -202,6 +219,7 @@ class ContentQueueItem:
     scheduled_at: str
     platform: str = "x"
     draft_id: str | None = None
+    topic_idea_id: str | None = None
     angle: str | None = None
     trend_ids: list[str] = field(default_factory=list)
     status: str = "needs_review"
@@ -265,6 +283,7 @@ class DraftRequest:
     trend_ids: list[str] = field(default_factory=list)
     use_patterns: bool = False
     pattern_ids: list[str] = field(default_factory=list)
+    prompt_profile: str | None = None
 
 
 @dataclass(frozen=True)
