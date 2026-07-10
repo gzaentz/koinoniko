@@ -15,7 +15,11 @@ from leadpoet_social_brain.core.models import (
     LeadMagnetSource,
     LeadMagnetVersion,
 )
-from leadpoet_social_brain.lead_magnet_scout import fetch_x_lead_magnet_candidates, research_lead_magnets
+from leadpoet_social_brain.lead_magnet_scout import (
+    default_lead_magnet_candidate_fetcher,
+    fetch_x_lead_magnet_candidates,
+    research_lead_magnets,
+)
 from leadpoet_social_brain.lead_magnets import generate_lead_magnet
 from leadpoet_social_brain.platforms.x_api import XApiClient, XWriteClient
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
@@ -36,7 +40,11 @@ class StaticLeadMagnetProvider:
 
 
 class FailingLeadMagnetProvider:
+    def __init__(self):
+        self.calls = 0
+
     def generate(self, prompt: str, *, variants: int, model: str | None = None) -> list[str]:
+        self.calls += 1
         raise RuntimeError("classification provider unavailable")
 
 
@@ -256,10 +264,11 @@ class LeadMagnetTest(unittest.TestCase):
         self.assertTrue(any("Only 1 source" in warning for warning in result.warnings))
         self.assertEqual(result.run.status, "partial")
 
-    def test_scout_keeps_deterministic_source_when_ai_classification_fails(self):
+    def test_scout_keeps_research_deterministic_when_provider_is_present(self):
+        provider = FailingLeadMagnetProvider()
         result = research_lead_magnets(
             self.store,
-            FailingLeadMagnetProvider(),
+            provider,
             candidates=[
                 lead_magnet_candidate(
                     title="Free outbound sales prompt library",
@@ -276,7 +285,8 @@ class LeadMagnetTest(unittest.TestCase):
         self.assertEqual(len(result.sources), 1)
         self.assertEqual(result.sources[0].format, "prompt_library")
         self.assertEqual(result.sources[0].evidence_strength, "metric_backed")
-        self.assertTrue(any("AI classification failed" in warning for warning in result.warnings))
+        self.assertEqual(provider.calls, 0)
+        self.assertFalse(any("AI classification failed" in warning for warning in result.warnings))
 
     def test_scout_rejects_non_sales_and_non_magnet_candidates(self):
         result = research_lead_magnets(
@@ -409,6 +419,28 @@ class LeadMagnetTest(unittest.TestCase):
         self.assertEqual(result.sources, [])
         self.assertTrue(any("X API request failed (429)" in warning for warning in result.warnings))
         self.assertTrue(any("without a verifiable publish date" in warning for warning in result.warnings))
+
+    def test_candidate_fetcher_skips_scrapingdog_when_x_fills_limit(self):
+        x_candidates = [
+            {
+                "title": f"Free outbound sales prompt library {index}",
+                "source_url": f"https://x.com/example/status/{index}",
+                "published_at": NOW,
+            }
+            for index in range(20)
+        ]
+        with patch.dict(os.environ, {"X_BEARER_TOKEN": "test-token"}):
+            with patch(
+                "leadpoet_social_brain.lead_magnet_scout.fetch_x_lead_magnet_candidates",
+                return_value=x_candidates,
+            ):
+                with patch(
+                    "leadpoet_social_brain.lead_magnet_scout.fetch_scrapingdog_pattern_candidates",
+                ) as scrapingdog:
+                    result = default_lead_magnet_candidate_fetcher(limit=20)
+
+        self.assertEqual(result, x_candidates)
+        scrapingdog.assert_not_called()
 
     def test_workspace_isolation_and_period_idempotency(self):
         first = research_lead_magnets(

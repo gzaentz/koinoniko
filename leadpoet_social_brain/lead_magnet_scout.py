@@ -13,7 +13,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from leadpoet_social_brain.core.models import LeadMagnetResearchRun, LeadMagnetSource, utc_now
 from leadpoet_social_brain.pattern_scout import fetch_scrapingdog_pattern_candidates
 from leadpoet_social_brain.platforms.x_api import TWEET_FIELDS, XApiClient
-from leadpoet_social_brain.providers import DraftProvider, generate_with_provider
+from leadpoet_social_brain.providers import DraftProvider
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 
 
@@ -90,8 +90,8 @@ def research_lead_magnets(
 ) -> LeadMagnetResearchResult:
     """Collect and rank recent sales/tech lead magnets without inventing performance.
 
-    An LLM may classify the reusable mechanic, but the deterministic scorer alone
-    decides performance and only labels metric-backed sources as observed.
+    Research stays deterministic so a web refresh can finish within its request
+    deadline. AI synthesis happens later when a lead magnet is generated.
     """
 
     current = parse_datetime(now) or datetime.now(timezone.utc)
@@ -156,18 +156,9 @@ def research_lead_magnets(
             if not is_sales_lead_magnet(text):
                 skipped_irrelevant += 1
                 continue
-            classification: dict[str, object] = {}
-            if provider:
-                try:
-                    classification = classify_candidate(provider, candidate)
-                except Exception as exc:  # noqa: BLE001 - deterministic evidence must survive provider failure.
-                    warnings.append(
-                        f"AI classification failed for {canonical or summarize_candidate_title(text)}; "
-                        f"kept deterministic fields instead: {exc}"
-                    )
             source = source_from_candidate(
                 candidate,
-                classification=classification,
+                classification={},
                 canonical_url=canonical,
                 published_at=published_dt.replace(microsecond=0).isoformat(),
                 now=current,
@@ -238,18 +229,20 @@ def default_lead_magnet_candidate_fetcher(
             candidates.extend(fetch_x_lead_magnet_candidates(limit=limit, query=query))
         except Exception as exc:  # noqa: BLE001 - qualitative discovery can still run.
             errors.append(f"X lead-magnet search failed: {exc}")
-    try:
-        # ScrapingDog's checked-in integration is Google News based. These results
-        # therefore enter as qualitative until a candidate includes observed metrics.
-        candidates.extend(
-            fetch_scrapingdog_pattern_candidates(
-                limit=limit,
-                window="monthly",
-                context_terms=list(SALES_TERMS[:8]),
+    if len(candidates) < limit:
+        try:
+            # ScrapingDog is a qualitative fallback only when X did not provide
+            # enough candidates. Avoid paying its multi-query latency on the
+            # successful X path.
+            candidates.extend(
+                fetch_scrapingdog_pattern_candidates(
+                    limit=limit - len(candidates),
+                    window="monthly",
+                    context_terms=list(SALES_TERMS[:8]),
+                )
             )
-        )
-    except Exception as exc:  # noqa: BLE001 - X or stored evidence may still be usable.
-        errors.append(str(exc))
+        except Exception as exc:  # noqa: BLE001 - X or stored evidence may still be usable.
+            errors.append(str(exc))
     if not candidates and errors:
         raise ValueError("; ".join(unique_texts(errors)))
     if errors and warnings is not None:
@@ -444,24 +437,6 @@ def source_from_candidate(
         raw_text=clean_optional(candidate.get("raw_text")) or json.dumps(candidate, sort_keys=True, default=str),
         status="active",
     )
-
-
-def classify_candidate(provider: DraftProvider, candidate: dict[str, object]) -> dict[str, object]:
-    prompt = f"""Classify this recent sales/tech lead magnet. Extract the reusable mechanic; do not copy source wording.
-
-Source:
-{candidate_text(candidate)[:5000]}
-
-Observed metadata (these are the only performance facts):
-{json.dumps({key: candidate.get(key) for key in ['likes', 'replies', 'comments', 'reposts', 'shares', 'bookmarks', 'saves', 'impressions', 'views', 'published_at']}, sort_keys=True)}
-
-Return compact JSON with: title, format, sales_topic, hook, promise, audience, delivery_mechanism, cta, product_placement, why_it_worked.
-format must be prompt_library, playbook, template_pack, or scorecard.
-Do not claim that it performed well and do not invent metrics."""
-    raw_values = generate_with_provider(provider, prompt, variants=1)
-    raw = raw_values[0] if raw_values else ""
-    parsed = parse_json_object(raw)
-    return parsed or {}
 
 
 def performance_score(

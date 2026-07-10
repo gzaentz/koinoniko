@@ -38,6 +38,7 @@ X_API_BASE_URL = "https://api.x.com/2"
 X_READ_MAX_ATTEMPTS = 3
 X_READ_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 X_READ_MAX_RETRY_AFTER_SECONDS = 10.0
+X_READ_REQUEST_TIMEOUT_SECONDS = 15.0
 
 MISSING_X_WRITE_CREDENTIALS_MESSAGE = (
     "No X write credentials configured. Set X write auth credentials before posting."
@@ -224,7 +225,7 @@ class XApiClient:
         )
         for attempt in range(X_READ_MAX_ATTEMPTS):
             try:
-                with urllib.request.urlopen(request, timeout=30) as response:
+                with urllib.request.urlopen(request, timeout=X_READ_REQUEST_TIMEOUT_SECONDS) as response:
                     return json.loads(response.read().decode("utf-8"))
             except urllib.error.HTTPError as exc:
                 body = exc.read().decode("utf-8", errors="replace")

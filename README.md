@@ -1204,7 +1204,7 @@ The Lead Magnets view is a separate review-first workflow for long-form sales re
 - `template_pack`: copyable templates plus implementation checklists
 - `scorecard`: diagnostic questions, scoring rules, bands, and recommended actions
 
-`Analyze last 30 days` collects sales/tech lead-magnet candidates, rejects out-of-window or unrelated sources, canonicalizes duplicate URLs, and scores only observed metrics. Metricless search results remain visibly `qualitative`; the model may classify their mechanic but cannot turn them into performance proof.
+`Analyze last 30 days` collects sales/tech lead-magnet candidates, rejects out-of-window or unrelated sources, canonicalizes duplicate URLs, and scores only observed metrics. Metricless search results remain visibly `qualitative`. Research is deterministic and bounded for web requests; model synthesis happens later during lead-magnet generation.
 
 When `X_BEARER_TOKEN` is configured, live research first searches X and stores public likes, replies, reposts, bookmarks, impressions, author reach, and the observation timestamp. The default `recent` endpoint covers the newest seven-day subset of the rolling month. Set `X_LEAD_MAGNET_SEARCH_ENDPOINT=all` only when the X project has full-archive search access; that queries the complete 30-day window. ScrapingDog discovery remains a qualitative fallback rather than being mislabeled as performance evidence.
 
