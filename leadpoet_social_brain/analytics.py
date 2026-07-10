@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 
 from leadpoet_social_brain.core.models import AnalyticsSummary, EngagementMetrics, PerformanceRow, PostInfluence, SocialPost
@@ -14,6 +15,11 @@ def build_analytics_summary(store: SQLiteStore) -> AnalyticsSummary:
 
     by_post_type = _group_performance(posts, metrics_by_post_id, key_fn=lambda post: post.post_type)
     by_topic = _group_performance(posts, metrics_by_post_id, key_fn=lambda post: post.topic)
+    by_topic_post_type = _group_performance(
+        posts,
+        metrics_by_post_id,
+        key_fn=lambda post: f"{post.topic}\x1f{post.post_type}",
+    )
     by_pattern = _group_named_pattern_performance(posts_by_id, metrics_by_post_id, influences)
     by_hook = _group_influence_performance(posts_by_id, metrics_by_post_id, influences, category="hook")
     by_structure = _group_influence_performance(posts_by_id, metrics_by_post_id, influences, category="structure")
@@ -26,7 +32,15 @@ def build_analytics_summary(store: SQLiteStore) -> AnalyticsSummary:
     by_used_trend = _group_trend_performance(posts_by_id, metrics_by_post_id, influences, use_name=True)
 
     best_examples = _best_posts(posts, metrics_by_post_id)[:5]
-    hints = _build_hints(by_post_type, by_topic, by_pattern, by_hook, by_structure, by_tone)
+    hints = _build_hints(
+        by_post_type,
+        by_topic,
+        by_topic_post_type,
+        by_pattern,
+        by_hook,
+        by_structure,
+        by_tone,
+    )
     return AnalyticsSummary(
         by_post_type=by_post_type,
         by_topic=by_topic,
@@ -73,7 +87,9 @@ def _group_performance(posts, metrics_by_post_id, *, key_fn) -> list[Performance
         rows.append(
             PerformanceRow(
                 key=key,
-                count=len(values),
+                # Hint confidence is about measured performance, not how many
+                # unmeasured posts happen to share the label.
+                count=len(rates),
                 avg_engagement_rate=(sum(rates) / len(rates)) if rates else None,
                 avg_total_engagements=(sum(totals) / len(totals)) if totals else 0.0,
                 avg_impressions=(sum(impressions) / len(impressions)) if impressions else 0.0,
@@ -83,15 +99,7 @@ def _group_performance(posts, metrics_by_post_id, *, key_fn) -> list[Performance
                 top_post_id=top_post[0].id if top_post else None,
             )
         )
-    return sorted(
-        rows,
-        key=lambda row: (
-            row.avg_engagement_rate or 0.0,
-            row.avg_total_engagements,
-            row.count,
-        ),
-        reverse=True,
-    )
+    return _confidence_ranked_rows(rows)
 
 
 def _group_influence_performance(
@@ -123,17 +131,7 @@ def _group_influence_performance(
                 key_fn=lambda _post, key=key: key,
             )
         )
-    return sorted(
-        rows,
-        key=lambda row: (
-            row.avg_engagement_rate or 0.0,
-            row.avg_bookmarks,
-            row.avg_replies,
-            row.avg_reposts,
-            row.avg_impressions,
-        ),
-        reverse=True,
-    )
+    return _confidence_ranked_rows(rows)
 
 
 def _group_named_pattern_performance(
@@ -191,17 +189,47 @@ def _group_trend_performance(
                 key_fn=lambda _post, key=key: key,
             )
         )
-    return sorted(
-        rows,
-        key=lambda row: (
-            row.avg_engagement_rate or 0.0,
+    return _confidence_ranked_rows(rows)
+
+
+def _confidence_ranked_rows(rows: list[PerformanceRow]) -> list[PerformanceRow]:
+    """Rank cohorts by a conservative engagement estimate, not raw tiny samples."""
+
+    measured = [row for row in rows if row.avg_engagement_rate is not None and row.count > 0]
+    total_impressions = sum(max(0.0, row.avg_impressions) * row.count for row in measured)
+    weighted_engagement = sum(
+        float(row.avg_engagement_rate or 0.0) * max(0.0, row.avg_impressions) * row.count
+        for row in measured
+    )
+    prior_rate = weighted_engagement / total_impressions if total_impressions > 0 else 0.02
+    prior_impressions = 800.0
+    z = 1.28155
+
+    def key(row: PerformanceRow) -> tuple[float, float, float, float, float, int, str]:
+        if row.avg_engagement_rate is None or row.count <= 0:
+            lower_bound = -1.0
+        else:
+            observed_impressions = max(float(row.count), max(0.0, row.avg_impressions) * row.count)
+            posterior_n = observed_impressions + prior_impressions
+            posterior_rate = (
+                float(row.avg_engagement_rate) * observed_impressions
+                + prior_rate * prior_impressions
+            ) / posterior_n
+            standard_error = math.sqrt(
+                max(0.0, posterior_rate * (1.0 - posterior_rate)) / posterior_n
+            )
+            lower_bound = posterior_rate - z * standard_error
+        return (
+            lower_bound,
             row.avg_bookmarks,
             row.avg_replies,
             row.avg_reposts,
             row.avg_impressions,
-        ),
-        reverse=True,
-    )
+            row.count,
+            row.key,
+        )
+
+    return sorted(rows, key=key, reverse=True)
 
 
 def _best_posts(posts: list[SocialPost], metrics_by_post_id: dict[str, EngagementMetrics]) -> list[SocialPost]:
@@ -223,16 +251,20 @@ def _best_posts(posts: list[SocialPost], metrics_by_post_id: dict[str, Engagemen
 def _build_hints(
     by_post_type: list[PerformanceRow],
     by_topic: list[PerformanceRow],
+    by_topic_post_type: list[PerformanceRow],
     by_pattern: list[PerformanceRow],
     by_hook: list[PerformanceRow],
     by_structure: list[PerformanceRow],
     by_tone: list[PerformanceRow],
 ) -> list[str]:
     hints: list[str] = []
-    if _enough_signal(by_post_type) and _enough_signal(by_topic):
+    if _enough_signal(by_topic_post_type):
+        topic, separator, post_type = by_topic_post_type[0].key.partition("\x1f")
+        if not separator:
+            topic, post_type = by_topic_post_type[0].key, "post"
         hints.append(
             "Early signal: posts about "
-            f"{by_topic[0].key} in a {by_post_type[0].key.replace('_', ' ')} format are earning stronger engagement."
+            f"{topic} in a {post_type.replace('_', ' ')} format are earning stronger engagement."
         )
     if _enough_signal(by_structure):
         hints.append(

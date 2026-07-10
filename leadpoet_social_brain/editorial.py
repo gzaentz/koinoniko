@@ -209,6 +209,7 @@ def quantified_claims(text: str) -> list[str]:
     """Extract canonical numeric/threshold claims that require explicit evidence."""
 
     value = " ".join(str(text or "").replace(",", "").lower().split())
+    generic_number_pattern = r"\b\d{2,}(?:\.\d+)?\b"
     patterns = [
         r"\b\d+(?:\.\d+)?\s*%\+?",
         r"\$\s*\d+(?:\.\d+)?\s*(?:k|m|b|thousand|million|billion)?\b",
@@ -221,13 +222,28 @@ def quantified_claims(text: str) -> list[str]:
             r"\b\d+(?:\.\d+)?\+?\s*(?:users?|sellers?|buyers?|accounts?|customers?|companies?|"
             r"meetings?|replies?|leads?|records?|domains?|signals?)\b"
         ),
-        r"\b\d{2,}(?:\.\d+)?\b",
+        generic_number_pattern,
+        r"\b(?:doubled|tripled|quadrupled|halved|twice|three\s+times)\b",
+        r"\b(?:cut|cuts|reduced?|reduces?|fell|falls?|dropped?|drops?)\b[^.!?]{0,45}\b(?:in|by)\s+half\b",
+        (
+            r"\b(?:dozens|hundreds|thousands|millions|billions)\s+of\s+"
+            r"(?:(?:active|annual|current|enterprise|new|paying|potential|qualified|verified)\s+){0,3}"
+            r"(?:users?|sellers?|buyers?|accounts?|customers?|companies?|meetings?|replies?|"
+            r"leads?|records?|domains?|signals?|calls?|emails?|people|teams?)\b"
+        ),
+        (
+            r"\b(?:most|the\s+majority\s+of|a\s+majority\s+of|more\s+than\s+half\s+of|"
+            r"roughly\s+half\s+of|the\s+vast\s+majority\s+of|nearly\s+all|almost\s+all)\s+"
+            r"(?:(?:active|annual|current|enterprise|new|paying|potential|qualified|verified)\s+){0,3}"
+            r"(?:users?|sellers?|buyers?|accounts?|customers?|companies?|"
+            r"meetings?|replies?|leads?|records?|domains?|signals?|calls?|emails?|people|teams?)\b"
+        ),
     ]
     claims: list[str] = []
     covered_spans: list[tuple[int, int]] = []
-    for index, pattern in enumerate(patterns):
+    for pattern in patterns:
         for match in re.finditer(pattern, value, flags=re.I):
-            if index == len(patterns) - 1 and any(
+            if pattern == generic_number_pattern and any(
                 match.start() < end and match.end() > start
                 for start, end in covered_spans
             ):
@@ -235,7 +251,7 @@ def quantified_claims(text: str) -> list[str]:
             canonical = _canonical_quantified_claim(match.group(0))
             if canonical and canonical not in claims:
                 claims.append(canonical)
-            if index < len(patterns) - 1:
+            if pattern != generic_number_pattern:
                 covered_spans.append(match.span())
     return claims
 
@@ -278,6 +294,36 @@ def same_editorial_event(left: Any, right: Any) -> bool:
 
 def _canonical_quantified_claim(value: str) -> str:
     cleaned = " ".join(value.lower().replace(",", "").split())
+    verbal_multiple = {
+        "doubled": "multiple:2",
+        "twice": "multiple:2",
+        "tripled": "multiple:3",
+        "three times": "multiple:3",
+        "quadrupled": "multiple:4",
+        "halved": "multiple:0.5",
+    }
+    if cleaned in verbal_multiple:
+        return verbal_multiple[cleaned]
+    if re.search(
+        r"\b(?:cut|cuts|reduced?|reduces?|fell|falls?|dropped?|drops?)\b[^.!?]{0,45}\b(?:in|by) half\b",
+        cleaned,
+    ):
+        return "multiple:0.5"
+    approximate = re.match(
+        r"(dozens|hundreds|thousands|millions|billions)\s+of\s+(.+)",
+        cleaned,
+    )
+    if approximate:
+        noun = approximate.group(2).rstrip("s")
+        return f"approximate_count:{approximate.group(1)}:{noun}"
+    proportion = re.match(
+        r"(most|the majority of|a majority of|more than half of|roughly half of|"
+        r"the vast majority of|nearly all|almost all)\s+(.+)",
+        cleaned,
+    )
+    if proportion:
+        label = "half" if proportion.group(1) == "roughly half of" else "majority"
+        return f"proportion:{label}:{proportion.group(2).rstrip('s')}"
     number_match = re.search(r"\d+(?:\.\d+)?", cleaned)
     if not number_match:
         return ""

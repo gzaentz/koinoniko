@@ -38,6 +38,7 @@ from leadpoet_social_brain.content_queue import (
     plan_week_x,
     post_queue_item_x,
     publish_due_x,
+    resolve_queue_edit_state,
     revise_queued_post,
     weekly_report_text,
 )
@@ -45,6 +46,9 @@ from leadpoet_social_brain.core.models import (
     ContextSection,
     ContentQueueItem,
     DEFAULT_WORKSPACE_ID,
+    LeadMagnet,
+    LeadMagnetSource,
+    LeadMagnetVersion,
     PostNote,
     QueuedPostVersion,
     SocialPost,
@@ -57,6 +61,15 @@ from leadpoet_social_brain.core.models import (
     utc_now,
 )
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator, parse_json_object
+from leadpoet_social_brain.lead_magnet_scout import research_lead_magnets
+from leadpoet_social_brain.lead_magnets import (
+    approve_lead_magnet,
+    archive_lead_magnet,
+    generate_lead_magnet,
+    render_lead_magnet_markdown,
+    revise_lead_magnet,
+)
+from leadpoet_social_brain.notion_publisher import NotionPublishError, publish_to_notion
 from leadpoet_social_brain.pattern_scout import (
     PATTERN_REFRESH_MISSING_PROVIDER,
     PATTERN_REFRESH_MISSING_SCRAPINGDOG,
@@ -124,6 +137,8 @@ TRENDS_SYNC_KEY = "trends_sync"
 PATTERNS_SYNC_KEY = "patterns_sync"
 TOPICS_SYNC_KEY = "topics_sync"
 AUTOPILOT_SYNC_KEY = "autopilot_weekly"
+LEAD_MAGNET_RESEARCH_SYNC_KEY = "lead_magnet_research_sync"
+LEAD_MAGNET_AUTOPILOT_SYNC_KEY = "lead_magnet_autopilot"
 VOICE_CONTEXT_NAME = "learned_from_high_performers"
 FACT_CONTEXT_FIELDS = [
     {
@@ -690,6 +705,8 @@ def route_api(
         return 200, refresh_topics_task_payload(store, payload)
     if method == "POST" and parts == ["tasks", "autopilot-weekly"]:
         return 200, autopilot_weekly_task_payload(store, payload)
+    if method == "POST" and parts == ["tasks", "autopilot-lead-magnet"]:
+        return 200, autopilot_lead_magnet_task_payload(store, payload)
     if not parts or parts[0] != "api":
         return 404, {"error": "Not found."}
 
@@ -778,6 +795,151 @@ def route_api(
         if not pattern:
             return 404, {"error": "Pattern not found."}
         return 200, {"pattern": pattern_payload(pattern)}
+    if method == "GET" and parts == ["api", "lead-magnets"]:
+        items = store.list_lead_magnets(
+            status=one(query, "status"),
+            format=one(query, "format"),
+            limit=int(one(query, "limit") or 50),
+        )
+        return 200, {"items": [lead_magnet_payload(store, item) for item in items]}
+    if method == "POST" and parts == ["api", "lead-magnets"]:
+        provider = load_configured_provider(store)
+        result = generate_lead_magnet(
+            store,
+            provider,
+            audience=str(payload.get("audience") or ""),
+            sales_outcome=str(payload.get("sales_outcome") or payload.get("sales_problem") or ""),
+            format=str(payload.get("format") or "prompt_library"),
+            depth=str(payload.get("depth") or "standard"),
+            product_integration=str(payload.get("product_integration") or "embedded"),
+            title=clean_optional(payload.get("title")),
+            cta=clean_optional(payload.get("cta")),
+            instruction=clean_optional(payload.get("instruction") or payload.get("instructions")),
+            source_ids=string_list_payload(payload.get("source_ids")) if "source_ids" in payload else None,
+            research_run_id=clean_optional(payload.get("research_run_id")),
+            evidence_summary=clean_optional(payload.get("evidence_summary")),
+        )
+        return 200, {
+            "item": lead_magnet_payload(store, result.item, include_detail=True),
+            "version": lead_magnet_version_payload(result.version),
+            "warnings": result.warnings,
+        }
+    if method == "POST" and parts == ["api", "lead-magnets", "research"]:
+        provider = load_configured_provider(store)
+        candidates = payload.get("candidates")
+        if candidates is not None and not isinstance(candidates, list):
+            raise ValueError("candidates must be an array when provided.")
+        result = research_lead_magnets(
+            store,
+            provider,
+            candidates=[row for row in candidates if isinstance(row, dict)] if isinstance(candidates, list) else None,
+            window_days=int(payload.get("window_days") or 30),
+            limit=int(payload.get("limit") or 20),
+            query=clean_optional(payload.get("query")),
+        )
+        save_lead_magnet_research_sync(store, result)
+        return 200, lead_magnet_research_result_payload(result)
+    if method == "GET" and parts == ["api", "lead-magnets", "sources"]:
+        sources = store.list_lead_magnet_sources(
+            status=one(query, "status"),
+            platform=one(query, "platform"),
+            format=one(query, "format"),
+            published_after=one(query, "published_after"),
+            limit=int(one(query, "limit") or 100),
+        )
+        return 200, {"items": [lead_magnet_source_payload(source) for source in sources]}
+    if method == "POST" and parts == ["api", "lead-magnets", "sources"]:
+        candidate = dict(payload)
+        if not candidate.get("published_at"):
+            raise ValueError("published_at is required so the rolling research window can be verified.")
+        provider = load_configured_provider(store)
+        result = research_lead_magnets(store, provider, candidates=[candidate], window_days=30, limit=1)
+        save_lead_magnet_research_sync(store, result)
+        return 200, lead_magnet_research_result_payload(result)
+    if method == "GET" and parts == ["api", "lead-magnets", "research-runs"]:
+        runs = store.list_lead_magnet_research_runs(
+            status=one(query, "status"),
+            limit=int(one(query, "limit") or 50),
+        )
+        return 200, {"items": [lead_magnet_research_run_payload(run) for run in runs]}
+    if method == "GET" and len(parts) == 3 and parts[:2] == ["api", "lead-magnets"]:
+        item = store.get_lead_magnet(parts[2])
+        if not item:
+            return 404, {"error": "Lead magnet not found."}
+        return 200, {"item": lead_magnet_payload(store, item, include_detail=True)}
+    if method == "PATCH" and len(parts) == 3 and parts[:2] == ["api", "lead-magnets"]:
+        item = update_lead_magnet_from_payload(store, parts[2], payload)
+        return 200, {"item": lead_magnet_payload(store, item, include_detail=True)}
+    if method == "POST" and len(parts) == 4 and parts[:2] == ["api", "lead-magnets"] and parts[3] == "revise":
+        provider = load_configured_provider(store)
+        result = revise_lead_magnet(
+            store,
+            provider,
+            lead_magnet_id=parts[2],
+            instruction=str(payload.get("instruction") or ""),
+        )
+        return 200, {
+            "item": lead_magnet_payload(store, result.item, include_detail=True),
+            "version": lead_magnet_version_payload(result.version),
+            "warnings": result.warnings,
+        }
+    if method == "POST" and len(parts) == 4 and parts[:2] == ["api", "lead-magnets"] and parts[3] == "approve":
+        item = approve_lead_magnet(store, parts[2])
+        return 200, {"item": lead_magnet_payload(store, item, include_detail=True)}
+    if method == "POST" and len(parts) == 4 and parts[:2] == ["api", "lead-magnets"] and parts[3] == "archive":
+        item = archive_lead_magnet(store, parts[2])
+        return 200, {"item": lead_magnet_payload(store, item, include_detail=True)}
+    if method == "POST" and len(parts) == 4 and parts[:2] == ["api", "lead-magnets"] and parts[3] == "publish":
+        item = store.get_lead_magnet(parts[2])
+        if not item:
+            return 404, {"error": "Lead magnet not found."}
+        if item.status not in {"approved", "published"}:
+            raise ValueError("Approve the lead magnet before publishing it to Notion.")
+        try:
+            published = publish_to_notion(
+                item.content,
+                title=item.title,
+                existing_page_id=item.notion_page_id,
+                icon="🧲",
+            )
+        except Exception as exc:  # noqa: BLE001 - retain the approved local artifact and retry receipt.
+            partial_page_id = exc.page_id if isinstance(exc, NotionPublishError) else item.notion_page_id
+            failed = store.save_lead_magnet(
+                replace(
+                    item,
+                    status="approved",
+                    notion_page_id=partial_page_id,
+                    failure_reason=str(exc),
+                    updated_at=utc_now(),
+                )
+            )
+            return 502, {
+                "error": str(exc),
+                "item": lead_magnet_payload(store, failed, include_detail=True),
+                "retryable": True,
+            }
+        saved = store.save_lead_magnet(
+            replace(
+                item,
+                status="published",
+                notion_page_id=published.page_id,
+                notion_url=published.public_url or published.url,
+                published_at=utc_now(),
+                failure_reason=None,
+                updated_at=utc_now(),
+            )
+        )
+        return 200, {
+            "item": lead_magnet_payload(store, saved, include_detail=True),
+            "publish": {
+                "page_id": published.page_id,
+                "url": published.public_url or published.url,
+                "created": published.created,
+                "block_count": published.block_count,
+                "batch_count": published.batch_count,
+                "content_hash": published.content_hash,
+            },
+        }
     if method == "GET" and len(parts) == 3 and parts[:2] == ["api", "posts"]:
         post = store.get_post(parts[2])
         if not post:
@@ -1564,6 +1726,157 @@ def autopilot_weekly_task_payload(store: SQLiteStore, payload: dict[str, Any]) -
         raise
 
 
+def autopilot_lead_magnet_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    """Research and create one review-ready artifact at most once per 14-day period."""
+
+    started_at = utc_now()
+    now = parse_dt(clean_optional(payload.get("now")) or started_at).astimezone(timezone.utc)
+    base_period_key = lead_magnet_period_key(now)
+    force = bool_from_payload(payload, "force", False)
+    existing = store.get_lead_magnet_research_run_by_period_key(base_period_key)
+    if existing and existing.status in {"running", "completed", "success", "partial"} and not force:
+        items = store.list_lead_magnets(research_run_id=existing.id, limit=5)
+        completed_at = utc_now()
+        summary = {
+            "skipped": True,
+            "reason": "A lead-magnet run already exists for this 14-day period.",
+            "period_key": base_period_key,
+            "research_run_id": existing.id,
+            "created": len(items),
+            "completed_at": completed_at,
+        }
+        metadata = store.save_sync_metadata(
+            SyncMetadata(
+                key=LEAD_MAGNET_AUTOPILOT_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=completed_at,
+                status="success",
+                summary=summary,
+            )
+        )
+        return {
+            **summary,
+            "items": [lead_magnet_payload(store, item) for item in items],
+            "sync": sync_metadata_payload(metadata),
+        }
+
+    period_key = base_period_key if not force else f"{base_period_key}:force:{new_id()[:8]}"
+    try:
+        provider = load_configured_provider(store)
+        if not provider:
+            raise ValueError("Lead-magnet autopilot requires a configured LLM provider.")
+        candidates = payload.get("candidates")
+        if candidates is not None and not isinstance(candidates, list):
+            raise ValueError("candidates must be an array when provided.")
+        research = research_lead_magnets(
+            store,
+            provider,
+            candidates=[row for row in candidates if isinstance(row, dict)] if isinstance(candidates, list) else None,
+            window_days=int(payload.get("window_days") or 30),
+            limit=int(payload.get("research_limit") or 20),
+            query=clean_optional(payload.get("query")),
+            now=now,
+            period_key=period_key,
+        )
+        save_lead_magnet_research_sync(store, research)
+        format = clean_optional(payload.get("format")) or best_lead_magnet_format(research.sources)
+        audience = clean_optional(payload.get("audience")) or first_source_value(research.sources, "audience") or "sales and GTM operators"
+        sales_outcome = (
+            clean_optional(payload.get("sales_outcome") or payload.get("sales_problem"))
+            or first_source_value(research.sources, "sales_topic")
+            or "turn buyer research into a repeatable, signal-aware sales workflow"
+        )
+        generated = generate_lead_magnet(
+            store,
+            provider,
+            audience=audience,
+            sales_outcome=sales_outcome,
+            format=format,
+            depth=str(payload.get("depth") or "standard"),
+            product_integration=str(payload.get("product_integration") or "embedded"),
+            title=clean_optional(payload.get("title")),
+            cta=clean_optional(payload.get("cta")),
+            instruction=clean_optional(payload.get("instruction")),
+            source_ids=[source.id for source in research.sources],
+            research_run_id=research.run.id,
+            evidence_summary=(
+                f"Rolling {int(payload.get('window_days') or 30)}-day research run; "
+                f"{len(research.sources)} qualified source(s)."
+            ),
+        )
+        completed_at = utc_now()
+        warnings = [*research.warnings, *generated.warnings]
+        summary = {
+            "skipped": False,
+            "created": 1,
+            "period_key": period_key,
+            "research_run_id": research.run.id,
+            "sources_qualified": len(research.sources),
+            "metric_backed_sources": sum(
+                1 for source in research.sources if source.evidence_strength == "metric_backed"
+            ),
+            "lead_magnet_id": generated.item.id,
+            "status": generated.item.status,
+            "warnings": warnings,
+            "completed_at": completed_at,
+        }
+        metadata = store.save_sync_metadata(
+            SyncMetadata(
+                key=LEAD_MAGNET_AUTOPILOT_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=completed_at,
+                status="partial" if warnings else "success",
+                summary=summary,
+                error_message="\n".join(warnings[:5]) if warnings else None,
+            )
+        )
+        return {
+            **summary,
+            "item": lead_magnet_payload(store, generated.item, include_detail=True),
+            "sync": sync_metadata_payload(metadata),
+        }
+    except Exception as exc:  # noqa: BLE001 - preserve an actionable task receipt.
+        completed_at = utc_now()
+        store.save_sync_metadata(
+            SyncMetadata(
+                key=LEAD_MAGNET_AUTOPILOT_SYNC_KEY,
+                last_started_at=started_at,
+                last_completed_at=completed_at,
+                status="failed",
+                summary={
+                    "skipped": False,
+                    "created": 0,
+                    "period_key": period_key,
+                    "errors": [str(exc)],
+                    "completed_at": completed_at,
+                },
+                error_message=str(exc),
+            )
+        )
+        raise
+
+
+def lead_magnet_period_key(value: datetime) -> str:
+    return f"lead-magnet:{value.date().toordinal() // 14}"
+
+
+def best_lead_magnet_format(sources: list[LeadMagnetSource]) -> str:
+    if not sources:
+        return "prompt_library"
+    counts = Counter(source.format for source in sources if source.format)
+    supported = {"prompt_library", "playbook", "template_pack", "scorecard"}
+    ranked = [name for name, _ in counts.most_common() if name in supported]
+    return ranked[0] if ranked else "prompt_library"
+
+
+def first_source_value(sources: list[LeadMagnetSource], field_name: str) -> str | None:
+    for source in sources:
+        value = clean_optional(getattr(source, field_name, None))
+        if value:
+            return value
+    return None
+
+
 def run_x_posts_sync(
     store: SQLiteStore,
     payload: dict[str, Any],
@@ -1784,6 +2097,18 @@ def weekly_report_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[s
 def update_queue_item(store: SQLiteStore, queue_id: str, payload: dict[str, Any]) -> ContentQueueItem:
     item = require_queue_item_for_web(store, queue_id)
     new_text = value_or_current(payload, "text", item.text)
+    new_topic = value_or_current(payload, "topic", item.topic)
+    new_post_type = value_or_current(payload, "post_type", item.post_type)
+    new_angle = value_or_current(payload, "angle", item.angle)
+    requested_status = value_or_current(payload, "status", item.status)
+    status, approved_at, _ = resolve_queue_edit_state(
+        item,
+        text=new_text,
+        topic=new_topic,
+        post_type=new_post_type,
+        angle=new_angle,
+        requested_status=requested_status,
+    )
     if new_text != item.text:
         store.save_queued_post_version(
             QueuedPostVersion(
@@ -1791,19 +2116,16 @@ def update_queue_item(store: SQLiteStore, queue_id: str, payload: dict[str, Any]
                 text=item.text,
                 edit_type="manual",
                 edit_instruction="previous text before manual edit",
+                source_draft_id=item.draft_id,
             )
         )
-    status = value_or_current(payload, "status", item.status)
-    approved_at = item.approved_at
-    if status != "approved":
-        approved_at = None
     updated = ContentQueueItem(
         **{
             **item.__dict__,
             "text": new_text,
-            "topic": value_or_current(payload, "topic", item.topic),
-            "post_type": value_or_current(payload, "post_type", item.post_type),
-            "angle": value_or_current(payload, "angle", item.angle),
+            "topic": new_topic,
+            "post_type": new_post_type,
+            "angle": new_angle,
             "scheduled_at": value_or_current(payload, "scheduled_at", item.scheduled_at),
             "reviewer_notes": value_or_current(payload, "reviewer_notes", item.reviewer_notes),
             "status": status,
@@ -1903,7 +2225,8 @@ def voice_suggestions_payload(store: SQLiteStore, *, limit: int = 6) -> list[dic
     candidates = [
         (voice_suggestion_score(metrics.get(post.id)), post)
         for post in posts
-        if not (notes.get(post.id) and notes[post.id].imitate)
+        if post.source_draft_id is None
+        and not (notes.get(post.id) and notes[post.id].imitate)
     ]
     candidates = [(score, post) for score, post in candidates if any(value > 0 for value in score)]
     candidates.sort(key=lambda item: item[0], reverse=True)
@@ -2737,6 +3060,7 @@ def status_payload(store: SQLiteStore | None = None) -> dict[str, Any]:
         "x_read_configured": bool(os.getenv("X_BEARER_TOKEN")),
         "x_write_configured": has_x_write_credentials(),
         "scrapingdog_configured": scrapingdog_configured(),
+        "notion_configured": bool(os.getenv("NOTION_API_TOKEN") and os.getenv("NOTION_PARENT_PAGE_ID")),
         "task_trigger_configured": bool(os.getenv(TASK_TOKEN_ENV)),
         "daily_sync_configured": bool(os.getenv(TASK_SECRET_ENV)),
     }
@@ -2806,6 +3130,11 @@ def account_connections_payload(status: dict[str, Any]) -> dict[str, dict[str, s
             "ScrapingDog",
             "Source used to refresh trends and Pattern Scout examples.",
         ),
+        "notion": connection_payload(
+            "connected" if status.get("notion_configured") else "not_connected",
+            "Notion",
+            "Publishes approved lead magnets as reusable pages.",
+        ),
         "daily_sync": connection_payload(
             "connected" if status.get("daily_sync_configured") else "not_configured",
             "Daily Sync",
@@ -2830,6 +3159,8 @@ def account_sync_payload(store: SQLiteStore) -> dict[str, Any]:
         X_DAILY_SYNC_KEY: sync_metadata_payload(metadata.get(X_DAILY_SYNC_KEY)),
         TRENDS_SYNC_KEY: sync_metadata_payload(metadata.get(TRENDS_SYNC_KEY)),
         PATTERNS_SYNC_KEY: sync_metadata_payload(metadata.get(PATTERNS_SYNC_KEY)),
+        LEAD_MAGNET_RESEARCH_SYNC_KEY: sync_metadata_payload(metadata.get(LEAD_MAGNET_RESEARCH_SYNC_KEY)),
+        LEAD_MAGNET_AUTOPILOT_SYNC_KEY: sync_metadata_payload(metadata.get(LEAD_MAGNET_AUTOPILOT_SYNC_KEY)),
     }
 
 
@@ -2839,12 +3170,22 @@ def account_sync_status_payload(sync: dict[str, Any]) -> dict[str, Any]:
         "last_x_metrics_sync": sync[X_METRICS_SYNC_KEY]["last_completed_at"],
         "last_trend_refresh": sync[TRENDS_SYNC_KEY]["last_completed_at"],
         "last_pattern_refresh": sync[PATTERNS_SYNC_KEY]["last_completed_at"],
+        "last_lead_magnet_research": sync[LEAD_MAGNET_RESEARCH_SYNC_KEY]["last_completed_at"],
+        "last_lead_magnet_autopilot": sync[LEAD_MAGNET_AUTOPILOT_SYNC_KEY]["last_completed_at"],
         "latest_error": latest_sync_error(sync),
     }
 
 
 def latest_sync_error(sync: dict[str, Any]) -> str | None:
-    for key in [PATTERNS_SYNC_KEY, TRENDS_SYNC_KEY, X_DAILY_SYNC_KEY, X_POSTS_SYNC_KEY, X_METRICS_SYNC_KEY]:
+    for key in [
+        LEAD_MAGNET_AUTOPILOT_SYNC_KEY,
+        LEAD_MAGNET_RESEARCH_SYNC_KEY,
+        PATTERNS_SYNC_KEY,
+        TRENDS_SYNC_KEY,
+        X_DAILY_SYNC_KEY,
+        X_POSTS_SYNC_KEY,
+        X_METRICS_SYNC_KEY,
+    ]:
         item = sync.get(key) or {}
         if item.get("error_message"):
             return str(item["error_message"])
@@ -3077,8 +3418,216 @@ def queue_version_payload(version: QueuedPostVersion) -> dict[str, Any]:
         "text": version.text,
         "edit_type": version.edit_type,
         "edit_instruction": version.edit_instruction,
+        "source_draft_id": version.source_draft_id,
+        "accepted_at": version.accepted_at,
         "created_at": version.created_at,
     }
+
+
+def lead_magnet_payload(store: SQLiteStore, item: LeadMagnet, *, include_detail: bool = False) -> dict[str, Any]:
+    sources = [source for source_id in item.source_ids if (source := store.get_lead_magnet_source(source_id))]
+    payload: dict[str, Any] = {
+        "id": item.id,
+        "title": item.title,
+        "promise": item.promise,
+        "audience": item.audience,
+        "sales_outcome": item.sales_outcome,
+        "format": item.format,
+        "depth": item.depth,
+        "product_integration": item.product_integration,
+        "cta": item.cta,
+        "status": item.status,
+        "source_ids": item.source_ids,
+        "research_run_id": item.research_run_id,
+        "evidence_summary": item.evidence_summary,
+        "research_strength": lead_magnet_research_strength(sources),
+        "source_count": len(sources),
+        "notion_page_id": item.notion_page_id,
+        "notion_url": item.notion_url,
+        "published_at": item.published_at,
+        "failure_reason": item.failure_reason,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+    }
+    if include_detail:
+        payload.update(
+            {
+                "content": item.content,
+                "markdown": item.markdown,
+                "generation_brief": item.generation_brief,
+                "sources": [lead_magnet_source_payload(source) for source in sources],
+                "versions": [
+                    lead_magnet_version_payload(version)
+                    for version in store.list_lead_magnet_versions(item.id, limit=50)
+                ],
+                "research_run": lead_magnet_research_run_payload(run)
+                if item.research_run_id and (run := store.get_lead_magnet_research_run(item.research_run_id))
+                else None,
+            }
+        )
+    return payload
+
+
+def lead_magnet_source_payload(source: LeadMagnetSource) -> dict[str, Any]:
+    return {
+        "id": source.id,
+        "title": source.title,
+        "source_url": source.source_url,
+        "canonical_url": source.canonical_url,
+        "platform": source.platform,
+        "author": source.author,
+        "published_at": source.published_at,
+        "collected_at": source.collected_at,
+        "format": source.format,
+        "sales_topic": source.sales_topic,
+        "hook": source.hook,
+        "promise": source.promise,
+        "audience": source.audience,
+        "delivery_mechanism": source.delivery_mechanism,
+        "cta": source.cta,
+        "leadpoet_integration": source.leadpoet_integration,
+        "why_it_worked": source.why_it_worked,
+        "observed_metrics": {
+            "likes": source.likes,
+            "replies": source.replies,
+            "reposts": source.reposts,
+            "bookmarks": source.bookmarks,
+            "impressions": source.impressions,
+            "follower_count": source.follower_count,
+            "observed_at": source.metric_observed_at,
+        },
+        "performance_score": source.performance_score,
+        "evidence_strength": source.evidence_strength,
+        "status": source.status,
+        "created_at": source.created_at,
+        "updated_at": source.updated_at,
+    }
+
+
+def lead_magnet_research_run_payload(run: Any) -> dict[str, Any]:
+    return {
+        "id": run.id,
+        "window_start": run.window_start,
+        "window_end": run.window_end,
+        "period_key": run.period_key,
+        "query": run.query,
+        "provider": run.provider,
+        "status": run.status,
+        "candidates_found": run.candidates_found,
+        "sources_qualified": run.sources_qualified,
+        "source_ids": run.source_ids,
+        "warnings": run.warnings,
+        "error_message": run.error_message,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+    }
+
+
+def lead_magnet_version_payload(version: LeadMagnetVersion) -> dict[str, Any]:
+    return {
+        "id": version.id,
+        "lead_magnet_id": version.lead_magnet_id,
+        "content": version.content,
+        "markdown": version.markdown,
+        "edit_type": version.edit_type,
+        "instruction": version.instruction,
+        "source_ids": version.source_ids,
+        "created_at": version.created_at,
+        "updated_at": version.updated_at,
+    }
+
+
+def lead_magnet_research_result_payload(result: Any) -> dict[str, Any]:
+    return {
+        "run": lead_magnet_research_run_payload(result.run),
+        "sources": [lead_magnet_source_payload(source) for source in result.sources],
+        "warnings": list(result.warnings),
+        "candidates_found": result.candidates_found,
+    }
+
+
+def lead_magnet_research_strength(sources: list[LeadMagnetSource]) -> str:
+    observed = sum(1 for source in sources if source.evidence_strength == "metric_backed")
+    if observed >= 3:
+        return "strong"
+    if observed:
+        return "directional"
+    return "qualitative" if sources else "none"
+
+
+def update_lead_magnet_from_payload(store: SQLiteStore, lead_magnet_id: str, payload: dict[str, Any]) -> LeadMagnet:
+    item = store.get_lead_magnet(lead_magnet_id)
+    if not item:
+        raise ValueError("Lead magnet not found.")
+    content_value = payload.get("content")
+    if content_value is not None and not isinstance(content_value, dict):
+        raise ValueError("content must be an object.")
+    content = dict(content_value) if isinstance(content_value, dict) else item.content
+    markdown = str(payload.get("markdown") or "") if "markdown" in payload else item.markdown
+    if isinstance(content_value, dict) and "markdown" not in payload:
+        markdown = render_lead_magnet_markdown(content)
+    source_ids = string_list_payload(payload.get("source_ids")) if "source_ids" in payload else item.source_ids
+    missing_sources = [source_id for source_id in source_ids if not store.get_lead_magnet_source(source_id)]
+    if missing_sources:
+        raise ValueError("Unknown lead-magnet source id(s): " + ", ".join(missing_sources))
+    content_changed = content != item.content or markdown != item.markdown
+    updated = store.save_lead_magnet(
+        replace(
+            item,
+            title=str(payload.get("title") or item.title).strip(),
+            promise=str(payload.get("promise") or item.promise).strip(),
+            audience=str(payload.get("audience") or item.audience).strip(),
+            sales_outcome=str(payload.get("sales_outcome") or payload.get("sales_problem") or item.sales_outcome).strip(),
+            format=str(payload.get("format") or item.format).strip(),
+            depth=str(payload.get("depth") or item.depth).strip(),
+            product_integration=str(payload.get("product_integration") or item.product_integration).strip(),
+            cta=str(payload.get("cta") or item.cta).strip(),
+            source_ids=source_ids,
+            evidence_summary=clean_optional(payload.get("evidence_summary")) if "evidence_summary" in payload else item.evidence_summary,
+            content=content,
+            markdown=markdown,
+            status="needs_review" if content_changed else item.status,
+            failure_reason=None if content_changed else item.failure_reason,
+            updated_at=utc_now(),
+        )
+    )
+    if content_changed:
+        store.save_lead_magnet_version(
+            LeadMagnetVersion(
+                lead_magnet_id=updated.id,
+                content=content,
+                markdown=markdown,
+                edit_type="manual_edit",
+                instruction=clean_optional(payload.get("edit_note")),
+                source_ids=source_ids,
+            )
+        )
+    return updated
+
+
+def save_lead_magnet_research_sync(store: SQLiteStore, result: Any) -> SyncMetadata:
+    summary = {
+        "research_run_id": result.run.id,
+        "window_start": result.run.window_start,
+        "window_end": result.run.window_end,
+        "candidates_found": result.candidates_found,
+        "sources_qualified": len(result.sources),
+        "metric_backed_sources": sum(
+            1 for source in result.sources if source.evidence_strength == "metric_backed"
+        ),
+        "warnings": list(result.warnings),
+        "completed_at": result.run.completed_at,
+    }
+    return store.save_sync_metadata(
+        SyncMetadata(
+            key=LEAD_MAGNET_RESEARCH_SYNC_KEY,
+            last_started_at=result.run.started_at,
+            last_completed_at=result.run.completed_at,
+            status="partial" if result.warnings else "success",
+            summary=summary,
+            error_message="\n".join(result.warnings[:5]) if result.warnings else None,
+        )
+    )
 
 
 def publish_result_payload(result) -> dict[str, Any]:

@@ -38,6 +38,9 @@ Koinoniko currently supports:
 - showing compact trend cards with a short "what happened" summary and deeper source details in the modal
 - storing optional Pattern Scout examples for reusable post mechanics
 - selecting a Topic, trend, or saved Pattern Scout mechanic when creating a post
+- researching sales/tech lead magnets from the rolling last 30 days, with observed metrics kept separate from qualitative inspiration
+- generating prompt libraries, playbooks, template packs, and scorecards as review-ready Markdown/Notion artifacts
+- publishing approved lead magnets to Notion idempotently and creating one review-ready draft per 14-day automation period
 - planning a review-ready week on autopilot, including topic and angle selection, without publishing automatically
 - asking Koinoniko questions about posts, Voice, trends, patterns, queue quality, and what is working
 - showing Account connection status without exposing secret values
@@ -64,12 +67,17 @@ leadpoet_social_brain/
   content_queue.py            Weekly planning, queue, approval, posting helpers
   context.py                  Context retrieval and Voice rebuilds
   generation.py               Prompt assembly, provider call, draft validation
+  originality.py              Local history-wide copy/overlap validation
+  feedback.py                 Conservative accepted-revision preference learning
   skills.py                   Markdown skill loader
   providers.py                Provider protocol and env loader
   openrouter_provider.py      Built-in OpenRouter provider
   analytics.py                Transparent performance summaries
   trend_scout.py              Web trend refresh and ScrapingDog integration
   pattern_scout.py            Optional Pattern Scout intake and refresh
+  lead_magnet_scout.py        Rolling 30-day lead-magnet research and deterministic performance scoring
+  lead_magnets.py             Structured long-form generation, revisions, approval, and Markdown rendering
+  notion_publisher.py         Direct, idempotent Notion page publishing
   cli.py                      Command-line interface
   web/app.py                  Login-gated HTTP API and static UI server
   web/static/                 Single-page web UI
@@ -271,8 +279,13 @@ SOCIAL_BRAIN_DB="/app/data/social_brain.sqlite3"
 SOCIAL_BRAIN_PROVIDER="leadpoet_social_brain.openrouter_provider:create_provider"
 OPENROUTER_API_KEY="<openrouter key>"
 X_BEARER_TOKEN="<x bearer token for read/import/metrics>"
+# Optional: use X full-archive search for the entire 30-day lead-magnet window.
+# Defaults to recent search (the newest seven-day subset) when omitted.
+X_LEAD_MAGNET_SEARCH_ENDPOINT="all"
 TASK_SECRET="<long random secret for /tasks/* endpoints>"
 SCRAPINGDOG_API_KEY="<scrapingdog key>"
+NOTION_API_TOKEN="<notion integration token>"
+NOTION_PARENT_PAGE_ID="<parent page id shared with the integration>"
 ```
 
 ScrapingDog status is connected if either of these is set:
@@ -296,10 +309,16 @@ Optional OpenRouter tuning:
 
 ```bash
 OPENROUTER_TEMPERATURE="0.8"
-OPENROUTER_MAX_TOKENS="1200"
+OPENROUTER_MAX_TOKENS="4000"
+OPENROUTER_MAX_RETRIES="2"
+OPENROUTER_RETRY_BACKOFF_SECONDS="0.5"
+OPENROUTER_REQUEST_TIMEOUT_SECONDS="90"
+OPENROUTER_MAX_RESPONSE_BYTES="5000000"
 OPENROUTER_SITE_URL="https://leadpoet.com"
 OPENROUTER_APP_NAME="Koinoniko"
 ```
+
+Transient OpenRouter timeouts, malformed/oversized responses, rate limits, and 5xx responses retry with bounded exponential backoff. Chunked bodies are read incrementally under a total wall-clock deadline and response-size cap, so periodic upstream chunks cannot keep a request alive forever. Authentication and other permanent 4xx failures fail immediately.
 
 X write credentials are only needed for posting from the app:
 
@@ -336,7 +355,21 @@ Then open `Account -> Model Routing` and set:
 - Natural writer model
 - Evaluator model
 
-Normal Create Post, CLI generation, and Autopilot planning use a two-call natural pipeline: natural writer -> evaluator. The writer gets the original brief, authored examples, saved facts, selected sources, and evidence limits without the legacy structure/rhythm/product-placement matrices. The evaluator ranks the options and preserves a passing winner verbatim; it rewrites only when every option has a concrete defect. Strategist routing remains available for Topic Scout and the legacy naturalness-audit pipeline.
+Normal Create Post, CLI generation, and Autopilot planning use a two-call natural pipeline: natural writer -> evaluator. The writer gets the complete original brief, authored examples, learned Voice profile, editable Voice rules, platform/post-type contract, saved facts, selected sources, performance hints, and evidence limits without the legacy structure/rhythm/product-placement matrices. The evaluator receives the same voice calibration plus the closed saved-fact/source evidence and active Review Filters, ranks every option, and preserves a passing winner verbatim. Strategist routing remains available for Topic Scout and the legacy structural audit selected with `audit-naturalness-x --legacy-structure`.
+
+The normal path validates the evaluator's JSON contract and retries it once when required ranking, logic audit, claim audit, warning fields, or structured quality audit are missing or malformed. Before evaluation, the writer must return exactly three materially distinct options; exact, formatting-only, near-copy, and repeated semantic-thesis sets get one bounded writer retry and then fail closed. The quality audit must identify an exact reader payoff, run a company-swap test against an exact mechanism fragment, and compare the final against supplied examples/recent wording for originality. After selection, shortening, and any source/clarity repair, a final deterministic gate independently rechecks avoid phrases, artificial voice patterns, negated or unsupported first-person setups, invented quotes and product capabilities, unsupported numbers and number-meaning changes, causal-claim laundering, logical clarity, control-string output, and generic AI/sales slogans. It uses a clean writer alternative first, performs one bounded repair only when necessary, and refuses to save or queue copy when the evaluator or final gate leaves an unresolved defect.
+
+The evaluator receipt is bound to the exact final UTF-8 bytes. Its initial audit is reused only when the evaluator actually reviewed those same bytes and its logic, claim coverage, reader payoff, and mechanism fragments all quote that final text. Any local selection, shortening, repair, or stale/mismatched audit triggers a separate audit-only evaluator call with a SHA-256 contract; a bad hash, missing bridge, omitted high-risk claim, stale quote, or unresolved warning fails closed before save. Production audit receipts independently recheck those bindings instead of trusting a `passed` flag alone.
+
+Originality validation is workspace-wide, not limited to the few Voice examples placed in the prompt. An internal corpus covers published posts, every queue state and prior queue version, generated-only drafts, earlier outputs in the current batch, and selected Pattern Scout source wording. The final gate checks exact copies, calibrated near copies, and copied middle passages after every possible text mutation, including evaluator rewrites and bounded repairs. Historical full text stays local; audit receipts contain source IDs, hashes, and similarity measurements rather than source prose. A queued revision exempts only its own lineage, so it can preserve supported language without becoming a duplicate of another post.
+
+Originality also tracks a closed set of direction-and-polarity-aware sales theses, so synonym changes cannot repeatedly publish the same underlying argument. One prior independent lineage creates novelty pressure; two independent live lineages block another unrequested reuse. Revisions collapse to their source lineage, rejected/failed/skipped copy does not create semantic memory, and only a thesis stated directly in the trusted user brief can be exempted. Prompts receive atom IDs and counts rather than historical post prose.
+
+Fetched trend and Pattern Scout text is treated as untrusted data, wrapped behind an explicit prompt boundary, and stripped of instruction-shaped lines before it reaches the writer or evaluator. OpenRouter also receives an invariant system-role boundary above the application prompt. External source text can supply facts; it cannot change roles, reveal context, or dictate output format, and token/control-string responses fail the final gate.
+
+AI revisions of queued posts use this same natural writer, typed evaluator, and final deterministic gate. Existing queued prose is an editing target, not factual evidence, so an old unsupported metric or product claim cannot authorize itself. A revision remains a separate preview until accepted; its generated draft and evaluator/context receipt are retained, acceptance links the queue to that exact draft, and a failed contract or quality gate saves no revision version or queue change.
+
+Approval belongs to the exact reviewed copy. Editing text, topic, post type, or angle reopens review and clears approval even when a caller tries to keep `approved`; schedule-only changes may preserve it, while posted/in-flight copy is immutable. Publication uses an atomic claim and refuses an exact copy that is already published, so separate duplicate queue items cannot both post through the normal path.
 
 For standard-length posts, the natural writer produces both compact and intentionally multiline options. A rotating layout preference and recent-output saturation check keep the selected posts from collapsing into the same single-paragraph shape, while line breaks still need to mark a real turn, list, question, or consequence.
 
@@ -421,9 +454,9 @@ startCommand = "python -m leadpoet_social_brain.web.railway_entrypoint"
 ```
 
 Railway provides `PORT` automatically. The app listens on that port in production.
-The checked-in `railway.toml` now points at `leadpoet_social_brain.web.railway_entrypoint`, which starts the web UI for the main service and runs one-shot task clients for Railway services named `publish-due-x`, `sync-x-posts`, `sync-x-metrics`, `refresh-trends`, or `refresh-patterns`. If a cron service has a different name, set `SOCIAL_BRAIN_TASK` to one of the supported task names.
+The checked-in `railway.toml` now points at `leadpoet_social_brain.web.railway_entrypoint`, which starts the web UI for the main service and runs one-shot task clients for Railway services named `publish-due-x`, `sync-x-posts`, `sync-x-metrics`, `refresh-trends`, `refresh-patterns`, or `autopilot-lead-magnet`. If a cron service has a different name, set `SOCIAL_BRAIN_TASK` to one of the supported task names.
 
-All product data lives in SQLite. On Railway, that means X posts, metric snapshots, Voice Examples, Koinoniko Voice, trends, Pattern Scout examples, drafts, queue items, sync metadata, model routing, and the web login persist only when the SQLite file is on the mounted volume.
+All product data lives in SQLite. On Railway, that means X posts, metric snapshots, Voice Examples, Koinoniko Voice, trends, Pattern Scout examples, lead-magnet research receipts/artifacts/versions, drafts, queue items, sync metadata, model routing, and the web login persist only when the SQLite file is on the mounted volume.
 
 Required Railway setup:
 
@@ -437,8 +470,9 @@ Required Railway setup:
 8. Set `X_BEARER_TOKEN` for X import and public metrics.
 9. Set `SCRAPINGDOG_API_KEY` or `SCRAPING_DOG_API_KEY` for live trend refresh.
 10. Set `TASK_SECRET` for protected Railway Cron tasks.
-11. Set X write credentials only if you want approved posts to post from Railway.
-12. Optional: set `SOCIAL_BRAIN_TASK_TOKEN` only if an external scheduler will call older `/api/tasks/*` endpoints.
+11. Set `NOTION_API_TOKEN` and `NOTION_PARENT_PAGE_ID` to publish approved lead magnets from the deployed app.
+12. Set X write credentials only if you want approved posts to post from Railway.
+13. Optional: set `SOCIAL_BRAIN_TASK_TOKEN` only if an external scheduler will call older `/api/tasks/*` endpoints.
 
 SQLite notes:
 
@@ -476,6 +510,7 @@ POST /tasks/refresh-patterns
 POST /tasks/refresh-patterns-weekly
 POST /tasks/refresh-topics
 POST /tasks/autopilot-weekly
+POST /tasks/autopilot-lead-magnet
 ```
 
 They require:
@@ -496,6 +531,7 @@ Trend refresh:     daily, 06:25 UTC        25 6 * * *
 Pattern refresh:   weekly, Mon 06:40 UTC   40 6 * * 1
 Topic refresh:     weekly, Mon 06:50 UTC   50 6 * * 1
 Autopilot planning: weekly, Mon 07:00 UTC    0 7 * * 1
+Lead magnet:       weekly, Mon 07:15 UTC   15 7 * * 1
 ```
 
 Create Railway Cron services that run and exit:
@@ -506,7 +542,10 @@ python -m leadpoet_social_brain.web.task_client sync-x-metrics
 python -m leadpoet_social_brain.web.task_client publish-due-x
 python -m leadpoet_social_brain.web.task_client refresh-trends
 python -m leadpoet_social_brain.web.task_client refresh-patterns-weekly
+python -m leadpoet_social_brain.web.task_client autopilot-lead-magnet
 ```
+
+The lead-magnet task is safe to trigger weekly. A persisted 14-day period key makes every second weekly invocation idempotently skip, so the app creates at most one new `needs_review` artifact per period. It researches a rolling 30-day window, preserves metric-backed versus qualitative evidence, generates one artifact, and never approves or publishes automatically.
 
 `publish-due-x` checks approved queue items and posts anything whose scheduled time has passed. Railway Cron has a 5-minute minimum interval, so approved posts can go out up to a few minutes after their scheduled time. `sync-x-posts` is incremental by default: after the first import, it asks X only for posts newer than the latest stored X post. The `refresh-trends` task uses a bounded, no-enrichment payload so slow ScrapingDog calls do not exceed hosted request limits. The `refresh-patterns-weekly` task refreshes both weekly and monthly Pattern Scout windows, 5 examples each by default. The default cron payloads also keep post and metric limits modest to avoid repeated backfills.
 
@@ -822,14 +861,19 @@ python3 -m leadpoet_social_brain.cli audit-naturalness-x \
   --fail-on-warning
 ```
 
-By default, `audit-naturalness-x` loads all matching current trends (`--trend-limit 0`) and generates 20 reviewed posts against them. Each generated audit post feeds into the next prompt as anti-sameness context, so the batch actively avoids repeating its own openings, closers, layouts, and Leadpoet grammar fingerprints. It reports bad phrase counts for cookie-cutter Leadpoet definitions and formulaic Leadpoet lead-ins, repeated stock phrases, first-line and closing-line variety, primary structure counts, primary layout target counts, primary closing target counts, primary human rhythm target counts, request angle counts, primary product mention lane, placement, and syntax guidance counts, guidance concentration warnings, actual Leadpoet paragraph/sentence placement, actual Leadpoet syntax counts, Leadpoet grammar fingerprint counts, Leadpoet mention pattern counts, generated layout fingerprints, and trend coverage. Generic saved Leadpoet trend angles are expanded into trend-specific request angles before generation so old stored defaults do not collapse the batch back into one positioning line. If there are more loaded trends than generated posts, the audit warns; raise `--count` or pass `--cover-all-trends` to cover every current trend. Use `--json` when you want the full rows and generated text for manual review.
+By default, `audit-naturalness-x` loads all matching current trends (`--trend-limit 0`) and sends 20 requests through the same production path used by Create Post and Autopilot: natural writer -> evaluator -> final deterministic quality gate. It does not inject the old audit sentinel or structure/rhythm/product-placement matrix into the brief. Each accepted post feeds into the next production prompt as anti-sameness context.
+
+The audit verifies a pipeline receipt for every returned post rather than treating any model text as a pass. A valid receipt must show the natural prompt profile, skipped strategist call, writer and evaluator routing, a distinct three-option writer set, a valid typed evaluator contract, exact-final SHA binding, final-text-bound logic and structured quality fragments, complete high-risk claim coverage, semantic and lexical originality diagnostics, no unresolved evaluator warnings, the selected trend and context containers, and a passing final quality gate. The batch reports generation failures, receipt failures, evaluator contract retries, writer-versus-evaluator selection, final-gate repairs, exact duplicates, repeated phrases and editorial theses, first/last-line and layout variety, Leadpoet grammar concentration and mention rate, character distribution, and trend coverage. Use `--json` for the complete receipts, failures, metrics, and generated text. If there are more loaded trends than attempted posts, raise `--count` or pass `--cover-all-trends`.
+
+Use `--legacy-structure` only when you specifically want to exercise the former strategist and deterministic structure/product-placement diagnostics. That compatibility path retains the detailed legacy matrix report, but it is not evidence about normal production generation.
 
 This command uses the configured LLM provider, so a live audit sends the selected trends, saved context, and generation prompts to that provider. Run it only in an environment where that is acceptable.
 
-Use `--plan-only` for a no-provider preflight that checks the deterministic prompt plan
-against current trends. It reports trend coverage plus planned request angle, structure,
-layout, closing, rhythm, and product mention variation without sending prompts to an LLM
-provider. It also warns when one planned assignment is too concentrated across the batch.
+Use `--plan-only` for a no-provider preflight of the legacy structure/source-seed plan.
+It is explicitly labeled `legacy_structure_source_seed_only` in JSON and reports that the
+production pipeline was not exercised. It remains useful for inspecting trend coverage and
+the old deterministic structure, layout, closing, rhythm, and product-mention assignments,
+but a clean plan-only result is not a production model-quality pass.
 
 In the web UI, `Create Post` includes:
 
@@ -840,11 +884,23 @@ In the web UI, `Create Post` includes:
 - `Pattern to use`
 - selected source chips that can be removed before generation
 
-Create Post uses the two-call natural writer -> evaluator pipeline. The original idea and
-authored examples control expression; saved context and the compact intent object set the
-evidence boundary. When no posts have been explicitly marked as Voice Examples, the system
-automatically fills the calibration set with the most relevant high-performing authored
-posts. Explicit Voice Examples always take precedence.
+Create Post uses the two-call natural writer -> evaluator pipeline. The original idea,
+authored examples, learned Voice profile, active Voice rules, and the relevant post-type
+contract control expression; saved context and selected source receipts set the evidence
+boundary. The evaluator sees those same inputs plus active Review Filters. When no posts have
+been explicitly marked as Voice Examples, the system automatically fills the calibration set
+with relevant authored posts using confidence-adjusted performance rather than raw engagement
+rate. The selector prefers self-contained examples, collapses exact duplicates, and balances
+thesis/structure variety inside hard topic/post-type relevance tiers. Posts generated by
+Koinoniko are excluded from that automatic fallback so generated copy cannot train the next
+generated copy. Explicit Voice Examples always take precedence.
+
+Generated posts are also excluded from automatic Voice suggestions in the UI and Ask
+Koinoniko. A user can still deliberately certify one as a Voice Example. Separately, accepted
+AI edit instructions can create a bounded writing preference only after the same fixed
+preference appears across at least three independent accepted queue revisions. Raw edit
+instructions never enter the writing prompt; one-off edits, unaccepted options, and skips do
+not become global Voice rules.
 
 Normal generation separates voice from editorial substance. Each request receives a rotating
 reader-payoff assignment such as a mechanism explanation, diagnostic, decision rule, practical
@@ -855,8 +911,12 @@ than the default destination for unrelated topics.
 
 The evaluator selects before editing. A passing writer option is saved verbatim. It only
 rewrites when every option has a concrete factual, clarity, avoid-phrase, or length defect.
-For source-backed posts, claim-audit receipts are checked against the literal source text;
-unsupported causal language triggers a bounded source-only repair and local revalidation.
+Its typed review contract is retried once rather than silently falling back to Draft 1. For
+source-backed posts, claim-audit receipts are checked against the literal source and saved
+fact set; unsupported causal language triggers a bounded source-only repair and local
+revalidation. A final gate revalidates copy after every length or repair transform, prefers a
+clean original option over another rewrite, and does not create a queue item while warnings or
+hard violations remain.
 The detailed structure/rhythm/product-placement matrix and automatic style-repair loop remain
 available to the legacy naturalness audit, but they no longer shape normal or Autopilot copy.
 Recent queued and published posts, including cross-topic queue context after same-topic
@@ -1135,6 +1195,39 @@ Rows include count, average engagement rate, average impressions, average bookma
 
 Analytics should guide future writing without making the system feel like a tagging/admin tool.
 
+## Lead Magnets
+
+The Lead Magnets view is a separate review-first workflow for long-form sales resources. It supports:
+
+- `prompt_library`: reusable prompts with inputs, usage steps, and expected outputs
+- `playbook`: stages, actions, examples, and exit criteria
+- `template_pack`: copyable templates plus implementation checklists
+- `scorecard`: diagnostic questions, scoring rules, bands, and recommended actions
+
+`Analyze last 30 days` collects sales/tech lead-magnet candidates, rejects out-of-window or unrelated sources, canonicalizes duplicate URLs, and scores only observed metrics. Metricless search results remain visibly `qualitative`; the model may classify their mechanic but cannot turn them into performance proof.
+
+When `X_BEARER_TOKEN` is configured, live research first searches X and stores public likes, replies, reposts, bookmarks, impressions, author reach, and the observation timestamp. The default `recent` endpoint covers the newest seven-day subset of the rolling month. Set `X_LEAD_MAGNET_SEARCH_ENDPOINT=all` only when the X project has full-archive search access; that queries the complete 30-day window. ScrapingDog discovery remains a qualitative fallback rather than being mislabeled as performance evidence.
+
+Generated artifacts preserve source receipts, render portable Markdown, include one operational Leadpoet workflow section grounded in saved product context, and enter `needs_review`. Approval is required before Notion publishing. Re-publishing updates the saved Notion page ID instead of creating a duplicate.
+
+CLI workflow:
+
+```bash
+python3 -m leadpoet_social_brain.cli research-lead-magnets --window-days 30
+
+python3 -m leadpoet_social_brain.cli generate-lead-magnet \
+  --audience "RevOps and outbound leaders" \
+  --sales-outcome "turn account signals into researched outbound" \
+  --format prompt_library \
+  --product-integration embedded
+
+python3 -m leadpoet_social_brain.cli list-lead-magnets --status needs_review
+python3 -m leadpoet_social_brain.cli approve-lead-magnet --lead-magnet-id "<id>"
+python3 -m leadpoet_social_brain.cli publish-lead-magnet --lead-magnet-id "<id>"
+```
+
+The weekly `autopilot-lead-magnet` task uses a unique 14-day period key. It researches, creates exactly one review-ready artifact, and stops; it never auto-approves or auto-publishes.
+
 ## Skills
 
 Reusable writing instructions live in markdown:
@@ -1169,10 +1262,14 @@ Important SQLite tables:
 - `post_influences`: links published posts to draft influences
 - `generated_drafts`: generated text and structured context snapshot
 - `content_queue`: review/approval/posting queue
-- `queued_post_versions`: manual and AI edit history
+- `queued_post_versions`: manual and AI edit history, source draft lineage, and acceptance timestamp
 - `trend_items`: timely market context
 - `patterns`: reusable named patterns
 - `pattern_examples`: Pattern Scout source examples and reusable mechanics
+- `lead_magnet_sources`: recent source receipts, observed metrics, evidence strength, and performance score
+- `lead_magnet_research_runs`: durable rolling-window and 14-day automation receipts
+- `lead_magnets`: structured artifact, Markdown, review state, and Notion publication state
+- `lead_magnet_versions`: append-only generated and edited revisions
 - `context_sections`: Leadpoet context and Koinoniko Voice sections
 - `web_auth_users`: single local web login
 - `sync_metadata`: X and trend sync status summaries
@@ -1185,6 +1282,9 @@ generated_drafts.id -> posts.source_draft_id -> post_influences -> post_metrics
 content_queue.draft_id -> generated_drafts.id -> posts.source_draft_id
 content_queue.id -> queued_post_versions.queue_id
 pattern_examples.id -> generated_drafts.context_snapshot -> post_influences
+lead_magnet_research_runs.id -> lead_magnets.research_run_id
+lead_magnet_sources.id -> lead_magnets.source_ids_json
+lead_magnets.id -> lead_magnet_versions.lead_magnet_id
 ```
 
 This lets later metrics be analyzed against the examples, context, trends, and patterns that shaped the post.
@@ -1218,6 +1318,18 @@ GET /api/patterns/:id
 POST /api/patterns/:id/archive
 POST /api/patterns/:id/ignore
 POST /api/patterns/refresh
+GET /api/lead-magnets
+POST /api/lead-magnets
+GET /api/lead-magnets/:id
+PATCH /api/lead-magnets/:id
+POST /api/lead-magnets/research
+GET /api/lead-magnets/research-runs
+GET /api/lead-magnets/sources
+POST /api/lead-magnets/sources
+POST /api/lead-magnets/:id/revise
+POST /api/lead-magnets/:id/approve
+POST /api/lead-magnets/:id/archive
+POST /api/lead-magnets/:id/publish
 ```
 
 The topic and post type option endpoints return distinct values from stored posts and queue items plus sensible defaults. They do not create a separate management system.
@@ -1242,6 +1354,12 @@ add-pattern-example
 ingest-patterns-batch
 list-patterns
 refresh-patterns
+research-lead-magnets
+generate-lead-magnet
+list-lead-magnets
+revise-lead-magnet
+approve-lead-magnet
+publish-lead-magnet
 generate-x
 plan-week-x
 list-content-queue

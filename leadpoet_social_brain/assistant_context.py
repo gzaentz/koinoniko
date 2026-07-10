@@ -236,7 +236,12 @@ def voice_candidates(
     notes: dict[str, PostNote],
     metrics: dict[str, EngagementMetrics],
 ) -> list[SocialPost]:
-    candidates = [post for post in posts if not (notes.get(post.id) and notes[post.id].imitate)]
+    candidates = [
+        post
+        for post in posts
+        if post.source_draft_id is None
+        and not (notes.get(post.id) and notes[post.id].imitate)
+    ]
     return top_posts(candidates, metrics)
 
 

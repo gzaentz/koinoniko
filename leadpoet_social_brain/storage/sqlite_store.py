@@ -19,6 +19,10 @@ from leadpoet_social_brain.core.models import (
     DraftRequest,
     EngagementMetrics,
     GeneratedDraft,
+    LeadMagnet,
+    LeadMagnetResearchRun,
+    LeadMagnetSource,
+    LeadMagnetVersion,
     Pattern,
     PostInfluence,
     PostNote,
@@ -28,6 +32,7 @@ from leadpoet_social_brain.core.models import (
     TopicIdea,
     TrendItem,
     ViralPattern,
+    VoiceExampleCandidate,
     WebAuthUser,
     new_id,
     utc_now,
@@ -268,6 +273,99 @@ class SQLiteStore:
             CREATE INDEX IF NOT EXISTS idx_trend_items_lookup
             ON trend_items(workspace_id, status, urgency, topic, date);
 
+            CREATE TABLE IF NOT EXISTS lead_magnet_sources (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                title TEXT NOT NULL,
+                source_url TEXT,
+                canonical_url TEXT,
+                platform TEXT NOT NULL DEFAULT 'web',
+                author TEXT,
+                published_at TEXT,
+                collected_at TEXT NOT NULL,
+                format TEXT NOT NULL DEFAULT 'other',
+                sales_topic TEXT,
+                hook TEXT,
+                promise TEXT,
+                audience TEXT,
+                delivery_mechanism TEXT,
+                cta TEXT,
+                leadpoet_integration TEXT,
+                why_it_worked TEXT,
+                likes INTEGER,
+                replies INTEGER,
+                reposts INTEGER,
+                bookmarks INTEGER,
+                impressions INTEGER,
+                follower_count INTEGER,
+                metric_observed_at TEXT,
+                performance_score REAL,
+                evidence_strength TEXT NOT NULL DEFAULT 'unknown',
+                raw_text TEXT,
+                status TEXT NOT NULL DEFAULT 'candidate',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS lead_magnet_research_runs (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                window_start TEXT NOT NULL,
+                window_end TEXT NOT NULL,
+                period_key TEXT NOT NULL,
+                query TEXT NOT NULL,
+                provider TEXT,
+                status TEXT NOT NULL DEFAULT 'running',
+                candidates_found INTEGER NOT NULL DEFAULT 0,
+                sources_qualified INTEGER NOT NULL DEFAULT 0,
+                source_ids_json TEXT NOT NULL DEFAULT '[]',
+                warnings_json TEXT NOT NULL DEFAULT '[]',
+                error_message TEXT,
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS lead_magnets (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                title TEXT NOT NULL,
+                promise TEXT NOT NULL DEFAULT '',
+                audience TEXT NOT NULL DEFAULT '',
+                sales_outcome TEXT NOT NULL DEFAULT '',
+                format TEXT NOT NULL DEFAULT 'notion_prompt_repo',
+                depth TEXT NOT NULL DEFAULT 'standard',
+                product_integration TEXT NOT NULL DEFAULT '',
+                cta TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'draft',
+                source_ids_json TEXT NOT NULL DEFAULT '[]',
+                research_run_id TEXT REFERENCES lead_magnet_research_runs(id) ON DELETE SET NULL,
+                evidence_summary TEXT,
+                content_json TEXT NOT NULL DEFAULT '{}',
+                markdown TEXT NOT NULL DEFAULT '',
+                generation_brief_json TEXT NOT NULL DEFAULT '{}',
+                notion_page_id TEXT,
+                notion_url TEXT,
+                published_at TEXT,
+                failure_reason TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS lead_magnet_versions (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                lead_magnet_id TEXT NOT NULL REFERENCES lead_magnets(id) ON DELETE CASCADE,
+                content_json TEXT NOT NULL DEFAULT '{}',
+                markdown TEXT NOT NULL DEFAULT '',
+                edit_type TEXT NOT NULL DEFAULT 'generated',
+                instruction TEXT,
+                source_ids_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS topic_ideas (
                 id TEXT PRIMARY KEY,
                 workspace_id TEXT NOT NULL DEFAULT 'default',
@@ -321,6 +419,8 @@ class SQLiteStore:
                 text TEXT NOT NULL,
                 edit_type TEXT NOT NULL,
                 edit_instruction TEXT,
+                source_draft_id TEXT,
+                accepted_at TEXT,
                 created_at TEXT NOT NULL
             );
 
@@ -364,12 +464,16 @@ class SQLiteStore:
     def _migrate_existing_schema(self) -> None:
         self._ensure_workspace_columns()
         self._migrate_workspace_unique_tables()
+        self._ensure_lead_magnet_columns()
+        self._ensure_unique_lead_magnet_period_keys()
         self._recreate_workspace_indexes()
         self._ensure_column("posts", "source_draft_id", "TEXT")
         for column in ["hook", "structure", "tone", "cta", "formatting"]:
             self._ensure_column("post_notes", column, "TEXT")
         self._ensure_column("generated_drafts", "context_snapshot_json", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_column("content_queue", "topic_idea_id", "TEXT")
+        self._ensure_column("queued_post_versions", "source_draft_id", "TEXT")
+        self._ensure_column("queued_post_versions", "accepted_at", "TEXT")
         self._ensure_column("topic_ideas", "evidence_basis_json", "TEXT NOT NULL DEFAULT '[]'")
         self._ensure_column("topic_ideas", "reader_value_mode", "TEXT")
         for column in [
@@ -395,6 +499,10 @@ class SQLiteStore:
             "context_sections",
             "generated_drafts",
             "trend_items",
+            "lead_magnet_sources",
+            "lead_magnet_research_runs",
+            "lead_magnets",
+            "lead_magnet_versions",
             "topic_ideas",
             "content_queue",
             "web_auth_users",
@@ -402,6 +510,119 @@ class SQLiteStore:
             "sync_metadata",
         ]:
             self._ensure_column(table, "workspace_id", f"TEXT NOT NULL DEFAULT '{DEFAULT_WORKSPACE_ID}'")
+
+    def _ensure_lead_magnet_columns(self) -> None:
+        columns_by_table = {
+            "lead_magnet_sources": {
+                "title": "TEXT NOT NULL DEFAULT ''",
+                "source_url": "TEXT",
+                "canonical_url": "TEXT",
+                "platform": "TEXT NOT NULL DEFAULT 'web'",
+                "author": "TEXT",
+                "published_at": "TEXT",
+                "collected_at": "TEXT NOT NULL DEFAULT ''",
+                "format": "TEXT NOT NULL DEFAULT 'other'",
+                "sales_topic": "TEXT",
+                "hook": "TEXT",
+                "promise": "TEXT",
+                "audience": "TEXT",
+                "delivery_mechanism": "TEXT",
+                "cta": "TEXT",
+                "leadpoet_integration": "TEXT",
+                "why_it_worked": "TEXT",
+                "likes": "INTEGER",
+                "replies": "INTEGER",
+                "reposts": "INTEGER",
+                "bookmarks": "INTEGER",
+                "impressions": "INTEGER",
+                "follower_count": "INTEGER",
+                "metric_observed_at": "TEXT",
+                "performance_score": "REAL",
+                "evidence_strength": "TEXT NOT NULL DEFAULT 'unknown'",
+                "raw_text": "TEXT",
+                "status": "TEXT NOT NULL DEFAULT 'candidate'",
+                "created_at": "TEXT NOT NULL DEFAULT ''",
+                "updated_at": "TEXT NOT NULL DEFAULT ''",
+            },
+            "lead_magnet_research_runs": {
+                "window_start": "TEXT NOT NULL DEFAULT ''",
+                "window_end": "TEXT NOT NULL DEFAULT ''",
+                "period_key": "TEXT NOT NULL DEFAULT ''",
+                "query": "TEXT NOT NULL DEFAULT ''",
+                "provider": "TEXT",
+                "status": "TEXT NOT NULL DEFAULT 'running'",
+                "candidates_found": "INTEGER NOT NULL DEFAULT 0",
+                "sources_qualified": "INTEGER NOT NULL DEFAULT 0",
+                "source_ids_json": "TEXT NOT NULL DEFAULT '[]'",
+                "warnings_json": "TEXT NOT NULL DEFAULT '[]'",
+                "error_message": "TEXT",
+                "started_at": "TEXT NOT NULL DEFAULT ''",
+                "completed_at": "TEXT",
+                "created_at": "TEXT NOT NULL DEFAULT ''",
+                "updated_at": "TEXT NOT NULL DEFAULT ''",
+            },
+            "lead_magnets": {
+                "title": "TEXT NOT NULL DEFAULT ''",
+                "promise": "TEXT NOT NULL DEFAULT ''",
+                "audience": "TEXT NOT NULL DEFAULT ''",
+                "sales_outcome": "TEXT NOT NULL DEFAULT ''",
+                "format": "TEXT NOT NULL DEFAULT 'notion_prompt_repo'",
+                "depth": "TEXT NOT NULL DEFAULT 'standard'",
+                "product_integration": "TEXT NOT NULL DEFAULT ''",
+                "cta": "TEXT NOT NULL DEFAULT ''",
+                "status": "TEXT NOT NULL DEFAULT 'draft'",
+                "source_ids_json": "TEXT NOT NULL DEFAULT '[]'",
+                "research_run_id": "TEXT",
+                "evidence_summary": "TEXT",
+                "content_json": "TEXT NOT NULL DEFAULT '{}'",
+                "markdown": "TEXT NOT NULL DEFAULT ''",
+                "generation_brief_json": "TEXT NOT NULL DEFAULT '{}'",
+                "notion_page_id": "TEXT",
+                "notion_url": "TEXT",
+                "published_at": "TEXT",
+                "failure_reason": "TEXT",
+                "created_at": "TEXT NOT NULL DEFAULT ''",
+                "updated_at": "TEXT NOT NULL DEFAULT ''",
+            },
+            "lead_magnet_versions": {
+                "lead_magnet_id": "TEXT NOT NULL DEFAULT ''",
+                "content_json": "TEXT NOT NULL DEFAULT '{}'",
+                "markdown": "TEXT NOT NULL DEFAULT ''",
+                "edit_type": "TEXT NOT NULL DEFAULT 'generated'",
+                "instruction": "TEXT",
+                "source_ids_json": "TEXT NOT NULL DEFAULT '[]'",
+                "created_at": "TEXT NOT NULL DEFAULT ''",
+                "updated_at": "TEXT NOT NULL DEFAULT ''",
+            },
+        }
+        for table, columns in columns_by_table.items():
+            for column, ddl in columns.items():
+                self._ensure_column(table, column, ddl)
+
+    def _ensure_unique_lead_magnet_period_keys(self) -> None:
+        rows = self.conn.execute(
+            """
+            SELECT rowid, id, workspace_id, period_key
+            FROM lead_magnet_research_runs
+            ORDER BY rowid
+            """
+        ).fetchall()
+        seen: set[tuple[str, str]] = set()
+        for row in rows:
+            workspace_id = str(row["workspace_id"] or DEFAULT_WORKSPACE_ID)
+            original = str(row["period_key"] or "").strip()
+            base = original or f"legacy:{row['id'] or row['rowid']}"
+            candidate = base
+            duplicate_number = 1
+            while (workspace_id, candidate) in seen:
+                duplicate_number += 1
+                candidate = f"{base}:legacy-{duplicate_number}"
+            seen.add((workspace_id, candidate))
+            if candidate != original:
+                self.conn.execute(
+                    "UPDATE lead_magnet_research_runs SET period_key = ? WHERE rowid = ?",
+                    (candidate, row["rowid"]),
+                )
 
     def _migrate_workspace_unique_tables(self) -> None:
         if not self._has_unique_index("patterns", ["workspace_id", "name"]):
@@ -446,10 +667,67 @@ class SQLiteStore:
             ON topic_ideas(workspace_id, status, priority DESC, created_at DESC)
             """,
         )
+        self._ensure_index(
+            "idx_lead_magnet_sources_lookup",
+            ["workspace_id", "status", "published_at", "performance_score"],
+            """
+            CREATE INDEX IF NOT EXISTS idx_lead_magnet_sources_lookup
+            ON lead_magnet_sources(workspace_id, status, published_at DESC, performance_score DESC)
+            """,
+        )
+        self._ensure_index(
+            "idx_lead_magnet_sources_canonical_url",
+            ["workspace_id", "canonical_url"],
+            """
+            CREATE INDEX IF NOT EXISTS idx_lead_magnet_sources_canonical_url
+            ON lead_magnet_sources(workspace_id, canonical_url)
+            """,
+        )
+        self._ensure_index(
+            "idx_lead_magnet_research_runs_lookup",
+            ["workspace_id", "status", "period_key", "window_end"],
+            """
+            CREATE INDEX IF NOT EXISTS idx_lead_magnet_research_runs_lookup
+            ON lead_magnet_research_runs(workspace_id, status, period_key, window_end DESC)
+            """,
+        )
+        self._ensure_index(
+            "idx_lead_magnet_research_runs_period_key",
+            ["workspace_id", "period_key"],
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_lead_magnet_research_runs_period_key
+            ON lead_magnet_research_runs(workspace_id, period_key)
+            """,
+            unique=True,
+        )
+        self._ensure_index(
+            "idx_lead_magnets_lookup",
+            ["workspace_id", "status", "format", "created_at"],
+            """
+            CREATE INDEX IF NOT EXISTS idx_lead_magnets_lookup
+            ON lead_magnets(workspace_id, status, format, created_at DESC)
+            """,
+        )
+        self._ensure_index(
+            "idx_lead_magnet_versions_lookup",
+            ["workspace_id", "lead_magnet_id", "created_at"],
+            """
+            CREATE INDEX IF NOT EXISTS idx_lead_magnet_versions_lookup
+            ON lead_magnet_versions(workspace_id, lead_magnet_id, created_at DESC)
+            """,
+        )
 
-    def _ensure_index(self, index_name: str, columns: list[str], create_sql: str) -> None:
+    def _ensure_index(
+        self,
+        index_name: str,
+        columns: list[str],
+        create_sql: str,
+        *,
+        unique: bool | None = None,
+    ) -> None:
         existing_columns = self._index_columns(index_name)
-        if existing_columns == columns:
+        uniqueness_matches = unique is None or self._index_is_unique(index_name) == unique
+        if existing_columns == columns and uniqueness_matches:
             return
         if existing_columns is not None:
             self.conn.execute(f"DROP INDEX IF EXISTS {index_name}")
@@ -464,6 +742,13 @@ class SQLiteStore:
             return None
         rows = self.conn.execute(f"PRAGMA index_info({index_name})").fetchall()
         return [row["name"] for row in rows]
+
+    def _index_is_unique(self, index_name: str) -> bool:
+        row = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+            (index_name,),
+        ).fetchone()
+        return bool(row and row["sql"] and "CREATE UNIQUE INDEX" in str(row["sql"]).upper())
 
     def _ensure_required_context_sections(self) -> None:
         for section in required_context_sections():
@@ -676,6 +961,25 @@ class SQLiteStore:
         ).fetchone()
         return self._row_to_queue_item(row) if row else None
 
+    def claim_content_queue_item_for_posting(self, queue_id: str) -> ContentQueueItem | None:
+        """Atomically move one approved queue item into an in-flight state."""
+
+        cursor = self.conn.execute(
+            """
+            UPDATE content_queue
+            SET status = 'posting', updated_at = ?, failure_reason = NULL
+            WHERE id = ?
+              AND workspace_id = ?
+              AND status = 'approved'
+              AND x_post_id IS NULL
+            """,
+            (utc_now(), queue_id, self.workspace_id),
+        )
+        self.conn.commit()
+        if cursor.rowcount != 1:
+            return None
+        return self.get_content_queue_item(queue_id)
+
     def list_content_queue(
         self,
         *,
@@ -684,6 +988,7 @@ class SQLiteStore:
         scheduled_from: str | None = None,
         scheduled_to: str | None = None,
         limit: int = 100,
+        newest_first: bool = False,
     ) -> list[ContentQueueItem]:
         clauses: list[str] = ["workspace_id = ?"]
         params: list[object] = [self.workspace_id]
@@ -700,12 +1005,17 @@ class SQLiteStore:
             clauses.append("scheduled_at < ?")
             params.append(scheduled_to)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        order_by = (
+            "updated_at DESC, created_at DESC, scheduled_at DESC, id DESC"
+            if newest_first
+            else "scheduled_at ASC, created_at ASC"
+        )
         rows = self.conn.execute(
             f"""
             SELECT *
             FROM content_queue
             {where}
-            ORDER BY scheduled_at ASC, created_at ASC
+            ORDER BY {order_by}
             LIMIT ?
             """,
             (*params, limit),
@@ -741,14 +1051,17 @@ class SQLiteStore:
             text=version.text,
             edit_type=version.edit_type,
             edit_instruction=version.edit_instruction,
+            source_draft_id=version.source_draft_id,
+            accepted_at=version.accepted_at,
             created_at=version.created_at,
         )
         self.conn.execute(
             """
             INSERT INTO queued_post_versions (
-                id, queue_id, text, edit_type, edit_instruction, created_at
+                id, queue_id, text, edit_type, edit_instruction,
+                source_draft_id, accepted_at, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 saved.id,
@@ -756,11 +1069,35 @@ class SQLiteStore:
                 saved.text,
                 saved.edit_type,
                 saved.edit_instruction,
+                saved.source_draft_id,
+                saved.accepted_at,
                 saved.created_at,
             ),
         )
         self.conn.commit()
         return saved
+
+    def mark_queued_post_version_accepted(self, version_id: str) -> QueuedPostVersion | None:
+        """Record which exact generated version became the queue's current copy."""
+
+        accepted_at = utc_now()
+        cursor = self.conn.execute(
+            """
+            UPDATE queued_post_versions
+            SET accepted_at = ?
+            WHERE id = ?
+              AND EXISTS (
+                  SELECT 1 FROM content_queue
+                  WHERE content_queue.id = queued_post_versions.queue_id
+                    AND content_queue.workspace_id = ?
+              )
+            """,
+            (accepted_at, version_id, self.workspace_id),
+        )
+        self.conn.commit()
+        if cursor.rowcount != 1:
+            return None
+        return self.get_queued_post_version(version_id)
 
     def get_queued_post_version(self, version_id: str) -> QueuedPostVersion | None:
         row = self.conn.execute(
@@ -1454,6 +1791,632 @@ class SQLiteStore:
         self.conn.commit()
         return saved
 
+    def save_lead_magnet_source(self, source: LeadMagnetSource) -> LeadMagnetSource:
+        now = utc_now()
+        saved = LeadMagnetSource(
+            id=source.id,
+            workspace_id=self.workspace_id,
+            title=source.title,
+            source_url=source.source_url,
+            canonical_url=source.canonical_url,
+            platform=source.platform or "web",
+            author=source.author,
+            published_at=source.published_at,
+            collected_at=source.collected_at or now,
+            format=source.format or "other",
+            sales_topic=source.sales_topic,
+            hook=source.hook,
+            promise=source.promise,
+            audience=source.audience,
+            delivery_mechanism=source.delivery_mechanism,
+            cta=source.cta,
+            leadpoet_integration=source.leadpoet_integration,
+            why_it_worked=source.why_it_worked,
+            likes=source.likes,
+            replies=source.replies,
+            reposts=source.reposts,
+            bookmarks=source.bookmarks,
+            impressions=source.impressions,
+            follower_count=source.follower_count,
+            metric_observed_at=source.metric_observed_at,
+            performance_score=source.performance_score,
+            evidence_strength=source.evidence_strength or "unknown",
+            raw_text=source.raw_text,
+            status=source.status or "candidate",
+            created_at=source.created_at,
+            updated_at=now,
+        )
+        self.conn.execute(
+            """
+            INSERT INTO lead_magnet_sources (
+                id, workspace_id, title, source_url, canonical_url, platform,
+                author, published_at, collected_at, format, sales_topic, hook,
+                promise, audience, delivery_mechanism, cta,
+                leadpoet_integration, why_it_worked, likes, replies, reposts,
+                bookmarks, impressions, follower_count, metric_observed_at,
+                performance_score, evidence_strength, raw_text, status,
+                created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                workspace_id = excluded.workspace_id,
+                title = excluded.title,
+                source_url = excluded.source_url,
+                canonical_url = excluded.canonical_url,
+                platform = excluded.platform,
+                author = excluded.author,
+                published_at = excluded.published_at,
+                collected_at = excluded.collected_at,
+                format = excluded.format,
+                sales_topic = excluded.sales_topic,
+                hook = excluded.hook,
+                promise = excluded.promise,
+                audience = excluded.audience,
+                delivery_mechanism = excluded.delivery_mechanism,
+                cta = excluded.cta,
+                leadpoet_integration = excluded.leadpoet_integration,
+                why_it_worked = excluded.why_it_worked,
+                likes = excluded.likes,
+                replies = excluded.replies,
+                reposts = excluded.reposts,
+                bookmarks = excluded.bookmarks,
+                impressions = excluded.impressions,
+                follower_count = excluded.follower_count,
+                metric_observed_at = excluded.metric_observed_at,
+                performance_score = excluded.performance_score,
+                evidence_strength = excluded.evidence_strength,
+                raw_text = excluded.raw_text,
+                status = excluded.status,
+                updated_at = excluded.updated_at
+            """,
+            (
+                saved.id,
+                saved.workspace_id,
+                saved.title,
+                saved.source_url,
+                saved.canonical_url,
+                saved.platform,
+                saved.author,
+                saved.published_at,
+                saved.collected_at,
+                saved.format,
+                saved.sales_topic,
+                saved.hook,
+                saved.promise,
+                saved.audience,
+                saved.delivery_mechanism,
+                saved.cta,
+                saved.leadpoet_integration,
+                saved.why_it_worked,
+                saved.likes,
+                saved.replies,
+                saved.reposts,
+                saved.bookmarks,
+                saved.impressions,
+                saved.follower_count,
+                saved.metric_observed_at,
+                saved.performance_score,
+                saved.evidence_strength,
+                saved.raw_text,
+                saved.status,
+                saved.created_at,
+                saved.updated_at,
+            ),
+        )
+        self.conn.commit()
+        return saved
+
+    def get_lead_magnet_source(self, source_id: str) -> LeadMagnetSource | None:
+        row = self.conn.execute(
+            "SELECT * FROM lead_magnet_sources WHERE id = ? AND workspace_id = ?",
+            (source_id, self.workspace_id),
+        ).fetchone()
+        return self._row_to_lead_magnet_source(row) if row else None
+
+    def get_lead_magnet_source_by_canonical_url(self, canonical_url: str) -> LeadMagnetSource | None:
+        row = self.conn.execute(
+            """
+            SELECT *
+            FROM lead_magnet_sources
+            WHERE workspace_id = ? AND canonical_url = ?
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (self.workspace_id, canonical_url),
+        ).fetchone()
+        return self._row_to_lead_magnet_source(row) if row else None
+
+    def list_lead_magnet_sources(
+        self,
+        *,
+        status: str | None = None,
+        platform: str | None = None,
+        format: str | None = None,
+        sales_topic: str | None = None,
+        published_after: str | None = None,
+        published_before: str | None = None,
+        min_performance_score: float | None = None,
+        limit: int | None = 100,
+    ) -> list[LeadMagnetSource]:
+        clauses = ["workspace_id = ?"]
+        params: list[object] = [self.workspace_id]
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if platform:
+            clauses.append("platform = ?")
+            params.append(platform)
+        if format:
+            clauses.append("format = ?")
+            params.append(format)
+        if sales_topic:
+            clauses.append("(sales_topic = ? OR sales_topic LIKE ?)")
+            params.extend([sales_topic, f"%{sales_topic}%"])
+        if published_after:
+            clauses.append("published_at >= ?")
+            params.append(published_after)
+        if published_before:
+            clauses.append("published_at <= ?")
+            params.append(published_before)
+        if min_performance_score is not None:
+            clauses.append("performance_score >= ?")
+            params.append(min_performance_score)
+        limit_sql = " LIMIT ?" if limit is not None else ""
+        if limit is not None:
+            params.append(limit)
+        rows = self.conn.execute(
+            f"""
+            SELECT *
+            FROM lead_magnet_sources
+            WHERE {' AND '.join(clauses)}
+            ORDER BY
+                CASE WHEN performance_score IS NULL THEN 1 ELSE 0 END,
+                performance_score DESC,
+                COALESCE(published_at, collected_at, created_at) DESC
+            {limit_sql}
+            """,
+            params,
+        ).fetchall()
+        return [self._row_to_lead_magnet_source(row) for row in rows]
+
+    def mark_lead_magnet_source_status(self, source_id: str, status: str) -> LeadMagnetSource | None:
+        self.conn.execute(
+            """
+            UPDATE lead_magnet_sources
+            SET status = ?, updated_at = ?
+            WHERE id = ? AND workspace_id = ?
+            """,
+            (status, utc_now(), source_id, self.workspace_id),
+        )
+        self.conn.commit()
+        return self.get_lead_magnet_source(source_id)
+
+    def delete_lead_magnet_source(self, source_id: str) -> bool:
+        cursor = self.conn.execute(
+            "DELETE FROM lead_magnet_sources WHERE id = ? AND workspace_id = ?",
+            (source_id, self.workspace_id),
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def save_lead_magnet_research_run(self, run: LeadMagnetResearchRun) -> LeadMagnetResearchRun:
+        period_key = run.period_key.strip()
+        if not period_key:
+            raise ValueError("Lead magnet research period_key is required.")
+        now = utc_now()
+        saved = LeadMagnetResearchRun(
+            id=run.id,
+            workspace_id=self.workspace_id,
+            window_start=run.window_start,
+            window_end=run.window_end,
+            period_key=period_key,
+            query=run.query,
+            provider=run.provider,
+            status=run.status or "running",
+            candidates_found=max(0, int(run.candidates_found)),
+            sources_qualified=max(0, int(run.sources_qualified)),
+            source_ids=list(run.source_ids or []),
+            warnings=list(run.warnings or []),
+            error_message=run.error_message,
+            started_at=run.started_at or now,
+            completed_at=run.completed_at,
+            created_at=run.created_at,
+            updated_at=now,
+        )
+        self.conn.execute(
+            """
+            INSERT INTO lead_magnet_research_runs (
+                id, workspace_id, window_start, window_end, period_key, query,
+                provider, status, candidates_found, sources_qualified,
+                source_ids_json, warnings_json, error_message, started_at,
+                completed_at, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(workspace_id, period_key) DO UPDATE SET
+                window_start = excluded.window_start,
+                window_end = excluded.window_end,
+                query = excluded.query,
+                provider = excluded.provider,
+                status = excluded.status,
+                candidates_found = excluded.candidates_found,
+                sources_qualified = excluded.sources_qualified,
+                source_ids_json = excluded.source_ids_json,
+                warnings_json = excluded.warnings_json,
+                error_message = excluded.error_message,
+                started_at = excluded.started_at,
+                completed_at = excluded.completed_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                saved.id,
+                saved.workspace_id,
+                saved.window_start,
+                saved.window_end,
+                saved.period_key,
+                saved.query,
+                saved.provider,
+                saved.status,
+                saved.candidates_found,
+                saved.sources_qualified,
+                json.dumps(saved.source_ids),
+                json.dumps(saved.warnings),
+                saved.error_message,
+                saved.started_at,
+                saved.completed_at,
+                saved.created_at,
+                saved.updated_at,
+            ),
+        )
+        self.conn.commit()
+        persisted = self.get_lead_magnet_research_run_by_period_key(saved.period_key)
+        if persisted is None:
+            raise RuntimeError(f"Lead magnet research run was not saved for period {saved.period_key}")
+        return persisted
+
+    def get_lead_magnet_research_run(self, run_id: str) -> LeadMagnetResearchRun | None:
+        row = self.conn.execute(
+            "SELECT * FROM lead_magnet_research_runs WHERE id = ? AND workspace_id = ?",
+            (run_id, self.workspace_id),
+        ).fetchone()
+        return self._row_to_lead_magnet_research_run(row) if row else None
+
+    def get_lead_magnet_research_run_by_period_key(self, period_key: str) -> LeadMagnetResearchRun | None:
+        row = self.conn.execute(
+            """
+            SELECT *
+            FROM lead_magnet_research_runs
+            WHERE workspace_id = ? AND period_key = ?
+            ORDER BY started_at DESC, created_at DESC
+            LIMIT 1
+            """,
+            (self.workspace_id, period_key),
+        ).fetchone()
+        return self._row_to_lead_magnet_research_run(row) if row else None
+
+    def list_lead_magnet_research_runs(
+        self,
+        *,
+        status: str | None = None,
+        period_key: str | None = None,
+        limit: int | None = 50,
+    ) -> list[LeadMagnetResearchRun]:
+        clauses = ["workspace_id = ?"]
+        params: list[object] = [self.workspace_id]
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if period_key:
+            clauses.append("period_key = ?")
+            params.append(period_key)
+        limit_sql = " LIMIT ?" if limit is not None else ""
+        if limit is not None:
+            params.append(limit)
+        rows = self.conn.execute(
+            f"""
+            SELECT *
+            FROM lead_magnet_research_runs
+            WHERE {' AND '.join(clauses)}
+            ORDER BY started_at DESC, created_at DESC
+            {limit_sql}
+            """,
+            params,
+        ).fetchall()
+        return [self._row_to_lead_magnet_research_run(row) for row in rows]
+
+    def mark_lead_magnet_research_run_status(
+        self,
+        run_id: str,
+        status: str,
+        *,
+        completed_at: str | None = None,
+        error_message: str | None = None,
+    ) -> LeadMagnetResearchRun | None:
+        now = utc_now()
+        completed = completed_at
+        if completed is None and status in {"success", "completed", "partial", "failed"}:
+            completed = now
+        self.conn.execute(
+            """
+            UPDATE lead_magnet_research_runs
+            SET status = ?, completed_at = COALESCE(?, completed_at),
+                error_message = ?, updated_at = ?
+            WHERE id = ? AND workspace_id = ?
+            """,
+            (status, completed, error_message, now, run_id, self.workspace_id),
+        )
+        self.conn.commit()
+        return self.get_lead_magnet_research_run(run_id)
+
+    def delete_lead_magnet_research_run(self, run_id: str) -> bool:
+        cursor = self.conn.execute(
+            "DELETE FROM lead_magnet_research_runs WHERE id = ? AND workspace_id = ?",
+            (run_id, self.workspace_id),
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def save_lead_magnet(self, magnet: LeadMagnet) -> LeadMagnet:
+        if magnet.research_run_id and not self.get_lead_magnet_research_run(magnet.research_run_id):
+            raise ValueError(f"No lead magnet research run found for id {magnet.research_run_id}")
+        now = utc_now()
+        saved = LeadMagnet(
+            id=magnet.id,
+            workspace_id=self.workspace_id,
+            title=magnet.title,
+            promise=magnet.promise or "",
+            audience=magnet.audience or "",
+            sales_outcome=magnet.sales_outcome or "",
+            format=magnet.format or "notion_prompt_repo",
+            depth=magnet.depth or "standard",
+            product_integration=magnet.product_integration or "",
+            cta=magnet.cta or "",
+            status=magnet.status or "draft",
+            source_ids=list(magnet.source_ids or []),
+            research_run_id=magnet.research_run_id,
+            evidence_summary=magnet.evidence_summary,
+            content=dict(magnet.content or {}),
+            markdown=magnet.markdown or "",
+            generation_brief=dict(magnet.generation_brief or {}),
+            notion_page_id=magnet.notion_page_id,
+            notion_url=magnet.notion_url,
+            published_at=magnet.published_at,
+            failure_reason=magnet.failure_reason,
+            created_at=magnet.created_at,
+            updated_at=now,
+        )
+        self.conn.execute(
+            """
+            INSERT INTO lead_magnets (
+                id, workspace_id, title, promise, audience, sales_outcome,
+                format, depth, product_integration, cta, status,
+                source_ids_json, research_run_id, evidence_summary,
+                content_json, markdown, generation_brief_json, notion_page_id,
+                notion_url, published_at, failure_reason, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                workspace_id = excluded.workspace_id,
+                title = excluded.title,
+                promise = excluded.promise,
+                audience = excluded.audience,
+                sales_outcome = excluded.sales_outcome,
+                format = excluded.format,
+                depth = excluded.depth,
+                product_integration = excluded.product_integration,
+                cta = excluded.cta,
+                status = excluded.status,
+                source_ids_json = excluded.source_ids_json,
+                research_run_id = excluded.research_run_id,
+                evidence_summary = excluded.evidence_summary,
+                content_json = excluded.content_json,
+                markdown = excluded.markdown,
+                generation_brief_json = excluded.generation_brief_json,
+                notion_page_id = excluded.notion_page_id,
+                notion_url = excluded.notion_url,
+                published_at = excluded.published_at,
+                failure_reason = excluded.failure_reason,
+                updated_at = excluded.updated_at
+            """,
+            (
+                saved.id,
+                saved.workspace_id,
+                saved.title,
+                saved.promise,
+                saved.audience,
+                saved.sales_outcome,
+                saved.format,
+                saved.depth,
+                saved.product_integration,
+                saved.cta,
+                saved.status,
+                json.dumps(saved.source_ids),
+                saved.research_run_id,
+                saved.evidence_summary,
+                json.dumps(saved.content),
+                saved.markdown,
+                json.dumps(saved.generation_brief),
+                saved.notion_page_id,
+                saved.notion_url,
+                saved.published_at,
+                saved.failure_reason,
+                saved.created_at,
+                saved.updated_at,
+            ),
+        )
+        self.conn.commit()
+        return saved
+
+    def get_lead_magnet(self, lead_magnet_id: str) -> LeadMagnet | None:
+        row = self.conn.execute(
+            "SELECT * FROM lead_magnets WHERE id = ? AND workspace_id = ?",
+            (lead_magnet_id, self.workspace_id),
+        ).fetchone()
+        return self._row_to_lead_magnet(row) if row else None
+
+    def list_lead_magnets(
+        self,
+        *,
+        status: str | None = None,
+        format: str | None = None,
+        research_run_id: str | None = None,
+        limit: int | None = 50,
+    ) -> list[LeadMagnet]:
+        clauses = ["workspace_id = ?"]
+        params: list[object] = [self.workspace_id]
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if format:
+            clauses.append("format = ?")
+            params.append(format)
+        if research_run_id:
+            clauses.append("research_run_id = ?")
+            params.append(research_run_id)
+        limit_sql = " LIMIT ?" if limit is not None else ""
+        if limit is not None:
+            params.append(limit)
+        rows = self.conn.execute(
+            f"""
+            SELECT *
+            FROM lead_magnets
+            WHERE {' AND '.join(clauses)}
+            ORDER BY COALESCE(published_at, updated_at, created_at) DESC
+            {limit_sql}
+            """,
+            params,
+        ).fetchall()
+        return [self._row_to_lead_magnet(row) for row in rows]
+
+    def mark_lead_magnet_status(
+        self,
+        lead_magnet_id: str,
+        status: str,
+        *,
+        published_at: str | None = None,
+        failure_reason: str | None = None,
+    ) -> LeadMagnet | None:
+        now = utc_now()
+        published = published_at
+        if published is None and status == "published":
+            published = now
+        self.conn.execute(
+            """
+            UPDATE lead_magnets
+            SET status = ?, published_at = COALESCE(?, published_at),
+                failure_reason = ?, updated_at = ?
+            WHERE id = ? AND workspace_id = ?
+            """,
+            (status, published, failure_reason, now, lead_magnet_id, self.workspace_id),
+        )
+        self.conn.commit()
+        return self.get_lead_magnet(lead_magnet_id)
+
+    def delete_lead_magnet(self, lead_magnet_id: str) -> bool:
+        cursor = self.conn.execute(
+            "DELETE FROM lead_magnets WHERE id = ? AND workspace_id = ?",
+            (lead_magnet_id, self.workspace_id),
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def save_lead_magnet_version(self, version: LeadMagnetVersion) -> LeadMagnetVersion:
+        if not self.get_lead_magnet(version.lead_magnet_id):
+            raise ValueError(f"No lead magnet found for id {version.lead_magnet_id}")
+        now = utc_now()
+        saved = LeadMagnetVersion(
+            id=version.id,
+            workspace_id=self.workspace_id,
+            lead_magnet_id=version.lead_magnet_id,
+            content=dict(version.content or {}),
+            markdown=version.markdown or "",
+            edit_type=version.edit_type or "generated",
+            instruction=version.instruction,
+            source_ids=list(version.source_ids or []),
+            created_at=version.created_at,
+            updated_at=now,
+        )
+        self.conn.execute(
+            """
+            INSERT INTO lead_magnet_versions (
+                id, workspace_id, lead_magnet_id, content_json, markdown,
+                edit_type, instruction, source_ids_json, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                workspace_id = excluded.workspace_id,
+                lead_magnet_id = excluded.lead_magnet_id,
+                content_json = excluded.content_json,
+                markdown = excluded.markdown,
+                edit_type = excluded.edit_type,
+                instruction = excluded.instruction,
+                source_ids_json = excluded.source_ids_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                saved.id,
+                saved.workspace_id,
+                saved.lead_magnet_id,
+                json.dumps(saved.content),
+                saved.markdown,
+                saved.edit_type,
+                saved.instruction,
+                json.dumps(saved.source_ids),
+                saved.created_at,
+                saved.updated_at,
+            ),
+        )
+        self.conn.commit()
+        return saved
+
+    def get_lead_magnet_version(self, version_id: str) -> LeadMagnetVersion | None:
+        row = self.conn.execute(
+            """
+            SELECT *
+            FROM lead_magnet_versions
+            WHERE id = ? AND workspace_id = ?
+            """,
+            (version_id, self.workspace_id),
+        ).fetchone()
+        return self._row_to_lead_magnet_version(row) if row else None
+
+    def list_lead_magnet_versions(
+        self,
+        lead_magnet_id: str | None = None,
+        *,
+        limit: int | None = 50,
+    ) -> list[LeadMagnetVersion]:
+        clauses = ["workspace_id = ?"]
+        params: list[object] = [self.workspace_id]
+        if lead_magnet_id:
+            clauses.append("lead_magnet_id = ?")
+            params.append(lead_magnet_id)
+        limit_sql = " LIMIT ?" if limit is not None else ""
+        if limit is not None:
+            params.append(limit)
+        rows = self.conn.execute(
+            f"""
+            SELECT *
+            FROM lead_magnet_versions
+            WHERE {' AND '.join(clauses)}
+            ORDER BY created_at DESC
+            {limit_sql}
+            """,
+            params,
+        ).fetchall()
+        return [self._row_to_lead_magnet_version(row) for row in rows]
+
+    def latest_lead_magnet_version(self, lead_magnet_id: str) -> LeadMagnetVersion | None:
+        versions = self.list_lead_magnet_versions(lead_magnet_id, limit=1)
+        return versions[0] if versions else None
+
+    def delete_lead_magnet_version(self, version_id: str) -> bool:
+        cursor = self.conn.execute(
+            "DELETE FROM lead_magnet_versions WHERE id = ? AND workspace_id = ?",
+            (version_id, self.workspace_id),
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
     def save_viral_pattern(self, pattern: ViralPattern) -> ViralPattern:
         now = utc_now()
         saved = ViralPattern(
@@ -1697,6 +2660,46 @@ class SQLiteStore:
             (status, utc_now(), trend_id, self.workspace_id),
         )
         self.conn.commit()
+
+    def list_generated_drafts(
+        self,
+        *,
+        platform: str | None = None,
+        limit: int | None = 100,
+    ) -> list[GeneratedDraft]:
+        clauses = ["workspace_id = ?"]
+        params: list[object] = [self.workspace_id]
+        if platform:
+            clauses.append("platform = ?")
+            params.append(platform)
+        limit_sql = " LIMIT ?" if limit is not None else ""
+        if limit is not None:
+            params.append(max(0, int(limit)))
+        rows = self.conn.execute(
+            f"""
+            SELECT *
+            FROM generated_drafts
+            WHERE {' AND '.join(clauses)}
+            ORDER BY created_at DESC, id DESC
+            {limit_sql}
+            """,
+            params,
+        ).fetchall()
+        drafts: list[GeneratedDraft] = []
+        for row in rows:
+            drafts.append(
+                GeneratedDraft(
+                    id=row["id"],
+                    workspace_id=row["workspace_id"],
+                    text=row["text"],
+                    request=DraftRequest(**json.loads(row["request_json"])),
+                    explanation=row["explanation"],
+                    influences=json.loads(row["influences_json"]),
+                    context_snapshot=json.loads(row["context_snapshot_json"] or "{}"),
+                    created_at=row["created_at"],
+                )
+            )
+        return drafts
 
     def get_generated_draft(self, draft_id: str) -> GeneratedDraft | None:
         row = self.conn.execute(
@@ -1985,6 +2988,7 @@ class SQLiteStore:
         post_type: str | None = None,
         limit: int = 5,
         imitate_only: bool = True,
+        authored_only: bool = False,
     ) -> list[SocialPost]:
         clauses = ["p.workspace_id = ?", "p.platform = ?", "p.status IN ('example', 'published')"]
         params: list[object] = [self.workspace_id, platform]
@@ -1996,6 +3000,8 @@ class SQLiteStore:
             params.append(post_type)
         if imitate_only:
             clauses.append("COALESCE(n.imitate, 0) = 1")
+        if authored_only:
+            clauses.append("p.source_draft_id IS NULL")
         where = " AND ".join(clauses)
         rows = self.conn.execute(
             f"""
@@ -2018,6 +3024,41 @@ class SQLiteStore:
             (*params, limit),
         ).fetchall()
         return [self._row_to_post(row) for row in rows]
+
+    def list_authored_voice_candidates(self, *, platform: str) -> list[VoiceExampleCandidate]:
+        """Return the authored corpus used only by automatic Voice fallback.
+
+        Explicit Voice Examples continue to use ``top_examples``. Keeping this as
+        a separate read model prevents confidence-aware fallback ranking from
+        changing analytics, Topic Scout, or any legacy example ordering.
+        """
+
+        rows = self.conn.execute(
+            """
+            SELECT p.*
+            FROM posts p
+            WHERE p.workspace_id = ?
+              AND p.platform = ?
+              AND p.status IN ('example', 'published')
+              AND p.source_draft_id IS NULL
+            ORDER BY COALESCE(p.published_at, p.created_at) DESC,
+                     p.created_at DESC,
+                     p.id DESC
+            """,
+            (self.workspace_id, platform),
+        ).fetchall()
+        posts = [self._row_to_post(row) for row in rows]
+        post_ids = [post.id for post in posts]
+        notes = self.notes_by_post_id(post_ids) if post_ids else {}
+        metrics = self.latest_metrics_by_post_id(post_ids) if post_ids else {}
+        return [
+            VoiceExampleCandidate(
+                post=post,
+                note=notes.get(post.id),
+                metrics=metrics.get(post.id),
+            )
+            for post in posts
+        ]
 
     def seed_defaults(self) -> None:
         for section in default_context_sections():
@@ -2174,6 +3215,103 @@ class SQLiteStore:
             updated_at=row["updated_at"],
         )
 
+    def _row_to_lead_magnet_source(self, row: sqlite3.Row) -> LeadMagnetSource:
+        return LeadMagnetSource(
+            id=row["id"],
+            workspace_id=row["workspace_id"],
+            title=row["title"],
+            source_url=row["source_url"],
+            canonical_url=row["canonical_url"],
+            platform=row["platform"],
+            author=row["author"],
+            published_at=row["published_at"],
+            collected_at=row["collected_at"],
+            format=row["format"],
+            sales_topic=row["sales_topic"],
+            hook=row["hook"],
+            promise=row["promise"],
+            audience=row["audience"],
+            delivery_mechanism=row["delivery_mechanism"],
+            cta=row["cta"],
+            leadpoet_integration=row["leadpoet_integration"],
+            why_it_worked=row["why_it_worked"],
+            likes=row["likes"],
+            replies=row["replies"],
+            reposts=row["reposts"],
+            bookmarks=row["bookmarks"],
+            impressions=row["impressions"],
+            follower_count=row["follower_count"],
+            metric_observed_at=row["metric_observed_at"],
+            performance_score=row["performance_score"],
+            evidence_strength=row["evidence_strength"] or "unknown",
+            raw_text=row["raw_text"],
+            status=row["status"] or "candidate",
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def _row_to_lead_magnet_research_run(self, row: sqlite3.Row) -> LeadMagnetResearchRun:
+        return LeadMagnetResearchRun(
+            id=row["id"],
+            workspace_id=row["workspace_id"],
+            window_start=row["window_start"],
+            window_end=row["window_end"],
+            period_key=row["period_key"],
+            query=row["query"],
+            provider=row["provider"],
+            status=row["status"] or "running",
+            candidates_found=int(row["candidates_found"] or 0),
+            sources_qualified=int(row["sources_qualified"] or 0),
+            source_ids=json.loads(row["source_ids_json"] or "[]"),
+            warnings=json.loads(row["warnings_json"] or "[]"),
+            error_message=row["error_message"],
+            started_at=row["started_at"],
+            completed_at=row["completed_at"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def _row_to_lead_magnet(self, row: sqlite3.Row) -> LeadMagnet:
+        return LeadMagnet(
+            id=row["id"],
+            workspace_id=row["workspace_id"],
+            title=row["title"],
+            promise=row["promise"],
+            audience=row["audience"],
+            sales_outcome=row["sales_outcome"],
+            format=row["format"],
+            depth=row["depth"],
+            product_integration=row["product_integration"],
+            cta=row["cta"],
+            status=row["status"] or "draft",
+            source_ids=json.loads(row["source_ids_json"] or "[]"),
+            research_run_id=row["research_run_id"],
+            evidence_summary=row["evidence_summary"],
+            content=json.loads(row["content_json"] or "{}"),
+            markdown=row["markdown"] or "",
+            generation_brief=json.loads(row["generation_brief_json"] or "{}"),
+            notion_page_id=row["notion_page_id"],
+            notion_url=row["notion_url"],
+            published_at=row["published_at"],
+            failure_reason=row["failure_reason"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def _row_to_lead_magnet_version(self, row: sqlite3.Row) -> LeadMagnetVersion:
+        return LeadMagnetVersion(
+            id=row["id"],
+            workspace_id=row["workspace_id"],
+            lead_magnet_id=row["lead_magnet_id"],
+            content=json.loads(row["content_json"] or "{}"),
+            markdown=row["markdown"] or "",
+            edit_type=row["edit_type"] or "generated",
+            instruction=row["instruction"],
+            source_ids=json.loads(row["source_ids_json"] or "[]"),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
     def _row_to_topic_idea(self, row: sqlite3.Row) -> TopicIdea:
         return TopicIdea(
             id=row["id"],
@@ -2224,6 +3362,8 @@ class SQLiteStore:
             text=row["text"],
             edit_type=row["edit_type"],
             edit_instruction=row["edit_instruction"],
+            source_draft_id=row["source_draft_id"],
+            accepted_at=row["accepted_at"],
             created_at=row["created_at"],
         )
 

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import json
 import re
 from collections import Counter
+from dataclasses import replace
 
 from leadpoet_social_brain.analytics import build_analytics_summary
 from leadpoet_social_brain.content_queue import (
@@ -14,6 +16,7 @@ from leadpoet_social_brain.content_queue import (
     post_queue_item_x,
     publish_due_x,
     require_queue_item,
+    resolve_queue_edit_state,
     revise_queued_post,
     weekly_report_text,
 )
@@ -26,18 +29,26 @@ from leadpoet_social_brain.core.models import (
     EngagementMetrics,
     Pattern,
     PostNote,
+    QueuedPostVersion,
     SocialPost,
     TrendItem,
     utc_now,
 )
-from leadpoet_social_brain.editorial import dedupe_editorial_trends
+from leadpoet_social_brain.editorial import dedupe_editorial_trends, editorial_theme_fingerprints
 from leadpoet_social_brain.generation import (
     MISSING_PROVIDER_MESSAGE,
     PRODUCT_NAME_OPTIONAL_LANE_NAMES,
     SocialBrainGenerator,
+    claim_audit_has_unsupported,
+    exact_final_claim_coverage_violations,
     leadpoet_phrase_pattern_fingerprint,
     leadpoet_sentence_template_fingerprint,
     leadpoet_sentence_grammar_fingerprint,
+    logic_audit_has_missing_bridge,
+    natural_logic_audit_has_valid_status,
+    natural_logic_audit_is_complete,
+    natural_logic_audit_quotes_final,
+    natural_quality_audit_contract_violations,
     primary_closing_target,
     primary_editorial_value_mode,
     primary_human_rhythm_target,
@@ -47,9 +58,19 @@ from leadpoet_social_brain.generation import (
     primary_product_mention_syntax_target,
     primary_product_name_usage_target,
     primary_structure_shape,
+    prompt_safe_automated_label,
+    quality_audit_failure_warnings,
     trend_angle_for_generation,
+    trend_specific_generation_angle,
 )
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
+from leadpoet_social_brain.lead_magnet_scout import research_lead_magnets
+from leadpoet_social_brain.lead_magnets import (
+    approve_lead_magnet,
+    generate_lead_magnet,
+    revise_lead_magnet,
+)
+from leadpoet_social_brain.notion_publisher import NotionPublishError, publish_to_notion
 from leadpoet_social_brain.pattern_scout import (
     PATTERN_REFRESH_MISSING_PROVIDER,
     add_pattern_example,
@@ -299,6 +320,56 @@ def build_parser() -> argparse.ArgumentParser:
     refresh_trends_parser.add_argument("--no-enrich", action="store_true")
     refresh_trends_parser.set_defaults(func=cmd_refresh_trends)
 
+    research_magnets = subparsers.add_parser(
+        "research-lead-magnets",
+        help="Analyze recent sales/tech lead-magnet patterns and observed performance.",
+    )
+    research_magnets.add_argument("--window-days", type=int, default=30)
+    research_magnets.add_argument("--limit", type=int, default=20)
+    research_magnets.add_argument("--query")
+    research_magnets.set_defaults(func=cmd_research_lead_magnets)
+
+    generate_magnet = subparsers.add_parser("generate-lead-magnet", help="Create a review-ready long-form lead magnet.")
+    generate_magnet.add_argument("--audience", required=True)
+    generate_magnet.add_argument("--sales-outcome", required=True)
+    generate_magnet.add_argument(
+        "--format",
+        choices=["prompt_library", "playbook", "template_pack", "scorecard"],
+        default="prompt_library",
+    )
+    generate_magnet.add_argument("--depth", choices=["quick", "standard", "deep"], default="standard")
+    generate_magnet.add_argument(
+        "--product-integration",
+        choices=["light", "embedded", "strong"],
+        default="embedded",
+    )
+    generate_magnet.add_argument("--title")
+    generate_magnet.add_argument("--cta")
+    generate_magnet.add_argument("--instruction")
+    generate_magnet.add_argument("--source-id", action="append", dest="source_ids")
+    generate_magnet.add_argument("--research-run-id")
+    generate_magnet.set_defaults(func=cmd_generate_lead_magnet)
+
+    list_magnets = subparsers.add_parser("list-lead-magnets", help="List saved lead magnets.")
+    list_magnets.add_argument("--status")
+    list_magnets.add_argument("--format")
+    list_magnets.add_argument("--limit", type=int, default=20)
+    list_magnets.add_argument("--json", action="store_true", dest="json_output")
+    list_magnets.set_defaults(func=cmd_list_lead_magnets)
+
+    revise_magnet = subparsers.add_parser("revise-lead-magnet", help="Create a new AI revision of a lead magnet.")
+    revise_magnet.add_argument("--lead-magnet-id", required=True)
+    revise_magnet.add_argument("--instruction", required=True)
+    revise_magnet.set_defaults(func=cmd_revise_lead_magnet)
+
+    approve_magnet = subparsers.add_parser("approve-lead-magnet", help="Approve a lead magnet for Notion publishing.")
+    approve_magnet.add_argument("--lead-magnet-id", required=True)
+    approve_magnet.set_defaults(func=cmd_approve_lead_magnet)
+
+    publish_magnet = subparsers.add_parser("publish-lead-magnet", help="Create or update an approved lead magnet in Notion.")
+    publish_magnet.add_argument("--lead-magnet-id", required=True)
+    publish_magnet.set_defaults(func=cmd_publish_lead_magnet)
+
     generate = subparsers.add_parser("generate-x", help="Generate X drafts.")
     generate.add_argument("--topic", required=True)
     generate.add_argument("--post-type", required=True)
@@ -314,14 +385,26 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--pattern-id", action="append", dest="pattern_ids", default=[])
     generate.set_defaults(func=cmd_generate_x)
 
-    audit_naturalness = subparsers.add_parser("audit-naturalness-x", help="Generate trend posts and report naturalness/structure metrics.")
+    audit_naturalness = subparsers.add_parser(
+        "audit-naturalness-x",
+        help="Exercise the production natural-copy pipeline across trend posts and report quality metrics.",
+    )
     audit_naturalness.add_argument("--count", type=int, default=20)
     audit_naturalness.add_argument("--trend-limit", type=int, default=0, help="Maximum matching trends to load. Use 0 for all current matching trends.")
     audit_naturalness.add_argument("--trend-status", default="unused")
     audit_naturalness.add_argument("--post-type", default="founder_insight")
     audit_naturalness.add_argument("--length", choices=["short", "standard", "long"], default="standard")
     audit_naturalness.add_argument("--save-drafts", action="store_true")
-    audit_naturalness.add_argument("--plan-only", action="store_true", help="Audit deterministic trend/variation coverage without calling the LLM provider.")
+    audit_naturalness.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="Run the legacy structure/source-seed preflight without calling the provider; this does not exercise production generation.",
+    )
+    audit_naturalness.add_argument(
+        "--legacy-structure",
+        action="store_true",
+        help="Exercise the former strategist/structure-matrix pipeline instead of the production natural-copy path.",
+    )
     audit_naturalness.add_argument("--cover-all-trends", action="store_true", help="Raise the effective post count to cover every loaded matching trend.")
     audit_naturalness.add_argument("--json", action="store_true", dest="json_output")
     audit_naturalness.add_argument("--fail-on-warning", action="store_true")
@@ -846,6 +929,181 @@ def cmd_refresh_trends(store: SQLiteStore, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_research_lead_magnets(store: SQLiteStore, args: argparse.Namespace) -> int:
+    try:
+        provider = load_configured_provider(store)
+    except Exception as exc:  # noqa: BLE001 - deterministic research remains useful without classification.
+        provider = None
+        print(f"Provider classification unavailable: {exc}")
+    try:
+        result = research_lead_magnets(
+            store,
+            provider,
+            window_days=args.window_days,
+            limit=args.limit,
+            query=args.query,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    print(f"Research run: {result.run.id}")
+    print(f"Window: {result.run.window_start} to {result.run.window_end}")
+    print(f"Candidates found: {result.candidates_found}")
+    print(f"Qualified sources: {len(result.sources)}")
+    print(
+        "Metric-backed sources: "
+        f"{sum(1 for source in result.sources if source.evidence_strength == 'metric_backed')}"
+    )
+    for source in result.sources:
+        print(
+            f"- {source.id} | {source.format} | {source.evidence_strength} | "
+            f"score={source.performance_score or 0:.3f} | {source.title}"
+        )
+        if source.source_url:
+            print(f"  {source.source_url}")
+    if result.warnings:
+        print("Warnings:")
+        for warning in result.warnings:
+            print(f"- {warning}")
+    return 0
+
+
+def cmd_generate_lead_magnet(store: SQLiteStore, args: argparse.Namespace) -> int:
+    provider = load_configured_provider(store)
+    if not provider:
+        raise SystemExit("Lead-magnet generation requires a configured LLM provider.")
+    try:
+        result = generate_lead_magnet(
+            store,
+            provider,
+            audience=args.audience,
+            sales_outcome=args.sales_outcome,
+            format=args.format,
+            depth=args.depth,
+            product_integration=args.product_integration,
+            title=args.title,
+            cta=args.cta,
+            instruction=args.instruction,
+            source_ids=args.source_ids,
+            research_run_id=args.research_run_id,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    print(f"Created lead magnet {result.item.id} in {result.item.status}")
+    print(f"Title: {result.item.title}")
+    print(f"Format: {result.item.format}")
+    print(f"Version: {result.version.id}")
+    if result.warnings:
+        print("Warnings:")
+        for warning in result.warnings:
+            print(f"- {warning}")
+    print("\n" + result.item.markdown)
+    return 0
+
+
+def cmd_list_lead_magnets(store: SQLiteStore, args: argparse.Namespace) -> int:
+    items = store.list_lead_magnets(status=args.status, format=args.format, limit=args.limit)
+    if args.json_output:
+        print(
+            json.dumps(
+                [
+                    {
+                        "id": item.id,
+                        "title": item.title,
+                        "promise": item.promise,
+                        "audience": item.audience,
+                        "sales_outcome": item.sales_outcome,
+                        "format": item.format,
+                        "status": item.status,
+                        "source_ids": item.source_ids,
+                        "notion_url": item.notion_url,
+                        "created_at": item.created_at,
+                        "updated_at": item.updated_at,
+                    }
+                    for item in items
+                ],
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+    if not items:
+        print("No lead magnets found.")
+        return 0
+    for item in items:
+        print(f"{item.id} | {item.status} | {item.format} | {item.title}")
+        print(f"  Audience: {item.audience} | Outcome: {item.sales_outcome}")
+        if item.notion_url:
+            print(f"  Notion: {item.notion_url}")
+    return 0
+
+
+def cmd_revise_lead_magnet(store: SQLiteStore, args: argparse.Namespace) -> int:
+    provider = load_configured_provider(store)
+    if not provider:
+        raise SystemExit("Lead-magnet revision requires a configured LLM provider.")
+    try:
+        result = revise_lead_magnet(
+            store,
+            provider,
+            lead_magnet_id=args.lead_magnet_id,
+            instruction=args.instruction,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    print(f"Saved revision {result.version.id} for {result.item.id}; status reset to {result.item.status}.")
+    return 0
+
+
+def cmd_approve_lead_magnet(store: SQLiteStore, args: argparse.Namespace) -> int:
+    try:
+        item = approve_lead_magnet(store, args.lead_magnet_id)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    print(f"Approved lead magnet {item.id}")
+    return 0
+
+
+def cmd_publish_lead_magnet(store: SQLiteStore, args: argparse.Namespace) -> int:
+    item = store.get_lead_magnet(args.lead_magnet_id)
+    if not item:
+        raise SystemExit(f"No lead magnet found for id {args.lead_magnet_id}")
+    if item.status not in {"approved", "published"}:
+        raise SystemExit("Approve the lead magnet before publishing it to Notion.")
+    try:
+        published = publish_to_notion(
+            item.content,
+            title=item.title,
+            existing_page_id=item.notion_page_id,
+            icon="🧲",
+        )
+    except Exception as exc:  # noqa: BLE001 - persist retry state for partial page creation.
+        partial_page_id = exc.page_id if isinstance(exc, NotionPublishError) else item.notion_page_id
+        store.save_lead_magnet(
+            replace(
+                item,
+                status="approved",
+                notion_page_id=partial_page_id,
+                failure_reason=str(exc),
+                updated_at=utc_now(),
+            )
+        )
+        raise SystemExit(str(exc)) from exc
+    saved = store.save_lead_magnet(
+        replace(
+            item,
+            status="published",
+            notion_page_id=published.page_id,
+            notion_url=published.public_url or published.url,
+            published_at=utc_now(),
+            failure_reason=None,
+            updated_at=utc_now(),
+        )
+    )
+    print(f"Published lead magnet {saved.id} to {saved.notion_url or saved.notion_page_id}")
+    print(f"Notion blocks: {published.block_count} in {published.batch_count} batch(es)")
+    return 0
+
+
 def cmd_generate_x(store: SQLiteStore, args: argparse.Namespace) -> int:
     provider = load_configured_provider(store)
     if not provider:
@@ -891,7 +1149,8 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
         if not provider:
             raise SystemExit(MISSING_PROVIDER_MESSAGE)
         generator = SocialBrainGenerator(store, provider=provider)
-        payload = build_naturalness_audit(
+        builder = build_naturalness_audit if args.legacy_structure else build_production_naturalness_audit
+        payload = builder(
             store,
             generator,
             count=args.count,
@@ -908,9 +1167,57 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
     if payload.get("mode") == "plan_only":
         print(f"Planned: {payload['post_count']} post(s) across {payload['trend_count']} trend(s)")
         print("Provider calls: no")
+        print("Scope: legacy structure/source-seed preflight only; production generation was not exercised")
     else:
         print(f"Generated: {payload['post_count']} post(s) across {payload['trend_count']} trend(s)")
     print(f"Trend coverage: {payload['covered_trend_count']} covered, {payload['uncovered_trend_count']} uncovered")
+    if payload.get("mode") == "production_natural":
+        print("Pipeline: production natural writer -> evaluator -> final quality gate")
+        print(f"Attempted: {payload['attempted_count']}")
+        print(f"Generation failures: {payload['generation_failure_count']}")
+        print(
+            "Verified pipeline receipts: "
+            f"{payload['pipeline_receipt_pass_count']} passed, "
+            f"{payload['pipeline_receipt_failure_count']} failed"
+        )
+        print(f"Saved drafts: {'yes' if args.save_drafts else 'no'}")
+        print(f"Unique first lines: {payload['unique_first_lines']}")
+        print(f"Unique closing lines: {payload['unique_last_lines']}")
+        print(f"Exact duplicate posts: {payload['exact_duplicate_count']}")
+        print(
+            "Character length: "
+            f"min {payload['min_chars']}, avg {payload['average_chars']}, max {payload['max_chars']}"
+        )
+        print(f"Posts naming Leadpoet: {payload['leadpoet_mentioned_count']}")
+        print("Bad phrase counts:")
+        for key, value in sorted(payload["bad_phrase_counts"].items()):
+            print(f"- {key}: {value}")
+        print("Evaluator selection modes:")
+        for key, value in sorted(payload["selection_mode_counts"].items()):
+            print(f"- {key}: {value}")
+        print("Evaluator contract attempts:")
+        for key, value in sorted(payload["evaluator_contract_attempt_counts"].items()):
+            print(f"- {key}: {value}")
+        print("Final quality gate resolutions:")
+        for key, value in sorted(payload["quality_gate_resolution_counts"].items()):
+            print(f"- {key}: {value}")
+        print("Editorial thesis counts:")
+        for key, value in sorted(payload["editorial_theme_counts"].items()):
+            print(f"- {key}: {value}")
+        print("Generated layout fingerprint counts:")
+        for key, value in sorted(payload["layout_fingerprint_counts"].items()):
+            print(f"- {key}: {value}")
+        print("Leadpoet grammar fingerprint counts:")
+        for key, value in sorted(payload["leadpoet_grammar_fingerprint_counts"].items()):
+            print(f"- {key}: {value}")
+        print("Repeated stock phrase counts:")
+        for key, value in sorted(payload["repeated_phrase_counts"].items()):
+            print(f"- {key}: {value}")
+        if payload["warnings"]:
+            print("Warnings:")
+            for warning in payload["warnings"]:
+                print(f"- {warning}")
+        return 1 if args.fail_on_warning and payload["warnings"] else 0
     if payload.get("mode") != "plan_only":
         print(f"Saved drafts: {'yes' if args.save_drafts else 'no'}")
         print("Leadpoet mention shapes:")
@@ -1114,6 +1421,8 @@ def build_naturalness_plan_audit(
         )
     return {
         "mode": "plan_only",
+        "scope": "legacy_structure_source_seed_only",
+        "production_pipeline_exercised": False,
         "trend_count": len(trends),
         "post_count": len(rows),
         "requested_count": requested_count,
@@ -1363,16 +1672,454 @@ def naturalness_audit_request_for_trend(
             f"{extra_context} Batch variation slot {variation_slot}: use a distinct route for structure, "
             "Leadpoet placement, sentence rhythm, and close. Do not print the slot."
         )
+    source_label = prompt_safe_automated_label(
+        trend.title,
+        fallback="the selected source",
+        max_chars=180,
+    )
     return DraftRequest(
         platform="x",
-        topic=trend.topic or "sales AI",
+        topic=prompt_safe_automated_label(
+            trend.topic,
+            fallback="sales AI",
+            max_chars=100,
+        ),
         post_type=post_type,
-        angle=trend_angle_for_generation(trend),
+        angle=(
+            f"Use {source_label} as source evidence. Extract one source-specific lesson and do not force "
+            "a product, buyer-timing, or account-context conclusion."
+        ),
         extra_context=extra_context,
+        angle_is_factual_evidence=False,
+        extra_context_is_factual_evidence=False,
         use_trends=True,
         trend_ids=[trend.id],
         length_mode=length_mode,
     )
+
+
+def production_naturalness_audit_request_for_trend(
+    trend: TrendItem,
+    *,
+    post_type: str,
+    length_mode: str,
+) -> DraftRequest:
+    """Build the same request shape used by normal production generation.
+
+    The legacy audit injects structure and product-placement variation instructions
+    into ``extra_context``. A production audit must not teach the model that it is
+    being tested or route through those matrices, so the trend, idea, and natural
+    prompt profile are the only audit-specific inputs.
+    """
+
+    return DraftRequest(
+        platform="x",
+        topic=prompt_safe_automated_label(
+            trend.topic,
+            fallback="sales AI",
+            max_chars=100,
+        ),
+        post_type=post_type,
+        angle=trend_specific_generation_angle(trend),
+        angle_is_factual_evidence=False,
+        use_trends=True,
+        trend_ids=[trend.id],
+        length_mode=length_mode,
+        prompt_profile="natural",
+    )
+
+
+def production_pipeline_receipt(
+    draft: object,
+    *,
+    trend_id: str,
+) -> dict[str, object]:
+    """Return independently checkable evidence that the production path ran."""
+
+    request = getattr(draft, "request", None)
+    snapshot = getattr(draft, "context_snapshot", None)
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    snapshot_request = snapshot.get("request")
+    snapshot_request = snapshot_request if isinstance(snapshot_request, dict) else {}
+    evaluation = snapshot.get("evaluation")
+    evaluation = evaluation if isinstance(evaluation, dict) else {}
+    contract = evaluation.get("contract")
+    contract = contract if isinstance(contract, dict) else {}
+    quality_gate = evaluation.get("natural_quality_gate")
+    quality_gate = quality_gate if isinstance(quality_gate, dict) else {}
+    originality_receipt = quality_gate.get("originality")
+    originality_receipt = originality_receipt if isinstance(originality_receipt, dict) else {}
+    originality_diagnostics = originality_receipt.get("diagnostics")
+    originality_diagnostics = originality_diagnostics if isinstance(originality_diagnostics, dict) else {}
+    models_used = snapshot.get("models_used")
+    models_used = models_used if isinstance(models_used, dict) else {}
+    selected_trends = snapshot.get("selected_trends")
+    selected_trends = selected_trends if isinstance(selected_trends, list) else []
+    warnings = evaluation.get("warnings")
+    writer_diversity = evaluation.get("writer_option_diversity")
+    writer_diversity = writer_diversity if isinstance(writer_diversity, dict) else {}
+    exact_final_audit = evaluation.get("exact_final_audit")
+    exact_final_audit = exact_final_audit if isinstance(exact_final_audit, dict) else {}
+    draft_text = str(getattr(draft, "text", "") or "")
+    draft_text_hash = hashlib.sha256(draft_text.encode("utf-8")).hexdigest()
+    logic_audit = evaluation.get("logic_audit")
+    if isinstance(logic_audit, dict) and any(key in logic_audit for key in ("bridge_status", "status")):
+        logic_rows: list[object] = [logic_audit]
+    elif isinstance(logic_audit, dict):
+        logic_rows = list(logic_audit.values())
+    elif isinstance(logic_audit, list):
+        logic_rows = logic_audit
+    else:
+        logic_rows = []
+    valid_logic_audit = (
+        natural_logic_audit_has_valid_status(logic_audit)
+        and not logic_audit_has_missing_bridge(logic_audit)
+        and natural_logic_audit_is_complete(logic_audit)
+        and natural_logic_audit_quotes_final(logic_audit, final_text=draft_text)
+    )
+    claim_audit = evaluation.get("claim_audit")
+    claim_coverage_violations = (
+        exact_final_claim_coverage_violations(
+            claim_audit,
+            final_text=draft_text,
+        )
+        if isinstance(claim_audit, (dict, list))
+        else ["claim audit is missing"]
+    )
+    quality_audit = evaluation.get("quality_audit")
+    quality_audit_violations = [
+        *natural_quality_audit_contract_violations(
+            quality_audit,
+            final_text=draft_text,
+        ),
+        *quality_audit_failure_warnings(quality_audit),
+    ]
+    exact_source = str(exact_final_audit.get("source") or "")
+    exact_attempts = exact_final_audit.get("audit_call_attempts")
+    initial_reuse_violations = exact_final_audit.get("initial_reuse_violations")
+    exact_source_consistent = (
+        exact_source == "initial_typed_evaluator"
+        and type(exact_attempts) is int
+        and exact_attempts == 0
+        and exact_final_audit.get("reused_initial_audit") is True
+        and evaluation.get("initial_evaluator_audited_text_sha256") == draft_text_hash
+        and isinstance(initial_reuse_violations, list)
+        and not initial_reuse_violations
+    ) or (
+        exact_source == "exact_final_typed_evaluator"
+        and type(exact_attempts) is int
+        and exact_attempts in {1, 2}
+        and exact_final_audit.get("reused_initial_audit") is False
+        and isinstance(initial_reuse_violations, list)
+    )
+    try:
+        contract_attempts = int(contract.get("attempts") or 0)
+    except (TypeError, ValueError):
+        contract_attempts = 0
+    try:
+        writer_diversity_attempts = int(writer_diversity.get("attempts") or 0)
+    except (TypeError, ValueError):
+        writer_diversity_attempts = 0
+
+    checks = {
+        "draft_request_uses_natural_profile": getattr(request, "prompt_profile", None) == "natural",
+        "snapshot_request_uses_natural_profile": snapshot_request.get("prompt_profile") == "natural",
+        "provider_generation_recorded": snapshot.get("generation_mode") == "provider",
+        "quality_review_recorded": snapshot.get("quality_mode") == "quality_review",
+        "natural_strategy_recorded": isinstance(snapshot.get("strategy_summary"), dict),
+        "strategist_call_skipped": "strategist" in models_used and models_used.get("strategist") is None,
+        "writer_route_recorded": "natural_writer" in models_used,
+        "evaluator_route_recorded": "evaluator" in models_used,
+        "evaluator_contract_valid": contract.get("valid") is True,
+        "evaluator_contract_attempts_recorded": contract_attempts in {1, 2},
+        "writer_option_diversity_recorded": (
+            writer_diversity.get("valid") is True
+            and writer_diversity_attempts in {1, 2}
+            and isinstance(writer_diversity.get("initial_violations"), list)
+        ),
+        "logic_audit_recorded": bool(logic_rows) and valid_logic_audit,
+        "claim_audit_recorded": (
+            isinstance(claim_audit, (dict, list))
+            and not claim_coverage_violations
+            and not claim_audit_has_unsupported(claim_audit)
+        ),
+        "structured_quality_audit_recorded": (
+            isinstance(quality_audit, dict)
+            and not quality_audit_violations
+        ),
+        "evaluator_warnings_cleared": isinstance(warnings, list) and not warnings,
+        "selection_recorded": evaluation.get("selection_mode") in {"writer_option", "evaluator_rewrite"},
+        "final_quality_gate_passed": quality_gate.get("passed") is True,
+        "final_quality_gate_resolution_recorded": bool(str(quality_gate.get("resolution") or "").strip()),
+        "final_originality_gate_passed": (
+            originality_receipt.get("passed") is True
+            and originality_receipt.get("violations") == []
+        ),
+        "final_originality_receipt_recorded": (
+            isinstance(originality_diagnostics.get("source_count"), int)
+            and isinstance(originality_diagnostics.get("raw_source_count"), int)
+            and isinstance(originality_diagnostics.get("matches"), list)
+        ),
+        "semantic_originality_receipt_recorded": (
+            isinstance(originality_diagnostics.get("semantic_source_count"), int)
+            and isinstance(originality_diagnostics.get("semantic_lineage_count"), int)
+            and isinstance(originality_diagnostics.get("semantic_candidate_atoms"), list)
+            and isinstance(originality_diagnostics.get("semantic_exempt_atoms"), list)
+            and isinstance(originality_diagnostics.get("semantic_prior_lineage_counts"), dict)
+            and isinstance(originality_diagnostics.get("semantic_matches"), list)
+        ),
+        "exact_final_audit_recorded": (
+            exact_final_audit.get("contract_version") == "natural_exact_final_v1"
+            and exact_final_audit.get("passed") is True
+            and exact_final_audit.get("audited_text_sha256") == draft_text_hash
+            and exact_source_consistent
+        ),
+        "selected_trend_recorded": any(
+            isinstance(value, dict) and str(value.get("id") or "") == str(trend_id)
+            for value in selected_trends
+        ),
+        "context_receipt_containers_recorded": (
+            isinstance(snapshot.get("selected_context_sections"), list)
+            and isinstance(snapshot.get("selected_examples"), list)
+            and isinstance(snapshot.get("skills"), list)
+            and isinstance(snapshot.get("active_writing_rules"), dict)
+        ),
+        "quality_notes_recorded": bool(str(snapshot.get("quality_notes") or "").strip()),
+    }
+    violations = [name for name, passed in checks.items() if not passed]
+    return {
+        "passed": not violations,
+        "checks": checks,
+        "violations": violations,
+        "selection_mode": str(evaluation.get("selection_mode") or "missing"),
+        "evaluator_contract_attempts": contract_attempts,
+        "quality_gate_resolution": str(quality_gate.get("resolution") or "missing"),
+    }
+
+
+def build_production_naturalness_audit(
+    store: SQLiteStore,
+    generator: SocialBrainGenerator,
+    *,
+    count: int,
+    trend_limit: int,
+    trend_status: str | None,
+    post_type: str,
+    length_mode: str,
+    save_drafts: bool,
+    cover_all_trends: bool = False,
+) -> dict[str, object]:
+    """Exercise and audit the real two-call natural-copy production path."""
+
+    if count <= 0:
+        raise SystemExit("--count must be greater than 0.")
+    effective_trend_limit = trend_limit if trend_limit > 0 else 1000
+    trends = dedupe_editorial_trends(
+        store.list_trends(status=trend_status or None, limit=effective_trend_limit)
+    )
+    if not trends:
+        raise SystemExit("No trends found for naturalness audit.")
+    requested_count = count
+    if cover_all_trends:
+        count = max(count, len(trends))
+
+    rows: list[dict[str, object]] = []
+    failures: list[dict[str, object]] = []
+    batch_recent_outputs: list[str] = []
+    for index in range(count):
+        trend = trends[index % len(trends)]
+        request = production_naturalness_audit_request_for_trend(
+            trend,
+            post_type=post_type,
+            length_mode=length_mode,
+        )
+        try:
+            generated = generator.generate(
+                request,
+                variants=1,
+                save=save_drafts,
+                recent_output_texts=batch_recent_outputs,
+            )
+            if not generated:
+                raise ValueError("Production generator returned no draft.")
+            draft = generated[0]
+        except (ValueError, RuntimeError) as exc:
+            failures.append(
+                {
+                    "index": index + 1,
+                    "trend_id": trend.id,
+                    "trend_title": trend.title,
+                    "error_type": type(exc).__name__,
+                    "error": " ".join(str(exc).split())[:500],
+                }
+            )
+            continue
+
+        snapshot = draft.context_snapshot if isinstance(draft.context_snapshot, dict) else {}
+        evaluation = snapshot.get("evaluation")
+        evaluation = evaluation if isinstance(evaluation, dict) else {}
+        receipt = production_pipeline_receipt(draft, trend_id=trend.id)
+        text = str(draft.text)
+        row = {
+            "index": index + 1,
+            "trend_id": trend.id,
+            "trend_title": trend.title,
+            "topic": trend.topic,
+            "request_angle": draft.request.angle or "",
+            "text": text,
+            "chars": len(text),
+            "first_line": first_nonempty_line(text),
+            "last_line": last_nonempty_line(text),
+            "layout_fingerprint": post_layout_fingerprint(text),
+            "editorial_themes": editorial_theme_fingerprints(text),
+            "leadpoet_grammar_fingerprint": leadpoet_grammar_fingerprint_for_text(text),
+            "pipeline_receipt": receipt,
+            "evaluation_selection_mode": receipt["selection_mode"],
+            "evaluator_contract_attempts": receipt["evaluator_contract_attempts"],
+            "quality_gate_resolution": receipt["quality_gate_resolution"],
+            "quality_notes": str(snapshot.get("quality_notes") or ""),
+        }
+        rows.append(row)
+        batch_recent_outputs.append(text)
+
+    warnings: list[str] = []
+    receipt_failures = [
+        {
+            "index": row["index"],
+            "trend_id": row["trend_id"],
+            "violations": row["pipeline_receipt"]["violations"],
+        }
+        for row in rows
+        if not row["pipeline_receipt"]["passed"]
+    ]
+    if failures:
+        warnings.append(
+            f"Production generation failed for {len(failures)}/{count} attempted post(s)."
+        )
+    if receipt_failures:
+        warnings.append(
+            f"Production pipeline receipt verification failed for {len(receipt_failures)}/{len(rows)} generated post(s)."
+        )
+
+    covered_trend_ids = {
+        str(row["trend_id"])
+        for row in rows
+        if row["trend_id"] and row["pipeline_receipt"]["passed"]
+    }
+    uncovered_trend_count = max(0, len(trends) - len(covered_trend_ids))
+    if uncovered_trend_count:
+        warnings.append(
+            f"{uncovered_trend_count} loaded trend(s) produced no verified post; raise --count, use --cover-all-trends, or inspect generation failures."
+        )
+
+    texts = [str(row["text"]) for row in rows]
+    text_blob = "\n\n".join(texts).lower()
+    bad_phrase_counts = leadpoet_bad_phrase_counts(text_blob)
+    if any(bad_phrase_counts.values()):
+        warnings.append("Cookie-cutter or formulaic Leadpoet phrasing still appeared in production output.")
+
+    unique_first_lines = len({str(row["first_line"]).casefold() for row in rows if row["first_line"]})
+    unique_last_lines = len({str(row["last_line"]).casefold() for row in rows if row["last_line"]})
+    if rows and unique_first_lines < min(5, len(rows)):
+        warnings.append("Production first lines are not varied enough.")
+    if rows and unique_last_lines < min(5, len(rows)):
+        warnings.append("Production closing lines are not varied enough.")
+
+    normalized_counts = Counter(" ".join(text.casefold().split()) for text in texts if text.strip())
+    exact_duplicate_count = sum(value - 1 for value in normalized_counts.values() if value > 1)
+    if exact_duplicate_count:
+        warnings.append(f"Production output contained {exact_duplicate_count} exact duplicate post(s).")
+
+    layout_counts = Counter(str(row["layout_fingerprint"]) for row in rows if row["layout_fingerprint"])
+    if rows and len(layout_counts) < min(4, len(rows)):
+        warnings.append("Production post layouts are not varied enough.")
+    elif layout_counts and layout_counts.most_common(1)[0][1] >= max(3, (len(rows) + 1) // 2):
+        layout, layout_count = layout_counts.most_common(1)[0]
+        warnings.append(
+            f"Production post layouts are too concentrated: {layout} appears {layout_count}/{len(rows)} times."
+        )
+
+    editorial_theme_counts: Counter[str] = Counter()
+    for row in rows:
+        editorial_theme_counts.update(str(value) for value in row["editorial_themes"] if str(value))
+    if len(rows) >= 5 and editorial_theme_counts:
+        theme, theme_count = editorial_theme_counts.most_common(1)[0]
+        if theme_count >= max(3, (len(rows) + 1) // 2):
+            warnings.append(
+                f"Production editorial thesis is too concentrated: {theme} appears {theme_count}/{len(rows)} times."
+            )
+
+    grammar_counts = Counter(
+        str(row["leadpoet_grammar_fingerprint"])
+        for row in rows
+        if row["leadpoet_grammar_fingerprint"] and row["leadpoet_grammar_fingerprint"] != "no_leadpoet"
+    )
+    leadpoet_mentioned_count = sum(grammar_counts.values())
+    if leadpoet_mentioned_count >= 3 and grammar_counts.most_common(1)[0][1] >= max(
+        3, (leadpoet_mentioned_count + 1) // 2
+    ):
+        grammar, grammar_count = grammar_counts.most_common(1)[0]
+        warnings.append(
+            f"Production Leadpoet grammar is too concentrated: {grammar} appears {grammar_count}/{leadpoet_mentioned_count} mentions."
+        )
+    if len(rows) >= 5 and leadpoet_mentioned_count >= max(4, (len(rows) * 4 + 4) // 5):
+        warnings.append(
+            f"Leadpoet is named in too much of the thought-leadership batch: {leadpoet_mentioned_count}/{len(rows)} post(s)."
+        )
+
+    repeated_phrase_counts = repeated_batch_phrase_counts(texts)
+    if repeated_phrase_counts:
+        phrase, phrase_count = next(iter(repeated_phrase_counts.items()))
+        warnings.append(
+            f"Repeated stock phrase appeared across production posts: '{phrase}' appears {phrase_count}/{len(rows)} times."
+        )
+
+    selection_mode_counts = Counter(str(row["evaluation_selection_mode"]) for row in rows)
+    evaluator_contract_attempt_counts = Counter(str(row["evaluator_contract_attempts"]) for row in rows)
+    quality_gate_resolution_counts = Counter(str(row["quality_gate_resolution"]) for row in rows)
+    contract_retry_count = sum(1 for row in rows if row["evaluator_contract_attempts"] == 2)
+    if len(rows) >= 4 and contract_retry_count >= max(2, (len(rows) + 3) // 4):
+        warnings.append(
+            f"Evaluator contract retries are too frequent: {contract_retry_count}/{len(rows)} generated post(s)."
+        )
+
+    char_counts = [int(row["chars"]) for row in rows]
+    return {
+        "mode": "production_natural",
+        "pipeline": "natural_writer_evaluator_final_gate",
+        "trend_count": len(trends),
+        "post_count": len(rows),
+        "attempted_count": count,
+        "requested_count": requested_count,
+        "cover_all_trends": cover_all_trends,
+        "covered_trend_count": len(covered_trend_ids),
+        "uncovered_trend_count": uncovered_trend_count,
+        "loaded_all_matching_trends": trend_limit <= 0,
+        "trend_limit": trend_limit,
+        "generation_failure_count": len(failures),
+        "generation_failures": failures,
+        "pipeline_receipt_pass_count": len(rows) - len(receipt_failures),
+        "pipeline_receipt_failure_count": len(receipt_failures),
+        "pipeline_receipt_failures": receipt_failures,
+        "selection_mode_counts": dict(selection_mode_counts),
+        "evaluator_contract_attempt_counts": dict(evaluator_contract_attempt_counts),
+        "evaluator_contract_retry_count": contract_retry_count,
+        "quality_gate_resolution_counts": dict(quality_gate_resolution_counts),
+        "bad_phrase_counts": bad_phrase_counts,
+        "unique_first_lines": unique_first_lines,
+        "unique_last_lines": unique_last_lines,
+        "exact_duplicate_count": exact_duplicate_count,
+        "layout_fingerprint_counts": dict(layout_counts),
+        "editorial_theme_counts": dict(editorial_theme_counts),
+        "leadpoet_grammar_fingerprint_counts": dict(grammar_counts),
+        "leadpoet_mentioned_count": leadpoet_mentioned_count,
+        "repeated_phrase_counts": repeated_phrase_counts,
+        "min_chars": min(char_counts) if char_counts else 0,
+        "max_chars": max(char_counts) if char_counts else 0,
+        "average_chars": round(sum(char_counts) / len(char_counts), 1) if char_counts else 0.0,
+        "warnings": warnings,
+        "rows": rows,
+    }
 
 
 def build_naturalness_audit(
@@ -2186,19 +2933,38 @@ def cmd_update_queued_post(store: SQLiteStore, args: argparse.Namespace) -> int:
         item = require_queue_item(store, args.queue_id)
         if args.post_type:
             get_x_adapter().validate_post_type(args.post_type)
-        status = args.status or item.status
-        approved_at = item.approved_at
-        if status == "approved" and item.status != "approved":
-            approved_at = utc_now()
+        new_text = args.text if args.text is not None else item.text
+        new_topic = args.topic if args.topic is not None else item.topic
+        new_post_type = args.post_type if args.post_type is not None else item.post_type
+        new_angle = args.angle if args.angle is not None else item.angle
+        status, approved_at, _ = resolve_queue_edit_state(
+            item,
+            text=new_text,
+            topic=new_topic,
+            post_type=new_post_type,
+            angle=new_angle,
+            requested_status=args.status or item.status,
+        )
+        if new_text != item.text:
+            store.save_queued_post_version(
+                QueuedPostVersion(
+                    queue_id=item.id,
+                    text=item.text,
+                    edit_type="manual",
+                    edit_instruction="previous text before manual edit",
+                    source_draft_id=item.draft_id,
+                )
+            )
         updated = store.save_content_queue_item(
             ContentQueueItem(
                 id=item.id,
                 platform=item.platform,
                 draft_id=item.draft_id,
-                text=args.text if args.text is not None else item.text,
-                topic=args.topic if args.topic is not None else item.topic,
-                post_type=args.post_type if args.post_type is not None else item.post_type,
-                angle=args.angle if args.angle is not None else item.angle,
+                topic_idea_id=item.topic_idea_id,
+                text=new_text,
+                topic=new_topic,
+                post_type=new_post_type,
+                angle=new_angle,
                 trend_ids=item.trend_ids,
                 scheduled_at=args.scheduled_at if args.scheduled_at is not None else item.scheduled_at,
                 status=status,

@@ -47,6 +47,14 @@
           <span class="nav-label">Queue</span>
           <span id="reviewNavBadge" class="nav-badge">0</span>
         </button>
+        <button class="nav-button" type="button" data-view="leadMagnets" aria-label="Lead Magnets" title="Lead Magnets">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 3h9a3 3 0 0 1 3 3v15l-6-3-6 3z"></path>
+            <path d="M9 8h6"></path>
+            <path d="M9 12h4"></path>
+          </svg>
+          <span class="nav-label">Lead Magnets</span>
+        </button>
         <button class="nav-button" type="button" data-view="voice" aria-label="Voice" title="Voice">
           <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M4 10v4"></path>
@@ -231,6 +239,60 @@
               <span id="scheduledCount" class="count-pill">0</span>
             </div>
             <div id="scheduledList" class="card-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="leadMagnetsView">
+        <div class="lead-magnets-shell">
+          <section class="panel lead-magnets-hero">
+            <div class="lead-magnets-header">
+              <div>
+                <span class="eyebrow">Research to asset</span>
+                <h1>Lead Magnets</h1>
+                <p class="panel-subtitle">Turn recent high-performing sales and tech ideas into reviewable resources grounded in Leadpoet.</p>
+              </div>
+              <div class="lead-magnets-header-actions">
+                <button class="secondary" id="researchLeadMagnetsButton" type="button">Research Recent Winners</button>
+                <button id="openLeadMagnetCreateButton" type="button">Create Lead Magnet</button>
+              </div>
+            </div>
+            <div class="lead-magnet-research-summary" id="leadMagnetResearchSummary" aria-live="polite">
+              Research looks across the last 30 days and keeps source evidence with every artifact.
+            </div>
+          </section>
+
+          <section class="panel lead-magnets-library">
+            <div class="panel-header lead-magnet-library-header">
+              <div>
+                <h2>Artifact Library</h2>
+                <p class="panel-subtitle"><span id="leadMagnetCount">0</span> saved</p>
+              </div>
+              <div class="lead-magnet-filters">
+                <input id="leadMagnetSearch" type="search" placeholder="Search lead magnets" aria-label="Search lead magnets">
+                <select id="leadMagnetStatusFilter" aria-label="Filter lead magnets by status">
+                  <option value="all">All statuses</option>
+                  <option value="draft">Draft</option>
+                  <option value="needs_review">Needs review</option>
+                  <option value="approved">Approved</option>
+                  <option value="published">Published</option>
+                  <option value="failed">Failed</option>
+                  <option value="archived">Archived</option>
+                </select>
+              </div>
+            </div>
+            <div id="leadMagnetList" class="lead-magnet-list" aria-live="polite">
+              <article class="lead-magnet-card skeleton-card" aria-hidden="true">
+                <span class="skeleton-line medium"></span>
+                <span class="skeleton-line long"></span>
+                <span class="skeleton-line short"></span>
+              </article>
+              <article class="lead-magnet-card skeleton-card" aria-hidden="true">
+                <span class="skeleton-line short"></span>
+                <span class="skeleton-line long"></span>
+                <span class="skeleton-line medium"></span>
+              </article>
+            </div>
           </section>
         </div>
       </section>
@@ -668,6 +730,85 @@
           <button class="icon-button" data-close-modal="patternModal" aria-label="Close">x</button>
         </div>
         <div id="patternModalBody" class="detail-stack"></div>
+      </div>
+    </section>
+
+    <section class="modal hidden" id="leadMagnetCreateModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="leadMagnetCreateModal"></div>
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <span class="eyebrow">New artifact</span>
+            <h2>Create Lead Magnet</h2>
+          </div>
+          <button class="icon-button" data-close-modal="leadMagnetCreateModal" aria-label="Close">x</button>
+        </div>
+        <p class="muted">Choose a direction or leave the title open so Koinoniko can shape the strongest resource from recent evidence.</p>
+        <div class="form-grid">
+          <label class="full-span">Working title
+            <input id="leadMagnetTitle" placeholder="Optional — let research suggest the title">
+          </label>
+          <label>Format
+            <select id="leadMagnetFormat">
+              <option value="prompt_library">Notion prompt library</option>
+              <option value="playbook">Sales playbook</option>
+              <option value="template_pack">Template pack / checklist</option>
+              <option value="scorecard">Scorecard / diagnostic</option>
+            </select>
+          </label>
+          <label>Audience
+            <input id="leadMagnetAudience" placeholder="Sales leaders, RevOps, founders...">
+          </label>
+          <label>Depth
+            <select id="leadMagnetDepth">
+              <option value="standard">Standard</option>
+              <option value="quick">Quick win</option>
+              <option value="deep">Deep resource</option>
+            </select>
+          </label>
+          <label>Call to action
+            <input id="leadMagnetCta" placeholder="Optional next step">
+          </label>
+          <label class="full-span">Sales outcome
+            <textarea id="leadMagnetSalesOutcome" rows="3" placeholder="Example: help teams turn account signals into a prioritized prospecting workflow."></textarea>
+          </label>
+          <label class="full-span">Leadpoet integration
+            <select id="leadMagnetProductIntegration">
+              <option value="light">Light — one useful product touchpoint</option>
+              <option value="embedded" selected>Embedded — Leadpoet supports a core workflow step</option>
+              <option value="strong">Strong — the resource is built around a Leadpoet workflow</option>
+            </select>
+          </label>
+          <label class="full-span">Optional instructions
+            <textarea id="leadMagnetInstructions" rows="4" placeholder="Include preferred sections, examples, constraints, or how Leadpoet should appear."></textarea>
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button id="createLeadMagnetButton" type="button">Generate Draft</button>
+          <button class="quiet-button" data-close-modal="leadMagnetCreateModal" type="button">Cancel</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="modal hidden" id="leadMagnetDetailModal" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="leadMagnetDetailModal"></div>
+      <div class="modal-card wide lead-magnet-detail-card">
+        <div class="modal-header lead-magnet-detail-header">
+          <div>
+            <span class="eyebrow">Lead magnet</span>
+            <h2 id="leadMagnetDetailTitle">Artifact details</h2>
+          </div>
+          <div class="modal-header-actions">
+            <span id="leadMagnetDetailStatus" class="lead-magnet-status">Draft</span>
+            <button class="icon-button" data-close-modal="leadMagnetDetailModal" aria-label="Close">x</button>
+          </div>
+        </div>
+        <div id="leadMagnetDetailBody" class="detail-stack"></div>
+        <div class="modal-actions lead-magnet-detail-actions">
+          <button class="secondary" id="approveLeadMagnetButton" type="button">Approve</button>
+          <button id="publishLeadMagnetButton" type="button">Publish to Notion</button>
+          <a class="button-link secondary-link hidden" id="openPublishedLeadMagnetLink" target="_blank" rel="noopener noreferrer">Open Published Page</a>
+        </div>
       </div>
     </section>
 

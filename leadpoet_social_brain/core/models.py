@@ -89,6 +89,15 @@ class PostNote:
 
 
 @dataclass(frozen=True)
+class VoiceExampleCandidate:
+    """Authored post plus the evidence used to calibrate automatic Voice fallback."""
+
+    post: SocialPost
+    note: PostNote | None = None
+    metrics: EngagementMetrics | None = None
+
+
+@dataclass(frozen=True)
 class PostInfluence:
     post_id: str
     influence_type: str
@@ -195,6 +204,103 @@ class TrendItem:
 
 
 @dataclass(frozen=True)
+class LeadMagnetSource:
+    title: str
+    source_url: str | None = None
+    canonical_url: str | None = None
+    platform: str = "web"
+    author: str | None = None
+    published_at: str | None = None
+    collected_at: str = field(default_factory=utc_now)
+    format: str = "other"
+    sales_topic: str | None = None
+    hook: str | None = None
+    promise: str | None = None
+    audience: str | None = None
+    delivery_mechanism: str | None = None
+    cta: str | None = None
+    leadpoet_integration: str | None = None
+    why_it_worked: str | None = None
+    likes: int | None = None
+    replies: int | None = None
+    reposts: int | None = None
+    bookmarks: int | None = None
+    impressions: int | None = None
+    follower_count: int | None = None
+    metric_observed_at: str | None = None
+    performance_score: float | None = None
+    evidence_strength: str = "unknown"
+    raw_text: str | None = None
+    status: str = "candidate"
+    id: str = field(default_factory=new_id)
+    workspace_id: str = DEFAULT_WORKSPACE_ID
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class LeadMagnetResearchRun:
+    window_start: str
+    window_end: str
+    period_key: str
+    query: str
+    provider: str | None = None
+    status: str = "running"
+    candidates_found: int = 0
+    sources_qualified: int = 0
+    source_ids: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    error_message: str | None = None
+    started_at: str = field(default_factory=utc_now)
+    completed_at: str | None = None
+    id: str = field(default_factory=new_id)
+    workspace_id: str = DEFAULT_WORKSPACE_ID
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class LeadMagnet:
+    title: str
+    promise: str = ""
+    audience: str = ""
+    sales_outcome: str = ""
+    format: str = "notion_prompt_repo"
+    depth: str = "standard"
+    product_integration: str = ""
+    cta: str = ""
+    status: str = "draft"
+    source_ids: list[str] = field(default_factory=list)
+    research_run_id: str | None = None
+    evidence_summary: str | None = None
+    content: "JsonDict" = field(default_factory=dict)
+    markdown: str = ""
+    generation_brief: "JsonDict" = field(default_factory=dict)
+    notion_page_id: str | None = None
+    notion_url: str | None = None
+    published_at: str | None = None
+    failure_reason: str | None = None
+    id: str = field(default_factory=new_id)
+    workspace_id: str = DEFAULT_WORKSPACE_ID
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class LeadMagnetVersion:
+    lead_magnet_id: str
+    content: "JsonDict" = field(default_factory=dict)
+    markdown: str = ""
+    edit_type: str = "generated"
+    instruction: str | None = None
+    source_ids: list[str] = field(default_factory=list)
+    id: str = field(default_factory=new_id)
+    workspace_id: str = DEFAULT_WORKSPACE_ID
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
 class TopicIdea:
     title: str
     topic: str
@@ -243,6 +349,8 @@ class QueuedPostVersion:
     text: str
     edit_type: str
     edit_instruction: str | None = None
+    source_draft_id: str | None = None
+    accepted_at: str | None = None
     id: str = field(default_factory=new_id)
     created_at: str = field(default_factory=utc_now)
 
@@ -281,12 +389,25 @@ class DraftRequest:
     length_mode: str | None = None
     max_chars: int | None = None
     extra_context: str | None = None
+    # Autopilot and source-derived editorial directions are useful instructions,
+    # but they are not automatically factual evidence. Direct user requests keep
+    # the backward-compatible trusted defaults; automated callers opt out.
+    angle_is_factual_evidence: bool = True
+    extra_context_is_factual_evidence: bool = True
     use_trends: bool = False
     trend_ids: list[str] = field(default_factory=list)
     use_patterns: bool = False
     pattern_ids: list[str] = field(default_factory=list)
     prompt_profile: str | None = None
     editorial_value_mode: str | None = None
+    # Revision material is intentionally separate from ``extra_context``.  The
+    # existing queued prose is useful as an editing target, but it is not factual
+    # evidence and must never authorize an unsupported claim merely because the
+    # old version already contained it.
+    revision_source_text: str | None = None
+    revision_instruction: str | None = None
+    revision_source_queue_id: str | None = None
+    revision_source_draft_id: str | None = None
 
 
 @dataclass(frozen=True)

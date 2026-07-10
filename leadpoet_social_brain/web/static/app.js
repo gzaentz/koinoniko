@@ -15,6 +15,14 @@ const state = {
   analytics: null,
   status: null,
   account: null,
+  leadMagnets: [],
+  leadMagnetsLoaded: false,
+  leadMagnetsLoading: false,
+  leadMagnetError: "",
+  leadMagnetResearch: null,
+  leadMagnetDetail: null,
+  leadMagnetDetailLoading: false,
+  leadMagnetDetailError: "",
   voice: null,
   voiceAvoidDraft: [],
   reviewItems: [],
@@ -311,6 +319,12 @@ async function loadQueueStatuses(statuses) {
 function renderCurrentView() {
   if (state.view === "dashboard") renderDashboard();
   if (state.view === "reviewer") renderReviewer();
+  if (state.view === "leadMagnets") {
+    renderLeadMagnets();
+    if (!state.leadMagnetsLoaded && !state.leadMagnetsLoading) {
+      loadLeadMagnets().catch((error) => showMessage(error.message, true));
+    }
+  }
   if (state.view === "voice") {
     if (!state.voice) renderVoiceLoading();
     loadVoice().catch((error) => showMessage(error.message, true));
@@ -326,7 +340,15 @@ function updateGlobalControls() {
   $("reviewNavBadge").textContent = String(reviewCount);
   $("reviewNavBadge").classList.toggle("muted-badge", reviewCount === 0);
 
-  [$("reviewAddButton"), $("generatePostButton"), $("refreshTopicsButton"), $("planWeekButton")].forEach((button) => {
+  [
+    $("reviewAddButton"),
+    $("generatePostButton"),
+    $("refreshTopicsButton"),
+    $("planWeekButton"),
+    $("openLeadMagnetCreateButton"),
+    $("createLeadMagnetButton"),
+  ].forEach((button) => {
+    if (!button) return;
     button.disabled = !state.status?.provider_configured;
     button.title = state.status?.provider_configured ? "" : "Provider-backed generation is not connected.";
   });
@@ -2279,6 +2301,564 @@ async function refreshAfterAccountAction() {
   }
 }
 
+async function loadLeadMagnets({ force = false, throwOnError = false } = {}) {
+  if (state.leadMagnetsLoading) return;
+  if (state.leadMagnetsLoaded && !force) {
+    renderLeadMagnets();
+    return;
+  }
+  state.leadMagnetsLoading = true;
+  state.leadMagnetError = "";
+  renderLeadMagnets();
+  try {
+    const payload = await api("/api/lead-magnets");
+    state.leadMagnets = leadMagnetItemsFromPayload(payload);
+    state.leadMagnetsLoaded = true;
+    if (payload?.research || payload?.run) {
+      state.leadMagnetResearch = payload.research || payload;
+    }
+  } catch (error) {
+    state.leadMagnetsLoaded = true;
+    state.leadMagnetError = error.message || "Could not load lead magnets.";
+    if (throwOnError) throw error;
+  } finally {
+    state.leadMagnetsLoading = false;
+    renderLeadMagnets();
+  }
+}
+
+function leadMagnetItemsFromPayload(payload) {
+  if (Array.isArray(payload)) return payload.filter((item) => item && typeof item === "object");
+  const candidates = [
+    payload?.items,
+    payload?.lead_magnets,
+    payload?.artifacts,
+    payload?.results,
+    payload?.data?.items,
+  ];
+  const items = candidates.find(Array.isArray) || [];
+  return items.filter((item) => item && typeof item === "object");
+}
+
+function leadMagnetItemFromPayload(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  const item = payload.item || payload.lead_magnet || payload.artifact || payload.result?.item || payload.result;
+  if (item && typeof item === "object" && !Array.isArray(item)) return item;
+  return payload.id || payload.status || payload.title ? payload : null;
+}
+
+function leadMagnetStatus(item) {
+  const value = item?.status || item?.review_status || item?.current_status || "draft";
+  return String(value).trim().toLowerCase().replace(/[\s-]+/g, "_").replace(/[^a-z0-9_]/g, "") || "draft";
+}
+
+function leadMagnetTitle(item) {
+  return cleanString(item?.title || item?.name || item?.spec?.title) || "Untitled lead magnet";
+}
+
+function leadMagnetFormat(item) {
+  return cleanString(item?.format || item?.format_type || item?.artifact_type || item?.spec?.format) || "resource";
+}
+
+function leadMagnetSummary(item) {
+  return cleanString(
+    item?.promise ||
+      item?.summary ||
+      item?.description ||
+      item?.value_proposition ||
+      item?.sales_outcome ||
+      item?.sales_problem ||
+      item?.brief?.summary
+  );
+}
+
+function leadMagnetProductIntegration(item) {
+  return leadMagnetDisplayText(
+    item?.content?.leadpoet_workflow ||
+      item?.leadpoet_workflow ||
+      item?.product_integration ||
+      item?.leadpoet_integration ||
+      item?.leadpoet_angle ||
+      item?.brief?.product_integration ||
+      item?.brief?.leadpoet_integration
+  );
+}
+
+function leadMagnetDisplayText(value) {
+  if (value === null || value === undefined) return "";
+  if (Array.isArray(value)) return value.map(leadMagnetDisplayText).filter(Boolean).join("\n");
+  if (typeof value === "object") {
+    if (Array.isArray(value.steps)) {
+      return [value.heading, value.context_basis, ...value.steps].map(cleanString).filter(Boolean).join("\n");
+    }
+    return cleanString(value.summary || value.description || value.text) || JSON.stringify(value, null, 2);
+  }
+  return cleanString(value);
+}
+
+function leadMagnetMarkdown(item) {
+  const direct = [
+    item?.markdown,
+    item?.content_markdown,
+    item?.markdown_content,
+    item?.artifact_markdown,
+    item?.content?.markdown,
+    item?.artifact?.markdown,
+    item?.document?.markdown,
+  ].find((value) => typeof value === "string" && value.trim());
+  if (direct) return direct.trim();
+  if (typeof item?.content === "string" && item.content.trim()) return item.content.trim();
+
+  const sections = item?.sections || item?.content?.sections || item?.content_manifest?.sections;
+  if (Array.isArray(sections) && sections.length) {
+    return sections
+      .map((section) => {
+        if (typeof section === "string") return section.trim();
+        const heading = cleanString(section?.title || section?.heading || section?.name);
+        const body = leadMagnetDisplayText(section?.markdown || section?.content || section?.body || section?.text);
+        return [heading ? `## ${heading}` : "", body].filter(Boolean).join("\n\n");
+      })
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  const structured = item?.content_manifest || item?.artifact || item?.content_json;
+  if (structured && typeof structured === "object") return JSON.stringify(structured, null, 2);
+  return "";
+}
+
+function leadMagnetEvidence(item) {
+  const candidates = [
+    item?.evidence,
+    item?.sources,
+    item?.source_examples,
+    item?.research_sources,
+    item?.evidence?.sources,
+    item?.research?.sources,
+  ];
+  const evidence = candidates.find(Array.isArray);
+  if (evidence) return evidence;
+
+  const sourceIds = Array.isArray(item?.source_ids)
+    ? item.source_ids
+    : Array.isArray(item?.source_refs)
+      ? item.source_refs
+      : [];
+  const researchSources = Array.isArray(state.leadMagnetResearch?.sources)
+    ? state.leadMagnetResearch.sources
+    : [];
+  return sourceIds.map((sourceId) => {
+    const matched = researchSources.find((source) => String(source?.id || source?.source_id) === String(sourceId));
+    return matched || { id: sourceId, title: `Source ${sourceId}` };
+  });
+}
+
+function leadMagnetPublishedUrl(item) {
+  const explicit =
+    item?.notion_url ||
+    item?.notion_page_url ||
+    item?.published_url ||
+    item?.destination_url ||
+    item?.publication?.url ||
+    item?.notion?.url;
+  if (explicit) return safeExternalUrl(explicit);
+  return leadMagnetStatus(item) === "published" ? safeExternalUrl(item?.url) : "";
+}
+
+function safeExternalUrl(value) {
+  const text = cleanString(value);
+  if (!text) return "";
+  try {
+    const parsed = new URL(text, window.location.origin);
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.href : "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function filteredLeadMagnets() {
+  const query = cleanString($("leadMagnetSearch")?.value).toLowerCase();
+  const status = $("leadMagnetStatusFilter")?.value || "all";
+  return [...state.leadMagnets]
+    .filter((item) => status === "all" || leadMagnetStatus(item) === status)
+    .filter((item) => {
+      if (!query) return true;
+      return [
+        leadMagnetTitle(item),
+        leadMagnetFormat(item),
+        leadMagnetSummary(item),
+        item?.audience,
+        item?.sales_outcome,
+        item?.sales_problem,
+      ]
+        .map((value) => cleanString(value).toLowerCase())
+        .join(" ")
+        .includes(query);
+    })
+    .sort((first, second) => {
+      const firstDate = Date.parse(first?.updated_at || first?.created_at || "") || 0;
+      const secondDate = Date.parse(second?.updated_at || second?.created_at || "") || 0;
+      return secondDate - firstDate;
+    });
+}
+
+function renderLeadMagnets() {
+  const list = $("leadMagnetList");
+  if (!list) return;
+  renderLeadMagnetResearchSummary();
+  $("leadMagnetCount").textContent = String(state.leadMagnets.length);
+  if (state.leadMagnetsLoading && !state.leadMagnetsLoaded) {
+    renderLeadMagnetsLoading();
+    return;
+  }
+  if (state.leadMagnetError) {
+    list.innerHTML = `
+      <article class="empty-state">
+        <h3>Lead magnets could not be loaded</h3>
+        <p>${escapeHtml(state.leadMagnetError)}</p>
+        <div class="actions left"><button class="secondary" type="button" data-lead-magnet-action="retry">Try again</button></div>
+      </article>
+    `;
+    return;
+  }
+  const items = filteredLeadMagnets();
+  if (!items.length) {
+    const hasArtifacts = state.leadMagnets.length > 0;
+    list.innerHTML = `
+      <article class="empty-state lead-magnet-empty-state">
+        <h3>${hasArtifacts ? "No artifacts match these filters" : "No lead magnets yet"}</h3>
+        <p>${hasArtifacts ? "Clear the search or choose another status." : "Research recent winners, then create the first reviewable resource."}</p>
+        ${hasArtifacts ? "" : '<div class="actions left"><button type="button" data-lead-magnet-action="create">Create Lead Magnet</button></div>'}
+      </article>
+    `;
+    return;
+  }
+  list.innerHTML = items.map(leadMagnetCard).join("");
+}
+
+function leadMagnetCard(item) {
+  const id = cleanString(item?.id);
+  const status = leadMagnetStatus(item);
+  const summary = leadMagnetSummary(item) || "Open the artifact to review its evidence and Markdown.";
+  const evidenceCount = leadMagnetEvidence(item).length;
+  const date = formatDate(item?.updated_at || item?.created_at || item?.published_at);
+  const publishedUrl = leadMagnetPublishedUrl(item);
+  return `
+    <article class="lead-magnet-card">
+      <button class="lead-magnet-card-open" type="button" data-lead-magnet-action="open" data-lead-magnet-id="${escapeAttr(id)}">
+        <span class="lead-magnet-card-topline">
+          <span class="lead-magnet-format">${escapeHtml(label(leadMagnetFormat(item)))}</span>
+          <span class="lead-magnet-status status-${escapeAttr(status)}">${escapeHtml(label(status))}</span>
+        </span>
+        <h3>${escapeHtml(leadMagnetTitle(item))}</h3>
+        <p>${escapeHtml(summary)}</p>
+        <span class="meta-row">
+          <span>${escapeHtml(`${evidenceCount} source${evidenceCount === 1 ? "" : "s"}`)}</span>
+          ${date ? `<span>${escapeHtml(date)}</span>` : ""}
+        </span>
+      </button>
+      <div class="lead-magnet-card-actions">
+        <button class="secondary" type="button" data-lead-magnet-action="open" data-lead-magnet-id="${escapeAttr(id)}">Review</button>
+        ${publishedUrl ? `<a href="${escapeAttr(publishedUrl)}" target="_blank" rel="noopener noreferrer">Open page</a>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function renderLeadMagnetResearchSummary() {
+  const node = $("leadMagnetResearchSummary");
+  if (!node) return;
+  const payload = state.leadMagnetResearch;
+  if (!payload) {
+    node.textContent = "Research looks across the last 30 days and keeps source evidence with every artifact.";
+    return;
+  }
+  if (payload.loading) {
+    node.innerHTML = '<span class="lead-magnet-research-pulse" aria-hidden="true"></span><span>Scanning the last 30 days for strong sales and tech lead magnets...</span>';
+    return;
+  }
+  const run = payload.run && typeof payload.run === "object" ? payload.run : payload;
+  const sources = Array.isArray(payload.sources) ? payload.sources : Array.isArray(run.sources) ? run.sources : [];
+  const warnings = Array.isArray(payload.warnings) ? payload.warnings : Array.isArray(run.warnings) ? run.warnings : [];
+  const candidates = Number(payload.candidates_found ?? run.candidates_found ?? run.fetched ?? 0);
+  const message = cleanString(payload.message || run.message);
+  node.innerHTML = `
+    <strong>${escapeHtml(message || "Research complete")}</strong>
+    <span>${escapeHtml(`${candidates} candidate${candidates === 1 ? "" : "s"} reviewed · ${sources.length} source${sources.length === 1 ? "" : "s"} retained`)}</span>
+    ${warnings.length ? `<span>${escapeHtml(`${warnings.length} warning${warnings.length === 1 ? "" : "s"}`)}</span>` : ""}
+  `;
+}
+
+async function researchLeadMagnets() {
+  state.leadMagnetResearch = { loading: true };
+  renderLeadMagnetResearchSummary();
+  try {
+    const payload = await api("/api/lead-magnets/research", {
+      method: "POST",
+      body: JSON.stringify({ window_days: 30 }),
+    });
+    state.leadMagnetResearch = payload || {};
+    await loadLeadMagnets({ force: true, throwOnError: true });
+    const retained = Array.isArray(payload.sources) ? payload.sources.length : 0;
+    showMessage(payload.message || `Lead magnet research complete. Retained ${retained} source${retained === 1 ? "" : "s"}.`);
+  } catch (error) {
+    state.leadMagnetResearch = { message: "Research could not be completed", warnings: [error.message] };
+    renderLeadMagnetResearchSummary();
+    throw error;
+  }
+}
+
+function openLeadMagnetCreateModal() {
+  resetLeadMagnetCreateForm();
+  openModal("leadMagnetCreateModal");
+  window.setTimeout(() => $("leadMagnetTitle")?.focus(), 0);
+}
+
+function resetLeadMagnetCreateForm() {
+  $("leadMagnetTitle").value = "";
+  $("leadMagnetFormat").value = "prompt_library";
+  $("leadMagnetAudience").value = "";
+  $("leadMagnetDepth").value = "standard";
+  $("leadMagnetCta").value = "";
+  $("leadMagnetSalesOutcome").value = "";
+  $("leadMagnetProductIntegration").value = "embedded";
+  $("leadMagnetInstructions").value = "";
+}
+
+async function createLeadMagnet() {
+  const audience = cleanString($("leadMagnetAudience").value);
+  if (!audience) throw new Error("Add the audience this lead magnet is for.");
+  const salesOutcome = cleanString($("leadMagnetSalesOutcome").value);
+  if (!salesOutcome) throw new Error("Add the sales outcome this lead magnet should help the reader achieve.");
+  const request = {
+    format: $("leadMagnetFormat").value || "prompt_library",
+    audience,
+    sales_outcome: salesOutcome,
+    depth: $("leadMagnetDepth").value || "standard",
+    product_integration: $("leadMagnetProductIntegration").value || "embedded",
+  };
+  const optionalFields = {
+    title: cleanString($("leadMagnetTitle").value),
+    cta: cleanString($("leadMagnetCta").value),
+    instruction: cleanString($("leadMagnetInstructions").value),
+  };
+  Object.entries(optionalFields).forEach(([key, value]) => {
+    if (value) request[key] = value;
+  });
+  const payload = await api("/api/lead-magnets", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+  const item = leadMagnetItemFromPayload(payload);
+  closeModal("leadMagnetCreateModal");
+  await loadLeadMagnets({ force: true, throwOnError: true });
+  showMessage(payload.message || "Lead magnet draft created for review.");
+  if (item?.id) await openLeadMagnetDetail(item.id, item);
+}
+
+async function openLeadMagnetDetail(id, fallbackItem = null) {
+  const cleanId = cleanString(id);
+  if (!cleanId) return;
+  state.leadMagnetDetail =
+    fallbackItem || state.leadMagnets.find((item) => String(item?.id || "") === cleanId) || { id: cleanId };
+  state.leadMagnetDetailLoading = true;
+  state.leadMagnetDetailError = "";
+  renderLeadMagnetDetail();
+  openModal("leadMagnetDetailModal");
+  try {
+    const payload = await api(`/api/lead-magnets/${encodeURIComponent(cleanId)}`);
+    const item = leadMagnetItemFromPayload(payload);
+    if (item) state.leadMagnetDetail = { ...state.leadMagnetDetail, ...item };
+  } catch (error) {
+    state.leadMagnetDetailError = error.message || "Could not load the full artifact.";
+  } finally {
+    state.leadMagnetDetailLoading = false;
+    renderLeadMagnetDetail();
+  }
+}
+
+function renderLeadMagnetDetail() {
+  const body = $("leadMagnetDetailBody");
+  const item = state.leadMagnetDetail;
+  if (!body) return;
+  $("leadMagnetDetailTitle").textContent = item ? leadMagnetTitle(item) : "Artifact details";
+  const status = leadMagnetStatus(item || {});
+  const statusNode = $("leadMagnetDetailStatus");
+  statusNode.textContent = label(status);
+  statusNode.className = `lead-magnet-status status-${status}`;
+  if (state.leadMagnetDetailLoading && !leadMagnetMarkdown(item || {})) {
+    body.innerHTML = skeletonCards(4, "lead-magnet-detail-section");
+    syncLeadMagnetDetailActions();
+    return;
+  }
+  if (!item) {
+    body.innerHTML = '<article class="empty-state"><p>Artifact details are not available.</p></article>';
+    syncLeadMagnetDetailActions();
+    return;
+  }
+
+  const evidence = leadMagnetEvidence(item);
+  const evidenceSummary = leadMagnetDisplayText(item?.evidence_summary || item?.research?.evidence_summary);
+  const markdown = leadMagnetMarkdown(item);
+  const summary = leadMagnetSummary(item);
+  const integration = leadMagnetProductIntegration(item);
+  const publicationError = cleanString(item?.publication_error || item?.failure_reason || item?.last_error);
+  body.innerHTML = `
+    ${state.leadMagnetDetailError ? `<article class="lead-magnet-detail-warning"><strong>Showing saved summary</strong><span>${escapeHtml(state.leadMagnetDetailError)}</span></article>` : ""}
+    <div class="detail-grid">
+      ${detail("Format", label(leadMagnetFormat(item)))}
+      ${detail("Audience", cleanString(item?.audience) || "Not specified")}
+      ${detail("Depth", label(item?.depth || "standard"))}
+      ${detail("Research", label(item?.research_strength || "none"))}
+      ${detail("Updated", formatDateTime(item?.updated_at || item?.created_at) || "Not available")}
+    </div>
+    ${summary ? `<section class="lead-magnet-detail-section"><span class="eyebrow">Outcome</span><p>${escapeHtml(summary)}</p></section>` : ""}
+    ${integration ? `<section class="lead-magnet-detail-section"><span class="eyebrow">Leadpoet integration</span><p class="full-text compact">${escapeHtml(integration)}</p></section>` : ""}
+    <section class="lead-magnet-detail-section">
+      <div class="lead-magnet-section-heading">
+        <div><span class="eyebrow">Evidence</span><h3>Why this should work</h3></div>
+        <span class="count-pill">${evidence.length}</span>
+      </div>
+      <div class="lead-magnet-evidence-list">
+        ${evidence.length ? evidence.map(leadMagnetEvidenceCard).join("") : '<p class="muted">No source evidence was returned with this artifact.</p>'}
+      </div>
+      ${evidenceSummary ? `<p class="muted">${escapeHtml(evidenceSummary)}</p>` : ""}
+    </section>
+    <section class="lead-magnet-detail-section">
+      <div class="lead-magnet-section-heading">
+        <div><span class="eyebrow">Artifact</span><h3>Markdown</h3></div>
+        ${markdown ? `<button class="quiet-button lead-magnet-copy-button" type="button" data-lead-magnet-action="copy-markdown">Copy Markdown</button>` : ""}
+      </div>
+      ${markdown ? `<pre class="lead-magnet-markdown">${escapeHtml(markdown)}</pre>` : '<article class="empty-state"><p>Markdown has not been generated for this artifact yet.</p></article>'}
+    </section>
+    ${item?.cta ? `<section class="lead-magnet-detail-section"><span class="eyebrow">Call to action</span><p>${escapeHtml(leadMagnetDisplayText(item.cta))}</p></section>` : ""}
+    ${publicationError ? `<article class="lead-magnet-detail-warning"><strong>Publication needs attention</strong><span>${escapeHtml(publicationError)}</span></article>` : ""}
+  `;
+  syncLeadMagnetDetailActions();
+}
+
+function leadMagnetEvidenceCard(source) {
+  const item = typeof source === "object" && source !== null ? source : { title: source };
+  const title = cleanString(item.title || item.source_title || item.name || item.url || item.id) || "Source evidence";
+  const summary = cleanString(item.summary || item.source_summary || item.excerpt || item.why_it_worked || item.analysis);
+  const url = safeExternalUrl(item.source_url || item.url || item.link);
+  const sourceLabel = cleanString(item.source_author || item.author || item.platform || item.source_type);
+  const signal = leadMagnetEvidenceSignal(item);
+  return `
+    <article class="lead-magnet-evidence-card">
+      <div>
+        ${url ? `<a href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer"><strong>${escapeHtml(title)}</strong></a>` : `<strong>${escapeHtml(title)}</strong>`}
+        ${sourceLabel ? `<span>${escapeHtml(sourceLabel)}</span>` : ""}
+      </div>
+      ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
+      ${signal ? `<small>${escapeHtml(signal)}</small>` : ""}
+    </article>
+  `;
+}
+
+function leadMagnetEvidenceSignal(source) {
+  if (source?.performance_score !== null && source?.performance_score !== undefined) {
+    return `Performance score ${source.performance_score}`;
+  }
+  if (source?.engagement_rate !== null && source?.engagement_rate !== undefined) {
+    return `Engagement rate ${formatRate(Number(source.engagement_rate))}`;
+  }
+  const metrics = source?.observed_metrics && typeof source.observed_metrics === "object"
+    ? source.observed_metrics
+    : source?.metrics && typeof source.metrics === "object"
+      ? source.metrics
+      : source;
+  const parts = [
+    ["likes", metrics?.likes],
+    ["comments", metrics?.comments ?? metrics?.replies],
+    ["shares", metrics?.shares ?? metrics?.reposts],
+    ["saves", metrics?.saves ?? metrics?.bookmarks],
+  ]
+    .filter(([, value]) => value !== null && value !== undefined)
+    .map(([name, value]) => `${formatNumber(Number(value) || 0)} ${name}`);
+  return parts.join(" · ");
+}
+
+function syncLeadMagnetDetailActions() {
+  const item = state.leadMagnetDetail || {};
+  const status = leadMagnetStatus(item);
+  const id = cleanString(item.id);
+  const approveButton = $("approveLeadMagnetButton");
+  const publishButton = $("publishLeadMagnetButton");
+  approveButton.disabled = !id || state.leadMagnetDetailLoading || ["approved", "published"].includes(status);
+  approveButton.textContent = ["approved", "published"].includes(status) ? "Approved" : "Approve";
+  const canPublish = ["approved", "ready", "ready_to_publish"].includes(status);
+  publishButton.disabled = !id || state.leadMagnetDetailLoading || !canPublish;
+  publishButton.textContent = status === "published" ? "Published" : "Publish to Notion";
+
+  const link = $("openPublishedLeadMagnetLink");
+  const publishedUrl = leadMagnetPublishedUrl(item);
+  link.classList.toggle("hidden", !publishedUrl);
+  if (publishedUrl) link.href = publishedUrl;
+  else link.removeAttribute("href");
+}
+
+async function mutateLeadMagnet(action) {
+  const current = state.leadMagnetDetail;
+  const id = cleanString(current?.id);
+  if (!id) throw new Error("This lead magnet does not have a saved ID yet.");
+  let payload;
+  try {
+    payload = await api(`/api/lead-magnets/${encodeURIComponent(id)}/${action}`, {
+      method: "POST",
+      body: "{}",
+    });
+  } catch (error) {
+    if (action === "publish") {
+      try {
+        const freshPayload = await api(`/api/lead-magnets/${encodeURIComponent(id)}`);
+        const freshItem = leadMagnetItemFromPayload(freshPayload);
+        if (freshItem) state.leadMagnetDetail = { ...current, ...freshItem };
+        renderLeadMagnetDetail();
+        await loadLeadMagnets({ force: true });
+      } catch (_) {}
+    }
+    throw error;
+  }
+  const updated = leadMagnetItemFromPayload(payload) || {};
+  state.leadMagnetDetail = { ...current, ...updated };
+  const existingIndex = state.leadMagnets.findIndex((item) => String(item?.id || "") === id);
+  if (existingIndex >= 0) state.leadMagnets[existingIndex] = { ...state.leadMagnets[existingIndex], ...updated };
+  renderLeadMagnetDetail();
+  renderLeadMagnets();
+  await loadLeadMagnets({ force: true });
+  showMessage(payload.message || (action === "approve" ? "Lead magnet approved." : "Lead magnet published to Notion."));
+}
+
+async function copyLeadMagnetMarkdown() {
+  const markdown = leadMagnetMarkdown(state.leadMagnetDetail || {});
+  if (!markdown) return;
+  if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is not available in this browser.");
+  await navigator.clipboard.writeText(markdown);
+  showMessage("Markdown copied.");
+}
+
+function handleLeadMagnetListClick(event) {
+  const control = event.target.closest("[data-lead-magnet-action]");
+  if (!control) return;
+  const action = control.dataset.leadMagnetAction;
+  if (action === "open") {
+    openLeadMagnetDetail(control.dataset.leadMagnetId).catch((error) => showMessage(error.message, true));
+  }
+  if (action === "retry") {
+    state.leadMagnetsLoaded = false;
+    loadLeadMagnets({ force: true }).catch((error) => showMessage(error.message, true));
+  }
+  if (action === "create") openLeadMagnetCreateModal();
+}
+
+function handleLeadMagnetDetailClick(event) {
+  const control = event.target.closest("[data-lead-magnet-action]");
+  if (control?.dataset.leadMagnetAction === "copy-markdown") {
+    copyLeadMagnetMarkdown().catch((error) => showMessage(error.message, true));
+  }
+}
+
 async function loadVoice() {
   const [status, current, examples, suggestions, coverage, facts, rules, avoidPhrases] = await Promise.all([
     api("/api/voice/status"),
@@ -2319,6 +2899,7 @@ function renderVoice() {
 function renderInitialLoadingState() {
   renderDashboardLoading();
   renderReviewerLoading();
+  renderLeadMagnetsLoading();
   renderVoiceLoading();
   renderAccountLoading();
 }
@@ -2336,6 +2917,13 @@ function renderReviewerLoading() {
   $("scheduledCount").textContent = "";
   $("reviewList").innerHTML = skeletonCards(2, "queue-card");
   $("scheduledList").innerHTML = skeletonCards(1, "queue-card");
+}
+
+function renderLeadMagnetsLoading() {
+  const list = $("leadMagnetList");
+  if (!list) return;
+  list.innerHTML = skeletonCards(4, "lead-magnet-card");
+  if ($("leadMagnetCount")) $("leadMagnetCount").textContent = "";
 }
 
 function renderVoiceLoading() {
@@ -3731,6 +4319,23 @@ function setup() {
     openModal("planModal");
   });
   document.addEventListener("click", closeReviewAddMenu);
+  $("researchLeadMagnetsButton").addEventListener("click", (event) =>
+    runButton(event.currentTarget, "Researching...", researchLeadMagnets)
+  );
+  $("openLeadMagnetCreateButton").addEventListener("click", openLeadMagnetCreateModal);
+  $("createLeadMagnetButton").addEventListener("click", (event) =>
+    runButton(event.currentTarget, "Generating...", createLeadMagnet)
+  );
+  $("leadMagnetSearch").addEventListener("input", renderLeadMagnets);
+  $("leadMagnetStatusFilter").addEventListener("change", renderLeadMagnets);
+  $("leadMagnetList").addEventListener("click", handleLeadMagnetListClick);
+  $("leadMagnetDetailBody").addEventListener("click", handleLeadMagnetDetailClick);
+  $("approveLeadMagnetButton").addEventListener("click", (event) =>
+    runButton(event.currentTarget, "Approving...", () => mutateLeadMagnet("approve"))
+  );
+  $("publishLeadMagnetButton").addEventListener("click", (event) =>
+    runButton(event.currentTarget, "Publishing...", () => mutateLeadMagnet("publish"))
+  );
   [
     ["accountConnectionsRow", "connections"],
     ["accountModelsRow", "models"],

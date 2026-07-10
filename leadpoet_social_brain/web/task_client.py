@@ -35,6 +35,12 @@ TASK_DEFAULTS: dict[str, dict[str, Any]] = {
         "use_patterns": True,
         "length_mode": "standard",
     },
+    "autopilot-lead-magnet": {
+        "window_days": 30,
+        "research_limit": 20,
+        "depth": "standard",
+        "product_integration": "embedded",
+    },
 }
 
 

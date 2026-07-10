@@ -16,27 +16,20 @@ from leadpoet_social_brain.core.models import (
     TrendItem,
     utc_now,
 )
-from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.editorial import dedupe_editorial_trends
 from leadpoet_social_brain.generation import (
     SocialBrainGenerator,
-    active_writing_rules_for_prompt,
-    build_best_writer_prompt,
-    build_evaluation_prompt,
-    build_strategy_prompt,
-    fit_generated_text_to_limit,
     normalize_length_mode,
-    parse_evaluation_result,
-    parse_strategy_summary,
+    prompt_safe_automated_label,
+    prompt_untrusted_text,
     resolve_length_max_chars,
-    skills_with_review_rules,
+    trend_specific_generation_angle,
 )
+from leadpoet_social_brain.originality import canonical_copy_text
 from leadpoet_social_brain.platforms.x import get_x_adapter
 from leadpoet_social_brain.platforms.x_api import XPostedTweet, XWriteClient
-from leadpoet_social_brain.providers import DraftProvider, generate_with_provider, resolve_model_routing
-from leadpoet_social_brain.skills import generation_skills
+from leadpoet_social_brain.providers import DraftProvider
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
-from leadpoet_social_brain.voice import load_avoid_phrases
 
 
 LOCAL_TZ = ZoneInfo("America/New_York")
@@ -114,7 +107,15 @@ def plan_week_x(
     queued: list[ContentQueueItem] = []
     for index in range(posts):
         topic_idea = selected_topic_ideas[index] if index < len(selected_topic_ideas) else None
-        topic = topic_idea.topic if topic_idea else topics[index % len(topics)]
+        topic = (
+            prompt_safe_automated_label(
+                topic_idea.topic,
+                fallback="sales AI",
+                max_chars=100,
+            )
+            if topic_idea
+            else topics[index % len(topics)]
+        )
         post_type = topic_idea.post_type if topic_idea else default_post_type
         referenced_trends = [
             trend
@@ -128,18 +129,19 @@ def plan_week_x(
             used_trends.add(trend.id)
         elif use_trends:
             warnings.append(f"No unused trend left for slot {index + 1}; planned evergreen post.")
-        angle = topic_idea.angle if topic_idea else (trend.leadpoet_angle if trend else evergreen_angle(topic, index))
-        context_lines = ["Weekly content calendar suggestion. Make it worth posting on its own."]
-        if topic_idea:
-            context_lines.append(f"Why this topic is worth posting now: {topic_idea.why_now}")
-        if extra_instruction and extra_instruction.strip():
-            context_lines.append(f"Weekly plan instruction: {extra_instruction.strip()}")
+        angle = (
+            prompt_untrusted_text(topic_idea.angle, max_chars=500)
+            if topic_idea
+            else (trend_specific_generation_angle(trend) if trend else evergreen_angle(topic, index))
+        )
         request = DraftRequest(
             platform="x",
             topic=topic,
             post_type=post_type,
             angle=angle,
-            extra_context="\n".join(context_lines),
+            extra_context=extra_instruction.strip() if extra_instruction and extra_instruction.strip() else None,
+            angle_is_factual_evidence=False,
+            extra_context_is_factual_evidence=False,
             length_mode=length_mode,
             use_trends=bool(trend),
             trend_ids=[trend.id] if trend else [],
@@ -150,6 +152,7 @@ def plan_week_x(
         drafts = generator.generate(
             request,
             variants=1,
+            recent_output_texts=[item.text for item in queued],
         )
         draft = drafts[0]
         quality_warnings = draft_quality_warnings(draft)
@@ -225,21 +228,13 @@ def create_post_x(
     if use_trends and not selected_trends:
         warnings.append("No relevant unused trends found. Created an evergreen post instead.")
 
-    context_parts = [
-        "Create one complete standalone X post for review.",
-        f"User instruction: {instruction}",
-    ]
-    if extra_context and extra_context.strip():
-        context_parts.append(f"Extra instruction: {extra_context.strip()}")
-    if topic_idea:
-        context_parts.append(f"Why this topic is worth posting now: {topic_idea.why_now}")
     request = DraftRequest(
         platform="x",
         topic=topic,
         post_type=post_type,
         angle=instruction,
         length_mode=length_mode,
-        extra_context="\n".join(context_parts),
+        extra_context=extra_context.strip() if extra_context and extra_context.strip() else None,
         use_trends=bool(selected_trends),
         trend_ids=[trend.id for trend in selected_trends],
         use_patterns=use_patterns,
@@ -276,6 +271,8 @@ def create_post_x(
 
 def approve_queue_item(store: SQLiteStore, queue_id: str) -> ContentQueueItem:
     item = require_queue_item(store, queue_id)
+    if item.status in {"posting", "posted"}:
+        raise ValueError("Posted or posting queue items cannot be approved again.")
     return store.save_content_queue_item(
         ContentQueueItem(
             **{
@@ -286,6 +283,43 @@ def approve_queue_item(store: SQLiteStore, queue_id: str) -> ContentQueueItem:
             }
         )
     )
+
+
+def resolve_queue_edit_state(
+    item: ContentQueueItem,
+    *,
+    text: str,
+    topic: str,
+    post_type: str,
+    angle: str | None,
+    requested_status: str,
+) -> tuple[str, str | None, bool]:
+    """Apply approval safety consistently across queue-edit entry points.
+
+    Approval belongs to the exact copy that was reviewed. A material edit to an
+    approved item therefore reopens review even when a caller also submits an
+    ``approved`` status. Published and in-flight copy is immutable because an
+    edit there could diverge local state from what X received.
+    """
+
+    material_changed = any(
+        [
+            text != item.text,
+            topic != item.topic,
+            post_type != item.post_type,
+            angle != item.angle,
+        ]
+    )
+    if material_changed and item.status in {"posting", "posted"}:
+        raise ValueError("Posted or posting queue items cannot be materially edited.")
+    if material_changed and (item.status == "approved" or requested_status == "approved"):
+        return "needs_review", None, True
+
+    if requested_status == "approved":
+        approved_at = item.approved_at or utc_now()
+    else:
+        approved_at = None
+    return requested_status, approved_at, material_changed
 
 
 def revise_queued_post(
@@ -301,120 +335,60 @@ def revise_queued_post(
     if not instruction.strip():
         raise ValueError("Edit instruction is required.")
     adapter = get_x_adapter()
-    bundle = ContextManager(store).build_bundle(
-        platform=item.platform,
-        topic=item.topic,
-        post_type=item.post_type,
-        max_examples=4,
-    )
-    skills = generation_skills(platform=item.platform, post_type=item.post_type)
-    active_rules = active_writing_rules_for_prompt(store, skills)
-    skills = skills_with_review_rules(skills, active_rules["review_rules"])
-    avoid_phrases = load_avoid_phrases(store)
-    model_routing = resolve_model_routing(store, provider)
     length_mode = queue_item_length_mode(store, item)
     max_chars = queue_item_max_chars(store, item)
+    source_draft = store.get_generated_draft(item.draft_id) if item.draft_id else None
+    source_request = source_draft.request if source_draft else None
     request = DraftRequest(
         platform=item.platform,
         topic=item.topic,
         post_type=item.post_type,
-        angle=item.angle,
+        angle=item.angle or (source_request.angle if source_request else None) or instruction.strip(),
+        audience=source_request.audience if source_request else None,
+        tone=source_request.tone if source_request else None,
+        call_to_action=source_request.call_to_action if source_request else None,
         length_mode=length_mode,
         max_chars=max_chars,
-        extra_context=(
-            "Revise this queued post into the strongest final version. "
-            f"Original post: {item.text}\nInstruction: {instruction.strip()}"
+        # Only the original request/context remains factual evidence.  The current
+        # prose is an editing target, not proof that its existing claims are true.
+        extra_context=source_request.extra_context if source_request else None,
+        angle_is_factual_evidence=(
+            source_request.angle_is_factual_evidence if source_request else True
         ),
+        extra_context_is_factual_evidence=(
+            source_request.extra_context_is_factual_evidence if source_request else True
+        ),
+        use_trends=bool(item.trend_ids),
         trend_ids=item.trend_ids,
+        use_patterns=bool(source_request and source_request.pattern_ids),
+        pattern_ids=list(source_request.pattern_ids) if source_request else [],
+        prompt_profile="natural",
+        editorial_value_mode=source_request.editorial_value_mode if source_request else None,
+        revision_source_text=item.text,
+        revision_instruction=instruction.strip(),
+        revision_source_queue_id=item.id,
+        revision_source_draft_id=item.draft_id,
     )
-    trends = [
-        trend for trend_id in item.trend_ids
-        if (trend := store.get_trend_item(trend_id)) is not None
+    draft = SocialBrainGenerator(store, provider=provider).generate(
+        request,
+        variants=1,
+        save=False,
+    )[0]
+    adapter.validate_text(draft.text, max_chars=max_chars)
+    if " ".join(draft.text.split()) == " ".join(item.text.split()):
+        raise ValueError("Revision did not change the queued post; no version was saved.")
+    draft = store.save_generated_draft(draft)
+    return [
+        store.save_queued_post_version(
+            QueuedPostVersion(
+                queue_id=item.id,
+                text=draft.text,
+                edit_type="llm",
+                edit_instruction=instruction.strip(),
+                source_draft_id=draft.id,
+            )
+        )
     ]
-    strategy_raw = generate_with_provider(
-        provider,
-        build_strategy_prompt(
-            request,
-            bundle,
-            trends=trends,
-            patterns=[],
-            avoid_phrases=avoid_phrases,
-            active_rules=active_rules,
-        ),
-        variants=1,
-        model=model_routing.strategist,
-    )[0]
-    strategy_summary = parse_strategy_summary(strategy_raw)
-    raw_options = generate_with_provider(
-        provider,
-        build_best_writer_prompt(
-            request,
-            bundle,
-            skills=skills,
-            trends=trends,
-            patterns=[],
-            avoid_phrases=avoid_phrases,
-            active_rules=active_rules,
-            strategy_summary=strategy_summary,
-            max_chars=max_chars,
-        ),
-        variants=3,
-        model=model_routing.natural_writer,
-    )
-    options: list[str] = []
-    for raw in raw_options:
-        try:
-            text = fit_generated_text_to_limit(
-                provider,
-                raw,
-                max_chars=max_chars,
-                model=model_routing.natural_writer,
-                repair_context="queued X revision option",
-            )
-        except ValueError:
-            continue
-        if text:
-            options.append(text)
-    if not options:
-        raise ValueError("Provider did not return usable revision text.")
-    evaluation_raw = generate_with_provider(
-        provider,
-        build_evaluation_prompt(
-            request,
-            skills=skills,
-            strategy_summary=strategy_summary,
-            draft_options=options,
-            trends=trends,
-            avoid_phrases=avoid_phrases,
-            active_rules=active_rules,
-            max_chars=max_chars,
-        ),
-        variants=1,
-        model=model_routing.evaluator,
-    )[0]
-    final_text, _, _ = parse_evaluation_result(evaluation_raw, options)
-    raw_versions = [final_text]
-    saved: list[QueuedPostVersion] = []
-    for raw in raw_versions:
-        text = fit_generated_text_to_limit(
-            provider,
-            raw,
-            max_chars=max_chars,
-            model=model_routing.natural_writer,
-            repair_context="queued X revision",
-        )
-        adapter.validate_text(text, max_chars=max_chars)
-        saved.append(
-            store.save_queued_post_version(
-                QueuedPostVersion(
-                    queue_id=item.id,
-                    text=text,
-                    edit_type="llm",
-                    edit_instruction=instruction.strip(),
-                )
-            )
-        )
-    return saved
 
 
 def accept_queued_post_version(store: SQLiteStore, *, version_id: str) -> ContentQueueItem:
@@ -426,20 +400,24 @@ def accept_queued_post_version(store: SQLiteStore, *, version_id: str) -> Conten
         QueuedPostVersion(
             queue_id=item.id,
             text=item.text,
-            edit_type="manual",
+            edit_type="superseded",
             edit_instruction="previous text before accepting revision",
+            source_draft_id=item.draft_id,
         )
     )
-    return store.save_content_queue_item(
+    saved = store.save_content_queue_item(
         ContentQueueItem(
             **{
                 **item.__dict__,
                 "text": version.text,
+                "draft_id": version.source_draft_id or item.draft_id,
                 "status": "needs_review" if item.status == "approved" else item.status,
                 "approved_at": None if item.status == "approved" else item.approved_at,
             }
         )
     )
+    store.mark_queued_post_version_accepted(version.id)
+    return saved
 
 
 def approve_week_x(store: SQLiteStore, *, week_start: str) -> list[ContentQueueItem]:
@@ -482,8 +460,35 @@ def post_queue_item_x(
     item: ContentQueueItem,
     author: str = "workspace",
 ) -> PublishResult:
-    if item.status != "approved":
+    current = require_queue_item(store, item.id)
+    if current.status == "posted" and current.x_post_id:
+        return PublishResult(queue_item=current, posted=None, error=None)
+    if current.status != "approved":
         raise ValueError("Queued post must be approved before posting.")
+    current_copy_key = canonical_copy_text(current.text)
+    duplicate = next(
+        (
+            post
+            for post in store.list_posts(
+                platform=current.platform,
+                status="published",
+                limit=None,
+            )
+            if current_copy_key and canonical_copy_text(post.text) == current_copy_key
+        ),
+        None,
+    )
+    if duplicate is not None:
+        raise ValueError(
+            "Queued post duplicates copy that is already published; edit it and approve the new text before posting."
+        )
+    claimed = store.claim_content_queue_item_for_posting(current.id)
+    if claimed is None:
+        current = require_queue_item(store, current.id)
+        if current.status == "posted" and current.x_post_id:
+            return PublishResult(queue_item=current, posted=None, error=None)
+        raise ValueError("Queued post is already being posted or is no longer approved.")
+    item = claimed
     try:
         get_x_adapter().validate_text(item.text, max_chars=queue_item_max_chars(store, item))
         posted = client.post_tweet(item.text)
