@@ -2095,6 +2095,20 @@ function openCreatePostModal() {
   window.setTimeout(() => $("createPostInstruction").focus(), 0);
 }
 
+function resetCreatePostForm() {
+  $("createPostInstruction").value = "";
+  $("createPostExtra").value = "";
+  $("createPostScheduled").value = "";
+  setCreatePostFieldValue("length", "standard");
+  if ($("createPostTrend")) $("createPostTrend").value = "";
+  if ($("createPostPattern")) $("createPostPattern").value = "";
+  if ($("createPostTopicIdea")) $("createPostTopicIdea").value = "";
+  state.selectedTrendForCreate = null;
+  state.selectedTopicIdeaForCreate = null;
+  state.selectedPatternForCreate = null;
+  renderCreatePostPatternHint();
+}
+
 async function createPost() {
   const instruction = $("createPostInstruction").value.trim();
   if (!instruction) throw new Error("Post idea / instruction is required.");
@@ -2117,6 +2131,7 @@ async function createPost() {
   const pendingId = `pending-post-${Date.now()}`;
   addPendingReviewCreation({ id: pendingId, ...requestBody });
   clearMessage();
+  resetCreatePostForm();
   closeModal("createPostModal");
   setView("reviewer");
   let payload;
@@ -2131,29 +2146,17 @@ async function createPost() {
   }
   const createdQueueId = payload.queue_id || payload.item?.id || "";
   const warnings = payload.warnings || [];
-  $("createPostResult").innerHTML = warnings.length
-    ? warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join("")
-    : "";
+  if ($("createPostModal").classList.contains("hidden")) {
+    $("createPostResult").innerHTML = warnings.length
+      ? warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join("")
+      : "";
+  }
   removePendingReviewCreation(pendingId);
   if (payload.item) showCreatedQueueItem(payload.item);
-  $("createPostInstruction").value = "";
-  $("createPostExtra").value = "";
-  $("createPostScheduled").value = "";
-  setCreatePostFieldValue("length", "standard");
-  if ($("createPostTrend")) $("createPostTrend").value = "";
-  if ($("createPostPattern")) $("createPostPattern").value = "";
-  if ($("createPostTopicIdea")) $("createPostTopicIdea").value = "";
-  state.selectedTrendForCreate = null;
-  state.selectedTopicIdeaForCreate = null;
-  state.selectedPatternForCreate = null;
-  renderCreatePostPatternHint();
   if (createdQueueId) {
     if (!payload.item) markQueueItemArrived(createdQueueId);
-    await refresh();
-    await openQueueDetailById(createdQueueId);
-  } else {
-    await refresh();
   }
+  await refresh();
 }
 
 async function planWeek() {
@@ -3757,7 +3760,7 @@ function setup() {
   setupCreatePostFieldCombo("length");
   document.addEventListener("click", closeCreatePostFieldMenus);
   document.addEventListener("keydown", handleGlobalEscape);
-  $("generatePostButton").addEventListener("click", (event) => runButton(event.currentTarget, "Generating...", createPost));
+  $("generatePostButton").addEventListener("click", () => runButton(null, "", createPost));
   $("planWeekButton").addEventListener("click", (event) => runButton(event.currentTarget, "Creating...", planWeek));
   $("planAutopilot").addEventListener("change", syncPlanAutopilotState);
   $("refreshTopicsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Refreshing...", refreshTopics));
