@@ -15,6 +15,7 @@ from leadpoet_social_brain.core.models import (
 )
 from leadpoet_social_brain.lead_magnet_scout import fetch_x_lead_magnet_candidates, research_lead_magnets
 from leadpoet_social_brain.lead_magnets import generate_lead_magnet
+from leadpoet_social_brain.platforms.x_api import XApiClient, XWriteClient
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 
 
@@ -62,6 +63,13 @@ class LeadMagnetTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.store.close()
         self.tmpdir.cleanup()
+
+    def test_x_clients_use_current_api_hostname(self):
+        self.assertEqual(XApiClient("token").base_url, "https://api.x.com/2")
+        self.assertEqual(
+            XWriteClient(oauth2_access_token="token").base_url,
+            "https://api.x.com/2",
+        )
 
     def test_storage_round_trip_status_and_version_cascade(self):
         source = self.store.save_lead_magnet_source(

@@ -34,6 +34,7 @@ TWEET_FIELDS = ",".join(
         "lang",
     ]
 )
+X_API_BASE_URL = "https://api.x.com/2"
 
 MISSING_X_WRITE_CREDENTIALS_MESSAGE = (
     "No X write credentials configured. Set X write auth credentials before posting."
@@ -104,7 +105,7 @@ class XApiClient:
         self,
         bearer_token: str,
         *,
-        base_url: str = "https://api.twitter.com/2",
+        base_url: str = X_API_BASE_URL,
         request_json: Callable[[str, dict[str, str]], dict[str, Any]] | None = None,
     ):
         if not bearer_token:
@@ -219,7 +220,7 @@ class XWriteClient:
         api_secret: str | None = None,
         access_token: str | None = None,
         access_token_secret: str | None = None,
-        base_url: str = "https://api.twitter.com/2",
+        base_url: str = X_API_BASE_URL,
         request_json: Callable[[str, dict[str, Any], dict[str, str]], dict[str, Any]] | None = None,
     ):
         self.oauth2_access_token = oauth2_access_token
