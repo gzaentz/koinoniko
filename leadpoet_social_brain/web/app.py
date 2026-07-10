@@ -825,7 +825,12 @@ def route_api(
             "warnings": result.warnings,
         }
     if method == "POST" and parts == ["api", "lead-magnets", "research"]:
-        provider = load_configured_provider(store)
+        provider_warnings: list[str] = []
+        try:
+            provider = load_configured_provider(store)
+        except Exception as exc:  # noqa: BLE001 - deterministic research does not require AI classification.
+            provider = None
+            provider_warnings.append(f"AI classification was unavailable; deterministic research continued: {exc}")
         candidates = payload.get("candidates")
         if candidates is not None and not isinstance(candidates, list):
             raise ValueError("candidates must be an array when provided.")
@@ -836,6 +841,7 @@ def route_api(
             window_days=int(payload.get("window_days") or 30),
             limit=int(payload.get("limit") or 20),
             query=clean_optional(payload.get("query")),
+            initial_warnings=provider_warnings,
         )
         save_lead_magnet_research_sync(store, result)
         return 200, lead_magnet_research_result_payload(result)
@@ -852,8 +858,20 @@ def route_api(
         candidate = dict(payload)
         if not candidate.get("published_at"):
             raise ValueError("published_at is required so the rolling research window can be verified.")
-        provider = load_configured_provider(store)
-        result = research_lead_magnets(store, provider, candidates=[candidate], window_days=30, limit=1)
+        provider_warnings: list[str] = []
+        try:
+            provider = load_configured_provider(store)
+        except Exception as exc:  # noqa: BLE001 - manual evidence intake should remain available.
+            provider = None
+            provider_warnings.append(f"AI classification was unavailable; deterministic research continued: {exc}")
+        result = research_lead_magnets(
+            store,
+            provider,
+            candidates=[candidate],
+            window_days=30,
+            limit=1,
+            initial_warnings=provider_warnings,
+        )
         save_lead_magnet_research_sync(store, result)
         return 200, lead_magnet_research_result_payload(result)
     if method == "GET" and parts == ["api", "lead-magnets", "research-runs"]:

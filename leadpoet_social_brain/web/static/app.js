@@ -2582,10 +2582,11 @@ function renderLeadMagnetResearchSummary() {
   const warnings = Array.isArray(payload.warnings) ? payload.warnings : Array.isArray(run.warnings) ? run.warnings : [];
   const candidates = Number(payload.candidates_found ?? run.candidates_found ?? run.fetched ?? 0);
   const message = cleanString(payload.message || run.message);
+  const firstWarning = warnings.length ? cleanString(warnings[0]) : "";
   node.innerHTML = `
     <strong>${escapeHtml(message || "Research complete")}</strong>
     <span>${escapeHtml(`${candidates} candidate${candidates === 1 ? "" : "s"} reviewed · ${sources.length} source${sources.length === 1 ? "" : "s"} retained`)}</span>
-    ${warnings.length ? `<span>${escapeHtml(`${warnings.length} warning${warnings.length === 1 ? "" : "s"}`)}</span>` : ""}
+    ${warnings.length ? `<span title="${escapeAttr(firstWarning)}">${escapeHtml(`${warnings.length} warning${warnings.length === 1 ? "" : "s"}: ${firstWarning}`)}</span>` : ""}
   `;
 }
 

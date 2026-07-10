@@ -155,6 +155,20 @@ class LeadMagnetWebTest(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("Approve", payload["error"])
 
+    def test_manual_research_continues_when_provider_configuration_fails(self):
+        with patch(
+            "leadpoet_social_brain.web.app.load_configured_provider",
+            side_effect=RuntimeError("provider configuration failed"),
+        ):
+            status, payload = self.request(
+                "POST",
+                "/api/lead-magnets/research",
+                {"window_days": 30, "candidates": [candidate()]},
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["run"]["sources_qualified"], 1)
+        self.assertTrue(any("deterministic research continued" in warning for warning in payload["warnings"]))
+
     def test_autopilot_is_idempotent_for_fourteen_day_period(self):
         payload = {
             "now": "2026-07-06T12:00:00+00:00",

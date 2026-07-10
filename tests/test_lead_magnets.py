@@ -30,6 +30,11 @@ class StaticLeadMagnetProvider:
         return [json.dumps(self.response) for _index in range(variants)]
 
 
+class FailingLeadMagnetProvider:
+    def generate(self, prompt: str, *, variants: int, model: str | None = None) -> list[str]:
+        raise RuntimeError("classification provider unavailable")
+
+
 def lead_magnet_candidate(
     *,
     title: str,
@@ -209,6 +214,28 @@ class LeadMagnetTest(unittest.TestCase):
         self.assertEqual(by_url["https://example.com/qualitative"].performance_score, 0)
         self.assertTrue(any("Only 1 source" in warning for warning in result.warnings))
         self.assertEqual(result.run.status, "partial")
+
+    def test_scout_keeps_deterministic_source_when_ai_classification_fails(self):
+        result = research_lead_magnets(
+            self.store,
+            FailingLeadMagnetProvider(),
+            candidates=[
+                lead_magnet_candidate(
+                    title="Free outbound sales prompt library",
+                    published_at="2026-07-05T12:00:00+00:00",
+                    source_url="https://example.com/provider-failure",
+                    likes=125,
+                    bookmarks=45,
+                )
+            ],
+            now=NOW,
+            period_key="provider-failure-test",
+        )
+
+        self.assertEqual(len(result.sources), 1)
+        self.assertEqual(result.sources[0].format, "prompt_library")
+        self.assertEqual(result.sources[0].evidence_strength, "metric_backed")
+        self.assertTrue(any("AI classification failed" in warning for warning in result.warnings))
 
     def test_scout_rejects_non_sales_and_non_magnet_candidates(self):
         result = research_lead_magnets(

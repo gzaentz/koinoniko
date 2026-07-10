@@ -86,6 +86,7 @@ def research_lead_magnets(
     query: str | None = None,
     now: str | datetime | None = None,
     period_key: str | None = None,
+    initial_warnings: list[str] | None = None,
 ) -> LeadMagnetResearchResult:
     """Collect and rank recent sales/tech lead magnets without inventing performance.
 
@@ -113,7 +114,7 @@ def research_lead_magnets(
         started_at=started_at,
     )
     run = store.save_lead_magnet_research_run(run)
-    warnings: list[str] = []
+    warnings: list[str] = list(initial_warnings or [])
     discovered: list[dict[str, object]] = []
     try:
         if candidates is not None:
@@ -147,7 +148,15 @@ def research_lead_magnets(
             if not is_sales_lead_magnet(text):
                 skipped_irrelevant += 1
                 continue
-            classification = classify_candidate(provider, candidate) if provider else {}
+            classification: dict[str, object] = {}
+            if provider:
+                try:
+                    classification = classify_candidate(provider, candidate)
+                except Exception as exc:  # noqa: BLE001 - deterministic evidence must survive provider failure.
+                    warnings.append(
+                        f"AI classification failed for {canonical or summarize_candidate_title(text)}; "
+                        f"kept deterministic fields instead: {exc}"
+                    )
             source = source_from_candidate(
                 candidate,
                 classification=classification,
