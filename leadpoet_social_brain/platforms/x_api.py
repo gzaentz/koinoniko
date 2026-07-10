@@ -35,6 +35,9 @@ TWEET_FIELDS = ",".join(
     ]
 )
 X_API_BASE_URL = "https://api.x.com/2"
+X_READ_MAX_ATTEMPTS = 3
+X_READ_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+X_READ_MAX_RETRY_AFTER_SECONDS = 10.0
 
 MISSING_X_WRITE_CREDENTIALS_MESSAGE = (
     "No X write credentials configured. Set X write auth credentials before posting."
@@ -43,6 +46,22 @@ MISSING_X_WRITE_CREDENTIALS_MESSAGE = (
 DEFAULT_IMPORT_TOPIC = "Leadpoet"
 DEFAULT_IMPORT_POST_TYPE = "founder_insight"
 UNCATEGORIZED_TOPIC = "uncategorized"
+
+
+def x_read_retry_delay(exc: urllib.error.HTTPError, *, attempt: int) -> float | None:
+    if exc.code not in X_READ_RETRYABLE_STATUS_CODES or attempt >= X_READ_MAX_ATTEMPTS - 1:
+        return None
+    retry_after = (exc.headers.get("Retry-After") if exc.headers else None) or ""
+    if retry_after:
+        try:
+            requested_delay = float(retry_after)
+        except ValueError:
+            requested_delay = 0.0
+        if requested_delay > X_READ_MAX_RETRY_AFTER_SECONDS:
+            return None
+        if requested_delay > 0:
+            return requested_delay
+    return min(float(2 ** (attempt + 1)), X_READ_MAX_RETRY_AFTER_SECONDS)
 
 
 @dataclass(frozen=True)
@@ -203,12 +222,18 @@ class XApiClient:
                 "User-Agent": "leadpoet-social-brain/0.2",
             },
         )
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"X API request failed ({exc.code}): {body}") from exc
+        for attempt in range(X_READ_MAX_ATTEMPTS):
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode("utf-8", errors="replace")
+                delay = x_read_retry_delay(exc, attempt=attempt)
+                if delay is not None:
+                    time.sleep(delay)
+                    continue
+                raise RuntimeError(f"X API request failed ({exc.code}): {body}") from exc
+        raise RuntimeError("X API request failed after retrying.")
 
 
 class XWriteClient:

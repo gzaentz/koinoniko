@@ -4,6 +4,8 @@ import json
 import os
 import tempfile
 import unittest
+from io import BytesIO
+from urllib.error import HTTPError
 from unittest.mock import patch
 
 from leadpoet_social_brain.core.models import (
@@ -70,6 +72,35 @@ class LeadMagnetTest(unittest.TestCase):
             XWriteClient(oauth2_access_token="token").base_url,
             "https://api.x.com/2",
         )
+
+    def test_x_read_client_retries_transient_rate_limit(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                return False
+
+            def read(self):
+                return b'{"data": [{"id": "123"}]}'
+
+        rate_limit = HTTPError(
+            "https://api.x.com/2/tweets/search/all",
+            429,
+            "Too Many Requests",
+            {},
+            BytesIO(b'{"title": "Too Many Requests"}'),
+        )
+        with patch(
+            "leadpoet_social_brain.platforms.x_api.urllib.request.urlopen",
+            side_effect=[rate_limit, FakeResponse()],
+        ) as urlopen:
+            with patch("leadpoet_social_brain.platforms.x_api.time.sleep") as sleep:
+                response = XApiClient("token").get_json("/tweets/search/all", {"query": "sales"})
+
+        self.assertEqual(response["data"][0]["id"], "123")
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(2.0)
 
     def test_storage_round_trip_status_and_version_cascade(self):
         source = self.store.save_lead_magnet_source(
