@@ -1098,7 +1098,6 @@ function topicIdeaCard(idea) {
       </div>
       <h3>${escapeHtml(idea.title || "Untitled topic")}</h3>
       <p class="topic-angle">${escapeHtml(idea.angle || "")}</p>
-      ${idea.why_now ? `<p class="topic-why"><strong>Why now:</strong> ${escapeHtml(idea.why_now)}</p>` : ""}
       <div class="actions left">
         <button class="secondary" data-topic-action="use" data-topic-id="${escapeAttr(idea.id)}">Use in Post</button>
         <button class="quiet-button" data-topic-action="dismiss" data-topic-id="${escapeAttr(idea.id)}">Dismiss</button>

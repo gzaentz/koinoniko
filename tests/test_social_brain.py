@@ -688,6 +688,10 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("renderInitialLoadingState", app_js)
         self.assertIn("renderDashboardLoading", app_js)
         self.assertIn("skeletonTableRows", app_js)
+        topic_preview_renderer = app_js.split("function topicIdeaCard", 1)[1].split(
+            "async function refreshTopics", 1
+        )[0]
+        self.assertNotIn("idea.why_now", topic_preview_renderer)
         self.assertIn("@keyframes skeleton-shimmer", styles_css)
         self.assertIn("@media (prefers-reduced-motion: reduce)", styles_css)
         self.assertIn('src="/static/koinoniko-logo.png" alt="" class="brand-logo" width="34" height="34"', index_html)
