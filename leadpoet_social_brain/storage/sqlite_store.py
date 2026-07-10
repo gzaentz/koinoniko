@@ -277,6 +277,8 @@ class SQLiteStore:
                 why_now TEXT NOT NULL,
                 source_type TEXT NOT NULL DEFAULT 'evergreen',
                 source_refs_json TEXT NOT NULL DEFAULT '[]',
+                evidence_basis_json TEXT NOT NULL DEFAULT '[]',
+                reader_value_mode TEXT,
                 post_type TEXT NOT NULL DEFAULT 'founder_insight',
                 priority INTEGER NOT NULL DEFAULT 50,
                 status TEXT NOT NULL DEFAULT 'suggested',
@@ -368,6 +370,8 @@ class SQLiteStore:
             self._ensure_column("post_notes", column, "TEXT")
         self._ensure_column("generated_drafts", "context_snapshot_json", "TEXT NOT NULL DEFAULT '{}'")
         self._ensure_column("content_queue", "topic_idea_id", "TEXT")
+        self._ensure_column("topic_ideas", "evidence_basis_json", "TEXT NOT NULL DEFAULT '[]'")
+        self._ensure_column("topic_ideas", "reader_value_mode", "TEXT")
         for column in [
             "source_title",
             "source_published_at",
@@ -580,6 +584,8 @@ class SQLiteStore:
             why_now=idea.why_now,
             source_type=idea.source_type,
             source_refs=list(idea.source_refs),
+            evidence_basis=list(idea.evidence_basis),
+            reader_value_mode=idea.reader_value_mode,
             post_type=idea.post_type,
             priority=max(0, min(100, int(idea.priority))),
             status=idea.status,
@@ -590,9 +596,10 @@ class SQLiteStore:
             """
             INSERT INTO topic_ideas (
                 id, workspace_id, title, topic, angle, why_now, source_type,
-                source_refs_json, post_type, priority, status, created_at, updated_at
+                source_refs_json, evidence_basis_json, reader_value_mode,
+                post_type, priority, status, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 workspace_id = excluded.workspace_id,
                 title = excluded.title,
@@ -601,6 +608,8 @@ class SQLiteStore:
                 why_now = excluded.why_now,
                 source_type = excluded.source_type,
                 source_refs_json = excluded.source_refs_json,
+                evidence_basis_json = excluded.evidence_basis_json,
+                reader_value_mode = excluded.reader_value_mode,
                 post_type = excluded.post_type,
                 priority = excluded.priority,
                 status = excluded.status,
@@ -615,6 +624,8 @@ class SQLiteStore:
                 saved.why_now,
                 saved.source_type,
                 json.dumps(saved.source_refs),
+                json.dumps(saved.evidence_basis),
+                saved.reader_value_mode,
                 saved.post_type,
                 saved.priority,
                 saved.status,
@@ -2173,6 +2184,8 @@ class SQLiteStore:
             why_now=row["why_now"],
             source_type=row["source_type"],
             source_refs=json.loads(row["source_refs_json"] or "[]"),
+            evidence_basis=json.loads(row["evidence_basis_json"] or "[]"),
+            reader_value_mode=row["reader_value_mode"],
             post_type=row["post_type"],
             priority=int(row["priority"] or 0),
             status=row["status"],

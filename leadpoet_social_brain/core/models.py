@@ -202,6 +202,8 @@ class TopicIdea:
     why_now: str
     source_type: str = "evergreen"
     source_refs: list[str] = field(default_factory=list)
+    evidence_basis: list[str] = field(default_factory=list)
+    reader_value_mode: str | None = None
     post_type: str = "founder_insight"
     priority: int = 50
     status: str = "suggested"
@@ -284,6 +286,7 @@ class DraftRequest:
     use_patterns: bool = False
     pattern_ids: list[str] = field(default_factory=list)
     prompt_profile: str | None = None
+    editorial_value_mode: str | None = None
 
 
 @dataclass(frozen=True)

@@ -17,6 +17,7 @@ from leadpoet_social_brain.core.models import (
     utc_now,
 )
 from leadpoet_social_brain.context import ContextManager
+from leadpoet_social_brain.editorial import dedupe_editorial_trends
 from leadpoet_social_brain.generation import (
     SocialBrainGenerator,
     active_writing_rules_for_prompt,
@@ -82,10 +83,15 @@ def plan_week_x(
     _ = variants_per_slot
     if posts <= 0:
         raise ValueError("--posts must be greater than 0.")
+    requested_posts = posts
     get_x_adapter().validate_post_type(default_post_type)
     start_date = date.fromisoformat(week_start)
     topics = expand_topic_mix(topic_mix, posts)
     selected_topic_ideas = [idea for idea in (topic_ideas or []) if idea.status == "suggested"][:posts]
+    if topic_ideas is not None:
+        if not selected_topic_ideas:
+            raise ValueError("No grounded topic ideas are available for Autopilot planning.")
+        posts = len(selected_topic_ideas)
     scheduled_times = schedule_slots(start_date, posts=posts, cadence=cadence)
     trends = recent_unused_trends(store, window_days=trend_window_days) if use_trends else []
     warnings: list[str] = []
@@ -98,10 +104,10 @@ def plan_week_x(
         )
     if use_trends and not trends:
         warnings.append("No recent unused trends found. Planning evergreen authority posts.")
-    if topic_ideas is not None and len(selected_topic_ideas) < posts:
+    if topic_ideas is not None and posts < requested_posts:
         warnings.append(
-            f"Only {len(selected_topic_ideas)} unused topic idea(s) were available; "
-            "remaining slots use the configured evergreen mix."
+            f"Planned {posts} grounded topic idea(s) instead of {requested_posts}; "
+            "Autopilot did not fill the remaining slots with generic fallback copy."
         )
 
     used_trends: set[str] = set()
@@ -139,6 +145,7 @@ def plan_week_x(
             trend_ids=[trend.id] if trend else [],
             use_patterns=use_patterns,
             prompt_profile="natural",
+            editorial_value_mode=topic_idea.reader_value_mode if topic_idea else None,
         )
         drafts = generator.generate(
             request,
@@ -238,6 +245,7 @@ def create_post_x(
         use_patterns=use_patterns,
         pattern_ids=pattern_ids or [],
         prompt_profile="natural",
+        editorial_value_mode=topic_idea.reader_value_mode if topic_idea else None,
     )
     draft = generator.generate(request, variants=1)[0]
     warnings.extend(f"Quality warning: {warning}" for warning in draft_quality_warnings(draft))
@@ -622,10 +630,10 @@ def schedule_slots(start_date: date, *, posts: int, cadence: str) -> list[dateti
 def recent_unused_trends(store: SQLiteStore, *, window_days: int) -> list[TrendItem]:
     cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
     trends = store.list_trends(status="unused", limit=1000)
-    return [
+    return dedupe_editorial_trends([
         trend for trend in trends
         if (parsed := parse_trend_datetime(trend)) is not None and parsed >= cutoff
-    ]
+    ])
 
 
 def parse_trend_datetime(trend: TrendItem) -> datetime | None:
@@ -661,9 +669,14 @@ def pick_trend_for_topic(
 
 def evergreen_angle(topic: str, index: int) -> str:
     defaults = [
-        f"make one sharp founder-led point about {topic}",
-        f"explain the weak default in {topic} and the better saved-context view",
-        f"turn a practical {topic} lesson into an authority-building post",
+        f"explain one concrete {topic} mechanism and the causal step operators often miss",
+        f"give readers a practical {topic} diagnostic: a symptom, likely cause, and useful test",
+        f"offer one decision rule or tradeoff that helps a buyer evaluate {topic}",
+        f"unpack one grounded {topic} fact and state what it proves and what it does not",
+        f"share a specific {topic} operating or build lesson without forcing a product mention",
+        f"give readers one sharp question to ask about {topic} and what a good answer includes",
+        f"separate two {topic} ideas people blur together and show when the distinction matters",
+        f"name one weak default in {topic} only if the replacement model teaches a genuinely new point",
     ]
     return defaults[index % len(defaults)]
 

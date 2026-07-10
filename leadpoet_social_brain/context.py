@@ -82,13 +82,14 @@ class ContextManager:
                 "- Generic AI phrasing, launch theater, and vague market commentary.",
                 "- Forced CTAs when the post already makes the business point.",
                 "- Tag language or internal labels in the writing itself.",
+                "- Reusing an example's thesis or broken-default frame just because its cadence is strong.",
                 "",
                 "Reusable writing principles:",
-                "- Start from a concrete observation or weak default.",
-                "- Make one sharp contrast or replacement model.",
+                "- Start from a concrete observation, mechanism, question, example, or weak default.",
+                "- Use a sharp contrast only when the idea genuinely depends on one.",
                 "- Use plain language even when the idea is technical.",
-                "- Tie product beliefs to buyer pain, timing, or trust.",
-                "- Leave the reader with a specific point of view, not a slogan.",
+                "- Keep positioning optional; a useful post can teach without mentioning the product.",
+                "- Leave the reader with a mechanism, diagnostic, decision rule, or specific point of view, not a slogan.",
             ]
         )
         section = ContextSection(

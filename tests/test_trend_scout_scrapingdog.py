@@ -76,8 +76,8 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
             profile=TrendScoutProfile(),
         )
 
-        self.assertIn("Leadpoet's angle", angle)
-        self.assertIn("buyer timing", angle)
+        self.assertIn("one concrete GTM mechanism", angle)
+        self.assertIn("product-free unless Leadpoet's saved context", angle)
         self.assertNotIn("leverage insights from", angle)
 
     def test_relevance_gate_requires_gtm_specificity(self):
@@ -459,6 +459,8 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
             self.assertIn("Return compact JSON", provider.prompts[0])
             self.assertIn("Keep only if it directly affects B2B GTM", provider.prompts[0])
             self.assertIn("Do not invent a Leadpoet angle", provider.prompts[0])
+            self.assertIn("Do not route every source back to buyer timing", provider.prompts[0])
+            self.assertIn("standalone market education", provider.prompts[0])
             stored = store.get_trend_item(trend.id)
             self.assertIsNotNone(stored)
             self.assertEqual(stored.enrichment_status, "enriched")
@@ -584,7 +586,8 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
 
         self.assertIn("What happened:\nAcme launched buyer-timing AI", prompt)
         self.assertIn("What is new:\nThe new part is workflow-level buyer timing.", prompt)
-        self.assertIn("Saved angle:\nUse Buyer timing AI launches as market proof", prompt)
+        self.assertIn("Saved angle:\nUse Buyer timing AI launches as source evidence", prompt)
+        self.assertIn("source-specific lesson", prompt)
         self.assertNotIn("Leadpoet should explain", prompt)
         self.assertIn("Suggested hooks:", prompt)
         self.assertNotIn("COPY THIS RAW ARTICLE LANGUAGE", prompt)

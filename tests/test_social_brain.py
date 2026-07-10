@@ -38,11 +38,17 @@ from leadpoet_social_brain.cli import (
 )
 from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.core.models import ContentQueueItem, ContextSection, DraftRequest, EngagementMetrics, GeneratedDraft, Pattern, PostNote, SocialPost, SyncMetadata, TopicIdea, TrendItem, utc_now
+from leadpoet_social_brain.editorial import (
+    dedupe_editorial_trends,
+    editorial_theme_fingerprints,
+    unsupported_quantified_claims,
+)
 from leadpoet_social_brain.generation import (
     MISSING_PROVIDER_MESSAGE,
     PRODUCT_NAME_OPTIONAL_LANE_NAMES,
     SocialBrainGenerator,
     clean_generated_text,
+    claim_audit_violations,
     deterministic_leadpoet_definition_repair,
     leadpoet_anchor_line,
     leadpoet_grammar_saturation_replacements,
@@ -65,7 +71,9 @@ from leadpoet_social_brain.generation import (
     selected_product_mention_syntax_targets,
     selected_product_name_usage_targets,
     selected_structure_shapes,
+    trend_specific_generation_angle,
     trend_angle_for_generation,
+    unsupported_source_language,
     workspace_anchor_candidates,
 )
 from leadpoet_social_brain.ingestion import ingest_trends_batch_csv, ingest_x_batch_csv, ingest_x_post, publish_x_draft
@@ -99,7 +107,12 @@ from leadpoet_social_brain.storage.sqlite_store import (
     resolve_db_path,
 )
 from leadpoet_social_brain.trend_scout import WebTrendGroups, build_trend_scout_profile, refresh_web_trends, web_trend_groups
-from leadpoet_social_brain.topic_scout import build_topic_ideas_prompt, parse_topic_ideas, refresh_topic_ideas
+from leadpoet_social_brain.topic_scout import (
+    build_topic_ideas_prompt,
+    parse_topic_ideas,
+    refresh_topic_ideas,
+    topic_portfolio_lane,
+)
 from leadpoet_social_brain.voice import (
     DEFAULT_AVOID_PHRASES,
     load_avoid_phrases,
@@ -1025,6 +1038,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(payload["model"], "anthropic/claude-3.5-sonnet")
         self.assertEqual(payload["temperature"], 0.6)
         self.assertEqual(payload["max_tokens"], 700)
+        self.assertNotIn("reasoning", payload)
         self.assertIn("Return exactly 2 variants", payload["messages"][0]["content"])
         self.assertEqual(headers["Authorization"], "Bearer test-key")
         self.assertEqual(headers["HTTP-Referer"], "https://leadpoet.com")
@@ -1051,6 +1065,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(provider.model, "openai/gpt-4.1-mini")
         self.assertEqual(provider.temperature, 0.7)
         self.assertEqual(provider.max_tokens, 900)
+        self.assertEqual(provider.reasoning_max_tokens, 1024)
 
         with patch.dict(os.environ, {"OPENROUTER_API_KEY": "", "OPENROUTER_MODEL": ""}, clear=False):
             with self.assertRaises(ValueError):
@@ -1059,6 +1074,37 @@ class SocialBrainTest(unittest.TestCase):
         provider_without_model = OpenRouterProvider(api_key="test-key", model=None, request_json=lambda *_: {})
         with self.assertRaises(ValueError):
             provider_without_model.generate("Write.", variants=1)
+
+    def test_openrouter_provider_limits_reasoning_and_retries_empty_length_response(self):
+        payloads: list[dict[str, object]] = []
+
+        def fake_request(_url, payload, _headers):
+            payloads.append(payload)
+            if len(payloads) == 1:
+                return {
+                    "id": "first",
+                    "model": "anthropic/claude-sonnet-5",
+                    "choices": [
+                        {
+                            "finish_reason": "length",
+                            "message": {"content": None, "reasoning_details": [{"type": "reasoning.text"}]},
+                        }
+                    ],
+                }
+            return {"choices": [{"finish_reason": "stop", "message": {"content": "Usable JSON."}}]}
+
+        provider = OpenRouterProvider(
+            api_key="test-key",
+            model="anthropic/claude-sonnet-5",
+            max_tokens=4000,
+            reasoning_max_tokens=1024,
+            request_json=fake_request,
+        )
+
+        self.assertEqual(provider.generate("Evaluate.", variants=1), ["Usable JSON."])
+        self.assertEqual(payloads[0]["reasoning"], {"max_tokens": 1024, "exclude": True})
+        self.assertEqual(payloads[1]["max_tokens"], 8000)
+        self.assertEqual(payloads[1]["reasoning"], {"max_tokens": 1024, "exclude": True})
 
     def test_provider_loader_uses_saved_model_override(self):
         with patch.dict(
@@ -1195,7 +1241,9 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("## skills/review_filter.md", prompt)
             self.assertIn("# Review Filter", prompt)
             self.assertIn("Use saved Facts & Context as the source of truth", prompt)
-            self.assertIn("Use saved positioning as source material for meaning, not wording to copy", prompt)
+            self.assertIn("Use saved positioning as a factual boundary and optional idea source", prompt)
+            self.assertIn("Editorial Depth & Reader Value:", prompt)
+            self.assertIn("Primary reader payoff for this request:", prompt)
             self.assertIn("Do not make another tool, agent, or case study supply the workspace's core mechanism", prompt)
             self.assertIn("explain the exact mechanism that transfers to saved Facts & Context", prompt)
             self.assertIn("Natural Voice Calibration:", prompt)
@@ -2310,6 +2358,496 @@ class SocialBrainTest(unittest.TestCase):
                 rows[0]["leadpoet_sentence_template"],
                 "the useful {product} {domain} is why this {domain} now",
             )
+            store.close()
+
+    def test_editorial_theme_fingerprint_catches_same_thesis_across_different_wording(self):
+        first = (
+            "Everyone benchmarks sales AI on how good the email reads.\n\n"
+            "Wrong test. The email is the easy part.\n\n"
+            "The hard part is knowing who's worth contacting, why now, and what evidence backs it up. "
+            "That judgment happens before a word gets written."
+        )
+        second = (
+            "Sales AI keeps optimizing the wrong step.\n\n"
+            "More messages, faster sequences. But the real tax is upstream: finding accounts, "
+            "checking contacts, and writing a reason worth sending."
+        )
+
+        self.assertIn("copy-is-downstream-of-judgment", editorial_theme_fingerprints(first))
+        self.assertIn("copy-is-downstream-of-judgment", editorial_theme_fingerprints(second))
+
+    def test_editorial_event_dedupe_collapses_duplicate_acquisition_and_funding_stories(self):
+        def trend(title: str) -> TrendItem:
+            return TrendItem(
+                title=title,
+                source_type="web",
+                topic="sales AI",
+                summary="",
+                why_it_matters="",
+                leadpoet_angle="",
+            )
+
+        trends = [
+            trend("HubSpot Acquires Warmly's AI to Decode Real-Time Buyer Intent"),
+            trend("HubSpot Acquires Warmly to Fix CRM's Biggest Blind Spot"),
+            trend("HubSpot's Warmly deal points to the next generation of CRM"),
+            trend("Aligned raises $60 million Series B to streamline B2B sales"),
+            trend("Exclusive: B2B sales startup Aligned raised $60M"),
+            trend("AI in CRM: Benefits, Use Cases, and Tools"),
+        ]
+
+        deduped = dedupe_editorial_trends(trends)
+
+        self.assertEqual(
+            [trend.title for trend in deduped],
+            [
+                "HubSpot Acquires Warmly's AI to Decode Real-Time Buyer Intent",
+                "Aligned raises $60 million Series B to streamline B2B sales",
+                "AI in CRM: Benefits, Use Cases, and Tools",
+            ],
+        )
+
+    def test_quantified_claim_guard_requires_exact_evidence(self):
+        text = "Reply rates drop 60% by day 7, and recovery takes 90 days. Aligned raised $60M."
+        evidence = "Aligned announced $60 million in financing."
+
+        self.assertEqual(
+            unsupported_quantified_claims(text, evidence),
+            ["percent:60", "duration:90:day", "duration:7:day"],
+        )
+        self.assertEqual(
+            unsupported_quantified_claims(
+                "That works out to 2673 on average.",
+                "306 businesses made 818000 calls.",
+            ),
+            ["threshold::2673"],
+        )
+
+    def test_source_language_guard_catches_unsourced_causal_extrapolation(self):
+        evidence = "ZoomInfo brings data and agents to revenue teams running on Snowflake."
+
+        self.assertEqual(
+            unsupported_source_language(
+                "ZoomInfo moved agents inside Snowflake instead of pulling data out, because copies drift.",
+                evidence,
+            ),
+            ["because", "instead of/rather than"],
+        )
+        self.assertEqual(
+            unsupported_source_language(
+                "The announcement suggests buyers should ask where the agent queries its data.",
+                evidence,
+            ),
+            [],
+        )
+        self.assertEqual(
+            unsupported_source_language(
+                "Most of your list is not in-market at all.",
+                "Buyers do 60-70% of their research before a rep gets involved.",
+            ),
+            ["most-group universal"],
+        )
+
+    def test_claim_audit_must_quote_and_visibly_hedge_the_final_text(self):
+        final = "The context layer sits next to the data. That proves the workflow runs end to end."
+        audit = [
+            {
+                "clause": "It suggests the context layer sits next to the data.",
+                "support": "interpretation",
+            },
+            {
+                "claim": "That proves the workflow runs end to end.",
+                "support": "interpretation: inferred from a live demo",
+            },
+        ]
+
+        self.assertEqual(
+            claim_audit_violations(
+                audit,
+                final_text=final,
+                source_evidence_text="A live demo showed one stalled deal, one automation, and ten prospects.",
+            ),
+            [
+                "claim audit does not quote final text",
+                "interpretation is not visibly hedged",
+            ],
+        )
+
+    def test_thin_trend_evidence_does_not_request_a_causal_mechanism(self):
+        trend = TrendItem(
+            title="A thin source announcement",
+            source_type="web",
+            topic="sales AI",
+            summary="A company announced a new agent.",
+            why_it_matters="It may affect the market.",
+            leadpoet_angle="Tie the signal back to buyer timing and context.",
+        )
+
+        self.assertNotIn("mechanism explainer", trend_specific_generation_angle(trend))
+
+    def test_natural_generation_prefers_fresh_thesis_when_positioning_is_injected(self):
+        repeated_one = (
+            "Everyone benchmarks sales AI on how good the email reads.\n\n"
+            "The email is the easy part. The hard part is knowing which account is worth contacting."
+        )
+        repeated_two = (
+            "More messages, faster sequences. The real work is upstream: find the account, "
+            "check the contact, and write a reason worth sending."
+        )
+        repeated_option = (
+            "Writing a polished email is easy. The hard part is knowing which account deserves it and why."
+        )
+        fresh_option = (
+            "Bad CRM handoffs have a tell: the source field disappears. Check whether the next system can show "
+            "where each record came from before trusting the enrichment."
+        )
+
+        class FreshnessProvider:
+            def __init__(self):
+                self.prompts: list[str] = []
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                self.prompts.append(prompt)
+                if "Write 3 X draft options" in prompt:
+                    return [
+                        repeated_option,
+                        fresh_option,
+                        "More messages will not fix outbound. Before the sequence, choose the account with evidence.",
+                    ][:variants]
+                return [
+                    json.dumps(
+                        {
+                            "ranked_drafts": [1, 2, 3],
+                            "quality_notes": "Draft one is concise.",
+                            "warnings": [],
+                            "suggested_final_version": repeated_option,
+                        }
+                    )
+                ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            for index, text in enumerate([repeated_one, repeated_two], start=1):
+                store.save_content_queue_item(
+                    ContentQueueItem(
+                        text=text,
+                        topic="sales AI",
+                        post_type="founder_insight",
+                        scheduled_at=f"2026-07-{index + 1:02d}T10:00:00+00:00",
+                    )
+                )
+            provider = FreshnessProvider()
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle="Explain how source attribution gets lost during CRM handoffs.",
+                    prompt_profile="natural",
+                ),
+                variants=1,
+            )[0]
+
+            self.assertEqual(draft.text, fresh_option)
+            self.assertEqual(len(provider.prompts), 2)
+            self.assertTrue(all("Recent editorial theme counts:" in prompt for prompt in provider.prompts))
+            self.assertEqual(
+                draft.context_snapshot["recent_output_editorial_theme_counts"]["copy-is-downstream-of-judgment"],
+                2,
+            )
+            self.assertEqual(
+                draft.context_snapshot["evaluation"]["freshness_override"]["selected_draft"],
+                2,
+            )
+            store.close()
+
+    def test_natural_generation_accepts_structured_ranked_drafts(self):
+        first = "A compact first option that should not win."
+        second = "One useful question:\n\nWhat changed the probability of the deal?"
+        third = "A third option."
+
+        class StructuredRankingProvider:
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Write 3 X draft options" in prompt:
+                    return [first, second, third][:variants]
+                return [
+                    json.dumps(
+                        {
+                            "ranked_drafts": [
+                                {"draft": 2, "rank": 1, "reason": "Most useful."},
+                                {"draft": 1, "rank": 2, "reason": "Too generic."},
+                                {"draft": 3, "rank": 3, "reason": "Too thin."},
+                            ],
+                            "quality_notes": "Draft two wins.",
+                            "warnings": [],
+                            "claim_audit": [],
+                            "suggested_final_version": second,
+                        }
+                    )
+                ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            draft = SocialBrainGenerator(store, provider=StructuredRankingProvider()).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales forecasting",
+                    post_type="founder_insight",
+                    angle="Ask what changed the probability of the deal.",
+                    length_mode="short",
+                    prompt_profile="natural",
+                ),
+                save=False,
+            )[0]
+
+            self.assertEqual(draft.text, second)
+            store.close()
+
+    def test_standard_natural_generation_uses_multiline_option_when_compact_layout_is_saturated(self):
+        compact = (
+            "A forecast call should ask what changed the probability of the deal, not how much activity happened."
+        )
+        multiline = (
+            "A forecast call needs one useful question:\n\n"
+            "What new evidence changed the probability of this deal?"
+        )
+        alternate = "Activity is an update.\n\nNew evidence is a reason to change the forecast."
+
+        class LayoutProvider:
+            def __init__(self):
+                self.prompts: list[str] = []
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                self.prompts.append(prompt)
+                if "Write 3 X draft options" in prompt:
+                    return [compact, multiline, alternate][:variants]
+                return [
+                    json.dumps(
+                        {
+                            "ranked_drafts": [1, 2, 3],
+                            "quality_notes": "All are publishable.",
+                            "warnings": [],
+                            "claim_audit": [],
+                            "suggested_final_version": compact,
+                        }
+                    )
+                ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            for index in range(3):
+                store.save_content_queue_item(
+                    ContentQueueItem(
+                        text=f"Single paragraph forecast observation number {index + 1} with no intentional line break.",
+                        topic="sales forecasting",
+                        post_type="founder_insight",
+                        scheduled_at=f"2026-07-{index + 1:02d}T10:00:00+00:00",
+                    )
+                )
+            provider = LayoutProvider()
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales forecasting",
+                    post_type="founder_insight",
+                    angle="Separate activity updates from evidence that changes deal probability.",
+                    length_mode="standard",
+                    prompt_profile="natural",
+                ),
+                save=False,
+            )[0]
+
+            self.assertEqual(draft.text, multiline)
+            self.assertEqual(draft.context_snapshot["evaluation"]["layout_override"]["selected_draft"], 2)
+            self.assertEqual(
+                draft.context_snapshot["evaluation"]["layout_override"]["recent_compact_layout_count"],
+                3,
+            )
+            self.assertIn("Natural Layout Variation:", provider.prompts[0])
+            self.assertIn("at least one compact single-paragraph option", provider.prompts[0])
+            self.assertIn("do not prefer a single compact paragraph", provider.prompts[1])
+            store.close()
+
+    def test_natural_generation_rejects_confusing_unstated_bridge(self):
+        confusing = (
+            "Buyers do 60-70% of their research before a rep gets involved. Most of your list isn't in-market at all. "
+            "So the real question is which accounts are moving right now, and whether you can see the evidence."
+        )
+        coherent = (
+            "Buyers do 60-70% of their research before talking to sales. That puts the first call later in their "
+            "decision process. The rep needs to learn what the buyer already knows and what still needs answering."
+        )
+        vague = "The market is changing. Sales teams need better evidence before they act."
+
+        class CoherenceProvider:
+            def __init__(self):
+                self.prompts: list[str] = []
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                self.prompts.append(prompt)
+                if "Write 3 X draft options" in prompt:
+                    return [confusing, coherent, vague][:variants]
+                return [
+                    json.dumps(
+                        {
+                            "ranked_drafts": [1, 2, 3],
+                            "quality_notes": "Draft one sounds sharp.",
+                            "warnings": [],
+                            "logic_audit": [
+                                {
+                                    "premise": "Buyers research before talking to sales.",
+                                    "conclusion": "Find accounts moving now.",
+                                    "bridge_status": "supported",
+                                }
+                            ],
+                            "claim_audit": [],
+                            "suggested_final_version": confusing,
+                        }
+                    )
+                ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = CoherenceProvider()
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="buyer research",
+                    post_type="founder_insight",
+                    angle="Buyers do 60-70% of their research before talking to sales.",
+                    length_mode="standard",
+                    prompt_profile="natural",
+                ),
+                save=False,
+            )[0]
+
+            self.assertEqual(draft.text, coherent)
+            self.assertEqual(draft.context_snapshot["evaluation"]["coherence_override"]["selected_draft"], 2)
+            self.assertIn("Do not join two individually plausible facts", provider.prompts[0])
+            self.assertIn("does not by itself establish that most contacts are out of market", provider.prompts[1])
+            store.close()
+
+    def test_natural_generation_rejects_unsupported_quantified_winner(self):
+        unsupported = "Funding signals lose 60% of their value within 7 days. Move before the cliff."
+        grounded = "A funding announcement is public to every competitor. Before sending, add one source-specific reason the account should care."
+
+        class GroundingProvider:
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Write 3 X draft options" in prompt:
+                    return [unsupported, grounded, "Public triggers create crowded outreach. Add one account-specific detail."][:variants]
+                return [
+                    json.dumps(
+                        {
+                            "ranked_drafts": [1, 2, 3],
+                            "quality_notes": "Draft one is sharp.",
+                            "warnings": [],
+                            "claim_audit": [
+                                {
+                                    "claim": "Funding signals lose 60% of their value within 7 days.",
+                                    "support": "unsupported",
+                                }
+                            ],
+                            "suggested_final_version": unsupported,
+                        }
+                    )
+                ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            draft = SocialBrainGenerator(store, provider=GroundingProvider()).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle="Explain the tradeoff in using public funding announcements for outreach.",
+                    prompt_profile="natural",
+                ),
+                save=False,
+            )[0]
+
+            self.assertEqual(draft.text, grounded)
+            self.assertEqual(draft.context_snapshot["evaluation"]["grounding_override"]["selected_draft"], 2)
+            self.assertEqual(
+                draft.context_snapshot["evaluation"]["grounding_override"]["removed_unsupported_quantified_claims"],
+                ["percent:60", "duration:7:day"],
+            )
+            self.assertIn("unsupported_source_claim", draft.context_snapshot["evaluation"]["warnings"])
+            store.close()
+
+    def test_natural_generation_repairs_failed_claim_audit_against_closed_source(self):
+        bad = "ZoomInfo proves agents run inside Snowflake without a copied data layer."
+        repaired = (
+            "The source says ZoomInfo brings data and agents to teams on Snowflake. "
+            "That suggests buyers should ask how the integration accesses their data."
+        )
+
+        class SourceRepairProvider:
+            def __init__(self):
+                self.repair_prompts: list[str] = []
+
+            def generate(self, prompt: str, *, variants: int) -> list[str]:
+                if "Write 3 X draft options" in prompt:
+                    return [bad, bad, bad][:variants]
+                if "Rewrite this X post so every factual and causal statement" in prompt:
+                    self.repair_prompts.append(prompt)
+                    return [repaired]
+                return [
+                    json.dumps(
+                        {
+                            "ranked_drafts": [1, 2, 3],
+                            "quality_notes": "The claim needs a visible evidence boundary.",
+                            "warnings": [],
+                            "claim_audit": [
+                                {
+                                    "claim": bad,
+                                    "support": "interpretation",
+                                }
+                            ],
+                            "suggested_final_version": bad,
+                        }
+                    )
+                ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            trend = store.save_trend_item(
+                TrendItem(
+                    title="ZoomInfo appears in a Snowflake report",
+                    source_type="web",
+                    topic="sales AI",
+                    summary="ZoomInfo brings data and agents to revenue teams running on Snowflake.",
+                    why_it_matters="The integration is newly available.",
+                    leadpoet_angle="Unpack the source evidence without inferring architecture.",
+                    source_excerpt="ZoomInfo brings data and agents to revenue teams running on Snowflake.",
+                )
+            )
+            provider = SourceRepairProvider()
+
+            draft = SocialBrainGenerator(store, provider=provider).generate(
+                DraftRequest(
+                    platform="x",
+                    topic="sales AI",
+                    post_type="founder_insight",
+                    angle="Explain what the source establishes and does not establish.",
+                    use_trends=True,
+                    trend_ids=[trend.id],
+                    prompt_profile="natural",
+                ),
+                save=False,
+            )[0]
+
+            self.assertEqual(draft.text, repaired)
+            self.assertEqual(len(provider.repair_prompts), 1)
+            self.assertTrue(draft.context_snapshot["evaluation"]["grounding_repair"]["source_only"])
+            self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
             store.close()
 
     def test_recent_output_anti_sameness_redacts_formulaic_leadpoet_seed_text(self):
@@ -4817,6 +5355,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertGreaterEqual(payload["unique_first_lines"], 5)
             self.assertGreaterEqual(payload["unique_last_lines"], 5)
             self.assertGreaterEqual(len(payload["primary_structure_option_counts"]), 5)
+            self.assertGreaterEqual(len(payload["primary_editorial_value_mode_counts"]), 6)
             self.assertGreaterEqual(len(payload["primary_product_mention_lane_counts"]), 5)
             self.assertGreaterEqual(len(payload["primary_product_mention_placement_target_counts"]), 4)
             self.assertGreaterEqual(len(payload["primary_product_mention_syntax_target_counts"]), 4)
@@ -5089,7 +5628,9 @@ class SocialBrainTest(unittest.TestCase):
             )
 
             self.assertNotEqual(trend_angle_for_generation(trends[0]), generic_angle)
-            self.assertIn("Use HubSpot Acquires Warmly for Buyer Intent as market proof", prompt)
+            self.assertIn("Use HubSpot Acquires Warmly for Buyer Intent as source evidence", prompt)
+            self.assertNotIn("for a evidence unpacking", prompt)
+            self.assertIn("do not force a product, buyer-timing, or account-context conclusion", prompt)
             self.assertNotIn(generic_angle, prompt)
             self.assertEqual(len(payload["request_angle_counts"]), 6)
             self.assertFalse(any("Request angle" in warning for warning in payload["warnings"]))
@@ -5133,7 +5674,8 @@ class SocialBrainTest(unittest.TestCase):
             )
 
             self.assertNotEqual(trend_angle_for_generation(trend), formulaic_angle)
-            self.assertIn("Use Salesforce Adds Prospecting Agent as market proof", prompt)
+            self.assertIn("Use Salesforce Adds Prospecting Agent as source evidence", prompt)
+            self.assertIn("source-specific lesson", prompt)
             self.assertNotIn(formulaic_angle, prompt)
             self.assertNotIn("Leadpoet should", payload["rows"][0]["request_angle"])
             store.close()
@@ -5176,7 +5718,8 @@ class SocialBrainTest(unittest.TestCase):
                 )
             )
 
-            self.assertIn("Saved angle:\nUse Sales AI Agents Add Buying Windows as market proof", prompt)
+            self.assertIn("Saved angle:\nUse Sales AI Agents Add Buying Windows as source evidence", prompt)
+            self.assertIn("do not force a product, buyer-timing, or account-context conclusion", prompt)
             self.assertIn("- Sales AI is becoming a timing layer.", prompt)
             self.assertIn("- Buyer timing beats generated email volume.", prompt)
             self.assertNotIn("Leadpoet should explain why timing beats", prompt)
@@ -5724,7 +6267,7 @@ class SocialBrainTest(unittest.TestCase):
                         topic="sales AI",
                         summary="A trend about GTM context.",
                         why_it_matters="It shows timing matters.",
-                        leadpoet_angle="Buyer timing needs proprietary account context.",
+                        leadpoet_angle="Buyer timing needs proprietary account context before email copy.",
                         date=utc_now(),
                     )
                 )
@@ -8862,8 +9405,9 @@ class SocialBrainTest(unittest.TestCase):
             rules_text = "\n".join(rules)
 
             self.assertTrue(any("Keep the Leadpoet wedge concrete" in rule for rule in rules))
-            self.assertIn("buyer timing, proprietary context, and the account reason before copy or outreach", rules_text)
-            self.assertIn("not the mechanism to copy", rules_text)
+            self.assertIn("exact mechanism, tradeoff, or evidence boundary", rules_text)
+            self.assertIn("without forcing buyer timing or account context", rules_text)
+            self.assertIn("omit the connection when it does not improve the reader payoff", rules_text)
             self.assertNotIn("Leadpoet owns the intent wedge", rules_text)
             self.assertNotRegex(rules_text, r"\bLeadpoet\s+(?:owns|is|should|can|needs?|has\s+to|starts)\b")
             self.assertNotIn("inside Leadpoet", rules_text)
@@ -8892,7 +9436,8 @@ class SocialBrainTest(unittest.TestCase):
             rules_text = "\n".join(rules)
 
             self.assertIn("Keep the Leadpoet wedge concrete", rules_text)
-            self.assertIn("buyer timing, proprietary context, and the account reason before copy or outreach", rules_text)
+            self.assertIn("without forcing buyer timing or account context", rules_text)
+            self.assertIn("exact mechanism, tradeoff, or evidence boundary", rules_text)
             self.assertNotIn("inside Leadpoet", rules_text)
             self.assertNotIn("Leadpoet owns the intent wedge", rules_text)
             self.assertNotIn("Leadpoet owning buyer timing", rules_text)
@@ -8926,7 +9471,8 @@ class SocialBrainTest(unittest.TestCase):
             )
 
             self.assertTrue(rules)
-            self.assertIn("buyer timing, proprietary context, and the account reason before copy or outreach", section.content)
+            self.assertIn("without forcing buyer timing or account context", section.content)
+            self.assertIn("not a checklist to inject into every post", section.content)
             self.assertNotIn("inside Leadpoet", section.content)
             self.assertNotIn("inside Leadpoet", prompt)
             store.close()
@@ -8997,7 +9543,7 @@ class SocialBrainTest(unittest.TestCase):
                 DraftRequest(platform="x", topic="sales LLMs", post_type="founder_insight")
             )
             self.assertIn("Leadpoet positioning meaning: buyer timing and proprietary account intent", prompt)
-            self.assertIn("Use saved positioning as source material for meaning, not wording to copy", prompt)
+            self.assertIn("Use saved positioning as a factual boundary and optional idea source", prompt)
             self.assertNotIn("Leadpoet owns buyer timing and proprietary account intent.", prompt)
             self.assertIn("Write like Gavin saw the problem himself.", prompt)
             self.assertIn("Reject drafts that make another tool sound like Leadpoet.", prompt)
@@ -11031,6 +11577,312 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("self-contained premise", provider.prompts[0])
             store.close()
 
+    def test_topic_scout_filters_paraphrased_theses_and_requests_reader_value_mix(self):
+        topic_rows = [
+            {
+                "title": "Email quality is downstream",
+                "topic": "sales AI",
+                "angle": "Explain why email copy is the easy part and account judgment happens before the message.",
+                "why_now": "Teams are benchmarking generated copy.",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 95,
+            },
+            {
+                "title": "The work before the sequence",
+                "topic": "sales AI",
+                "angle": "The real work happens upstream of the sequence: deciding which account is worth contacting.",
+                "why_now": "Sequence generation keeps getting cheaper.",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 92,
+            },
+            {
+                "title": "Where attribution fields disappear",
+                "topic": "RevOps",
+                "angle": "Show how attribution fields disappear between enrichment and CRM import, then give a two-field check.",
+                "why_now": "More enrichment tools are feeding the same CRM records.",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 90,
+            },
+            {
+                "title": "The hidden cost in AI SDR pricing",
+                "topic": "sales AI",
+                "angle": "Give buyers a decision rule for comparing AI SDR pricing with the human time spent reviewing replies.",
+                "why_now": "Per-seat and outcome pricing are being compared without review cost.",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 88,
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            store.seed_defaults()
+            provider = FakeProvider([json.dumps({"topics": topic_rows})])
+
+            result = refresh_topic_ideas(store, provider, limit=4)
+
+            self.assertEqual(len(result.ideas), 3)
+            self.assertEqual(
+                sum(
+                    "copy-is-downstream-of-judgment"
+                    in editorial_theme_fingerprints(f"{idea.title} {idea.angle}")
+                    for idea in result.ideas
+                ),
+                1,
+            )
+            self.assertTrue(any("repeated an already-covered editorial thesis" in warning for warning in result.diagnostics))
+            self.assertIn("At least half of the ideas should be useful without naming the product", provider.prompts[0])
+            self.assertIn("available_reader_value_modes", provider.prompts[0])
+            self.assertIn("recent_editorial_theme_counts", provider.prompts[0])
+            self.assertIn("evidence_basis", provider.prompts[0])
+            self.assertIn("no more than three ideas total", provider.prompts[0])
+            store.close()
+
+    def test_topic_portfolio_lane_collapses_signal_timing_context_variants(self):
+        variants = [
+            TopicIdea(
+                title="Context before contact",
+                topic="sales AI",
+                angle="Give buyers a question about why-now context before an email is written.",
+                why_now="Useful now.",
+            ),
+            TopicIdea(
+                title="Signal to action",
+                topic="sales AI",
+                angle="Show how an intent signal changes which account enters outreach.",
+                why_now="Useful now.",
+            ),
+            TopicIdea(
+                title="Agent context layer",
+                topic="sales AI",
+                angle="Explain why an automated agent needs account evidence before acting.",
+                why_now="Useful now.",
+            ),
+        ]
+
+        self.assertEqual(
+            {topic_portfolio_lane(idea) for idea in variants},
+            {"signals-and-timing"},
+        )
+
+    def test_topic_scout_rejects_invented_quantified_claims(self):
+        rows = [
+            {
+                "title": "The seven-day signal cliff",
+                "topic": "sales AI",
+                "angle": "Claim that reply rates drop 60% and recovery takes 90 days, then tell teams to act faster.",
+                "why_now": "The benchmark is urgent.",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 95,
+            },
+            {
+                "title": "A buyer question for intent vendors",
+                "topic": "sales AI",
+                "angle": "Ask how a vendor separates individual browsing from account evaluation and explain what a concrete answer includes.",
+                "why_now": "Teams need a clearer evaluation question.",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 90,
+            },
+            {
+                "title": "Where CRM context disappears",
+                "topic": "RevOps",
+                "angle": "Explain the handoff between enrichment and CRM import, then give readers a field-level diagnostic.",
+                "why_now": "More tools are feeding the same records.",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 88,
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            provider = FakeProvider([json.dumps({"topics": rows})])
+
+            result = refresh_topic_ideas(store, provider, limit=3)
+
+            self.assertEqual(len(result.ideas), 2)
+            self.assertNotIn("The seven-day signal cliff", {idea.title for idea in result.ideas})
+            self.assertTrue(any("unsupported quantified claims" in warning for warning in result.diagnostics))
+            store.close()
+
+    def test_topic_scout_replaces_rejected_ideas_until_the_queue_is_full(self):
+        initial_rows = [
+            {
+                "title": "The review cost missing from AI SDR pricing",
+                "topic": "sales AI",
+                "angle": "Give buyers a decision rule for including human reply review in vendor comparisons.",
+                "why_now": "Outcome and seat pricing hide different operating work.",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 92,
+            },
+            {
+                "title": "The 72-hour recovery window",
+                "topic": "sales AI",
+                "angle": "Tell teams every missed signal takes 72 hours to recover.",
+                "why_now": "Fast follow-up is becoming urgent.",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 90,
+            },
+            {
+                "title": "A lesson from an uncited acquisition",
+                "topic": "sales AI",
+                "angle": "Explain what a recent acquisition proves about CRM agents.",
+                "why_now": "The acquisition is recent.",
+                "source_type": "trend",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 88,
+            },
+        ]
+        replacement_rows = [
+            {
+                "title": "Where enrichment provenance disappears",
+                "topic": "RevOps",
+                "angle": "Show the handoff where a verified field loses its source, then give readers a provenance check.",
+                "why_now": "More enrichment tools now write into the same record.",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 87,
+            },
+            {
+                "title": "The buyer question for an AI SDR demo",
+                "topic": "sales AI",
+                "angle": "Give buyers one question that reveals how a system handles contradictory account evidence.",
+                "why_now": "Generation quality alone no longer distinguishes the demos.",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 86,
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            provider = SequentialProvider(
+                [
+                    json.dumps({"topics": initial_rows}),
+                    json.dumps({"topics": replacement_rows}),
+                ]
+            )
+
+            result = refresh_topic_ideas(store, provider, limit=3)
+
+            self.assertEqual(len(result.ideas), 3)
+            self.assertEqual(len(provider.prompts), 2)
+            self.assertIn("This is a replacement pass", provider.prompts[1])
+            self.assertNotIn("The 72-hour recovery window", {idea.title for idea in result.ideas})
+            self.assertTrue(any("unsupported quantified claims" in warning for warning in result.diagnostics))
+            self.assertTrue(any("traceable source_refs" in warning for warning in result.diagnostics))
+            store.close()
+
+    def test_topic_scout_quantified_claims_use_only_the_cited_source(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            cited = store.save_post(
+                SocialPost(
+                    text="One plain message earned a reply after the sequence was ignored.",
+                    platform="x",
+                    author="Gavin",
+                    topic="outbound",
+                    post_type="founder_insight",
+                )
+            )
+            store.save_post(
+                SocialPost(
+                    text="An unrelated support workflow uses a 24-hour response window.",
+                    platform="x",
+                    author="Someone else",
+                    topic="support",
+                    post_type="founder_insight",
+                )
+            )
+            initial_rows = [
+                {
+                    "title": "The 24-hour follow-up rule",
+                    "topic": "outbound",
+                    "angle": "Observed: One plain message earned a reply after the sequence was ignored. Reader value: Turn the cited reply into a universal 24-hour follow-up rule.",
+                    "why_now": "Teams want a concrete timing threshold.",
+                    "source_type": "follow_up",
+                    "source_refs": [cited.id],
+                    "evidence_basis": ["One plain message earned a reply after the sequence was ignored."],
+                    "reader_value_mode": "evidence unpacking",
+                    "post_type": "founder_insight",
+                    "priority": 95,
+                },
+                {
+                    "title": "What a single reply does not prove",
+                    "topic": "outbound",
+                    "angle": "Observed: One plain message earned a reply after the sequence was ignored. Reader value: Unpack it as an example while separating the observed result from a universal rule.",
+                    "why_now": "Outbound advice often promotes an example into a benchmark.",
+                    "source_type": "follow_up",
+                    "source_refs": [cited.id],
+                    "evidence_basis": ["One plain message earned a reply after the sequence was ignored."],
+                    "reader_value_mode": "evidence unpacking",
+                    "post_type": "founder_insight",
+                    "priority": 91,
+                },
+                {
+                    "title": "A diagnostic for reply friction",
+                    "topic": "outbound",
+                    "angle": "Give readers a check for whether a message asks for too much commitment before creating interest.",
+                    "why_now": "Low-friction replies are useful without inventing a timing rule.",
+                    "source_type": "evergreen",
+                    "source_refs": [],
+                    "post_type": "founder_insight",
+                    "priority": 89,
+                },
+                {
+                    "title": "Why the single message worked",
+                    "topic": "outbound",
+                    "angle": "Explain the mechanism behind why the message worked and the sequences failed.",
+                    "why_now": "The reply is a useful founder example.",
+                    "source_type": "follow_up",
+                    "source_refs": [cited.id],
+                    "evidence_basis": ["One plain message earned a reply after the sequence was ignored."],
+                    "reader_value_mode": "mechanism explainer",
+                    "post_type": "founder_insight",
+                    "priority": 87,
+                },
+            ]
+            replacement = [
+                {
+                    "title": "The difference between interest and evaluation",
+                    "topic": "outbound",
+                    "angle": "Give readers a distinction they can use before treating a lightweight reply as buying intent.",
+                    "why_now": "Teams need a more careful way to interpret replies.",
+                    "source_type": "evergreen",
+                    "source_refs": [],
+                    "post_type": "founder_insight",
+                    "priority": 85,
+                }
+            ]
+            provider = SequentialProvider(
+                [json.dumps({"topics": initial_rows}), json.dumps({"topics": replacement})]
+            )
+
+            result = refresh_topic_ideas(store, provider, limit=3)
+
+            self.assertEqual(len(result.ideas), 3)
+            self.assertNotIn("The 24-hour follow-up rule", {idea.title for idea in result.ideas})
+            self.assertTrue(any("duration:24:hour" in warning for warning in result.diagnostics))
+            self.assertNotIn("Why the single message worked", {idea.title for idea in result.ideas})
+            self.assertTrue(any("missing Observed evidence boundary" in warning for warning in result.diagnostics))
+            store.close()
+
     def test_parse_topic_ideas_normalizes_invalid_fields(self):
         ideas = parse_topic_ideas(
             """```json
@@ -11052,6 +11904,7 @@ class SocialBrainTest(unittest.TestCase):
                     topic="sales LLMs",
                     angle="Make the case that account timing is harder and more valuable than send volume.",
                     why_now="AI SDR launches keep leading with activity counts.",
+                    reader_value_mode="decision framework",
                     post_type="founder_insight",
                     priority=95,
                 )
@@ -11077,8 +11930,45 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(result.queued[0].topic, "sales LLMs")
             self.assertEqual(result.queued[0].post_type, "founder_insight")
             self.assertEqual(store.get_topic_idea(idea.id).status, "used")
+            saved_draft = store.get_generated_draft(result.queued[0].draft_id)
+            self.assertEqual(saved_draft.request.editorial_value_mode, "decision framework")
+            self.assertEqual(
+                saved_draft.context_snapshot["primary_editorial_value_mode"]["name"],
+                "decision framework",
+            )
             self.assertIn("Why this topic is worth posting now", provider.prompts[0])
             self.assertIn("Keep the point blunt", provider.prompts[0])
+            store.close()
+
+    def test_plan_week_autopilot_does_not_fill_missing_topics_with_generic_copy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            idea = store.save_topic_idea(
+                TopicIdea(
+                    title="A grounded diagnostic",
+                    topic="RevOps",
+                    angle="Give readers a field-level check for lost enrichment provenance.",
+                    why_now="It is a recurring operating problem.",
+                    reader_value_mode="diagnostic",
+                )
+            )
+
+            result = plan_week_x(
+                store,
+                SocialBrainGenerator(store, provider=FakeProvider()),
+                week_start="2026-07-13",
+                posts=3,
+                use_trends=False,
+                trend_window_days=14,
+                topic_mix=None,
+                cadence="weekday_mornings",
+                default_post_type="founder_insight",
+                variants_per_slot=1,
+                topic_ideas=[idea],
+            )
+
+            self.assertEqual(len(result.queued), 1)
+            self.assertTrue(any("did not fill" in warning for warning in result.warnings))
             store.close()
 
     def test_topics_api_and_dashboard_expose_dedicated_topic_section(self):
@@ -11176,6 +12066,8 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotIn("Produce the structured Post Intent", provider.calls[0]["prompt"])
             self.assertNotIn("Draft Option Variation Map", provider.calls[0]["prompt"])
             self.assertIn("Judge the options on:", provider.calls[1]["prompt"])
+            self.assertIn("Closed source evidence:", provider.calls[1]["prompt"])
+            self.assertIn("claim_audit", provider.calls[1]["prompt"])
             self.assertEqual(saved.request.prompt_profile, "natural")
             self.assertIsNone(saved.context_snapshot["models_used"]["strategist"])
             store.close()

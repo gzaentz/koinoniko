@@ -302,8 +302,14 @@ class TrendScoutProfile:
     @property
     def default_angle(self) -> str:
         if self.workspace_name == "Leadpoet":
-            return "Use the source as market proof, then make the angle specific to the account-timing question it raises before copy or outreach."
-        return f"Tie the signal back to {self.workspace_name}'s saved positioning and why this market shift matters now."
+            return (
+                "Use the source to teach one concrete GTM mechanism, tradeoff, or decision rule. "
+                "Connect it to Leadpoet only when that connection materially improves the reader's understanding."
+            )
+        return (
+            f"Explain the concrete mechanism or reader lesson in this signal. Connect it to {self.workspace_name} "
+            "only when the saved positioning makes the lesson more specific."
+        )
 
 
 @dataclass(frozen=True)
@@ -1070,7 +1076,9 @@ def leadpoet_angle_needs_positioning_rewrite(angle: str, *, profile: TrendScoutP
         "could leverage",
         "inspired by",
         "borrow from",
-        "copy",
+        "copy from",
+        "copy their",
+        "copying",
     ]
     if any(phrase in lowered for phrase in risky_phrases):
         return True
@@ -1083,12 +1091,12 @@ def leadpoet_angle_needs_positioning_rewrite(angle: str, *, profile: TrendScoutP
 def default_positioned_leadpoet_angle(profile: TrendScoutProfile) -> str:
     if profile.workspace_name == "Leadpoet":
         return (
-            "Leadpoet's angle: this is market proof that buyer timing, account context, "
-            "and intent signals are becoming the core layer in sales AI, not a feature bolted onto generic automation."
+            "Use this source to explain one concrete GTM mechanism, tradeoff, or evaluation question. "
+            "Keep the post product-free unless Leadpoet's saved context materially sharpens the lesson."
         )
     return (
-        f"{profile.workspace_name}'s angle: treat this source as market proof for the saved positioning, "
-        "not as the source of the company's wedge."
+        f"Use this source for one concrete reader lesson. Mention {profile.workspace_name} only when the saved "
+        "positioning adds necessary specificity, not as a required conclusion."
     )
 
 
@@ -1266,10 +1274,12 @@ keep, relevance_score, relevance_reason, reject_reason, what_happened, what_is_n
 Rules:
 - relevance_score is 0-10.
 - If keep is false or relevance_score is below 6, set leadpoet_angle to an empty string and explain reject_reason.
-- Do not invent a {profile.workspace_name} angle. If the source does not connect naturally to the saved workspace context, buyer timing, proprietary context, account signals, or sales workflow timing, reject it.
+- Do not invent a {profile.workspace_name} angle. Keep a source only when it has a concrete lesson for the saved audience across workflow, economics, data, buyer behavior, evaluation, team design, or execution.
 - In leadpoet_angle, never make another tool, agent, or case study supply {profile.workspace_name}'s saved wedge.
-- If another company is mentioned, treat it as market proof, then bring the point back to the saved buyer-timing, proprietary-context, or account-signal mechanism before copy, outreach, or account selection.
-- Avoid wording like "{profile.workspace_name} can leverage insights from..." or "{profile.workspace_name} can learn from..." unless the sentence immediately names {profile.workspace_name}'s own buyer timing, proprietary context, or account-level intent.
+- If another company is mentioned, extract one transferable mechanism, tradeoff, decision rule, or evidence boundary. A workspace/product connection is optional and should be omitted when the source is more useful as standalone market education.
+- Do not route every source back to buyer timing, account context, intent signals, or "before copy." Those are available angles, not the default angle.
+- Avoid wording like "{profile.workspace_name} can leverage insights from..." or "{profile.workspace_name} can learn from...". State the reader lesson directly.
+- possible_post_angles must span different reader payoffs when the source supports them, such as mechanism explanation, diagnostic, decision framework, evidence unpacking, or practical guidance.
 - Keep each value specific and concise.
 - suggested_hooks and possible_post_angles must be arrays."""
 
@@ -1317,7 +1327,10 @@ def fallback_trend_digest(
         "what_happened": what_happened,
         "what_is_new": clean_text(article.get("trend_breakdown_text")) or trend.title,
         "why_it_matters": f"{trend.why_it_matters}{number_note}",
-        "why_it_matters_to_gtm": "This matters for sales and lead generation if it changes buyer timing, prioritization, or the context reps need before outreach.",
+        "why_it_matters_to_gtm": (
+            "Explain the concrete GTM effect: workflow, economics, data quality, buyer behavior, team design, "
+            "evaluation criteria, or execution risk."
+        ),
         "leadpoet_angle": trend.leadpoet_angle,
         "suggested_hooks": [trend.suggested_hooks] if trend.suggested_hooks else [suggested_hook_for_trend(trend.title, trend.topic)],
         "possible_post_angles": [default_post_angle_for_trend(trend.title, trend.topic, profile)],
@@ -1573,20 +1586,20 @@ def classify_topic(title: str) -> str:
 
 def suggested_hook_for_topic(topic: str) -> str:
     if topic == "lead generation":
-        return "Lead generation is becoming a timing problem, not just a volume problem."
+        return "A useful lead generation take should change what an operator does next."
     if topic == "sales AI":
-        return "The sales AI debate is really a context debate."
-    return "The AI trend that matters is the one that changes buyer behavior."
+        return "The useful sales AI question is what changed in the actual workflow."
+    return "The useful AI signal is the concrete behavior, cost, or constraint that changed."
 
 
 def suggested_hook_for_trend(title: str, topic: str) -> str:
     title_text = clean_text(title)
     if title_text:
         if topic == "lead generation":
-            return f"{title_text}: the useful question is whether timing changed before volume did."
+            return f"{title_text}: what changes for the operator on Monday?"
         if topic == "sales AI":
-            return f"{title_text}: the useful question is what changed before a rep writes."
-        return f"{title_text}: the useful question is whether buyer timing changed or only the tool label did."
+            return f"{title_text}: separate the product claim from the workflow change."
+        return f"{title_text}: what changed, what did not, and who should care?"
     return suggested_hook_for_topic(topic)
 
 
@@ -1594,10 +1607,13 @@ def default_post_angle_for_trend(title: str, topic: str, profile: TrendScoutProf
     proof = clean_text(title) or clean_text(topic) or "this source"
     if profile.workspace_name == "Leadpoet":
         return (
-            f"Use {proof} as market proof for the account-timing question it raises before copy, "
-            "outreach, or account selection."
+            f"Use {proof} to teach one concrete GTM mechanism, tradeoff, diagnostic, or decision rule. "
+            "Do not force a Leadpoet or buyer-timing conclusion."
         )
-    return f"Use {proof} as market proof for how {profile.workspace_name}'s saved positioning should meet this market shift."
+    return (
+        f"Use {proof} to teach one concrete mechanism or decision rule. Mention {profile.workspace_name} only if "
+        "its saved context makes the lesson materially more specific."
+    )
 
 
 def clean_text(value: object) -> str:

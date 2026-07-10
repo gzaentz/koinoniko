@@ -13,7 +13,8 @@ VOICE_RULES_SETTING = "voice.rules"
 VOICE_REVIEW_RULES_SETTING = "voice.review_rules"
 POSITIONING_RULES_CONTEXT_NAME = "active_positioning_rules"
 POSITIONING_SOURCE_PROMPT_GUIDANCE = (
-    "Use saved positioning as source material for meaning, not wording to copy; "
+    "Use saved positioning as a factual boundary and optional idea source, not a checklist to inject into every post; "
+    "only use the wedge when it materially helps the current reader payoff. When it is relevant, "
     "translate any product-definition or product-subject phrasing into a concrete mechanism, "
     "account change, or consequence before writing."
 )
@@ -38,21 +39,30 @@ DEFAULT_AVOID_PHRASES = [
 
 DEFAULT_WORKSPACE_POSITIONING_RULES = [
     "Keep the Leadpoet wedge concrete: proprietary buyer context, timing signals, and account-level intent.",
-    "Other tools, agents, and case studies are market proof that intent matters, not the mechanism to copy.",
-    "When referencing another product, validate the market shift, then bring the point back to buyer timing, proprietary context, and the account reason before copy or outreach.",
+    "Use other tools, agents, and case studies for the exact mechanism, tradeoff, or evidence boundary they reveal; do not turn each one into generic proof that intent matters.",
+    "When another product or market example materially illuminates the Leadpoet wedge, connect the exact mechanism; otherwise let it teach a useful standalone lesson without forcing buyer timing or account context into the post.",
 ]
 
 LEGACY_WORKSPACE_POSITIONING_REPLACEMENTS = {
     "Leadpoet owns the intent wedge: proprietary buyer context, timing signals, and account-level intent.": DEFAULT_WORKSPACE_POSITIONING_RULES[0],
     "Other tools, agents, and case studies are market proof that intent matters, not the source of Leadpoet's unique wedge.": DEFAULT_WORKSPACE_POSITIONING_RULES[1],
+    "Other tools, agents, and case studies are market proof that intent matters, not the mechanism to copy.": DEFAULT_WORKSPACE_POSITIONING_RULES[1],
     "When referencing another product, validate the market shift, then pull the point back to Leadpoet owning buyer timing and proprietary context.": DEFAULT_WORKSPACE_POSITIONING_RULES[2],
     "When referencing another product, validate the market shift, then bring the point back to buyer timing and proprietary context inside Leadpoet.": DEFAULT_WORKSPACE_POSITIONING_RULES[2],
+    "When referencing another product, validate the market shift, then bring the point back to buyer timing, proprietary context, and the account reason before copy or outreach.": DEFAULT_WORKSPACE_POSITIONING_RULES[2],
+    "When referencing another product, trend, or case study, connect it back only to the saved positioning.": (
+        "If a post connects another product, trend, or case study to the workspace, use only saved positioning; "
+        "omit the connection when it does not improve the reader payoff."
+    ),
 }
 
 UNIVERSAL_POSITIONING_RULES = [
     "Use saved Facts & Context as the source of truth for writer, company, product, audience, and positioning.",
     "Do not invent company claims, founder background, customer proof, metrics, or product capabilities.",
-    "When referencing another product, trend, or case study, connect it back only to the saved positioning.",
+    (
+        "If a post connects another product, trend, or case study to the workspace, use only saved positioning; "
+        "omit the connection when it does not improve the reader payoff."
+    ),
 ]
 
 POSITIONING_RULES = [
@@ -67,6 +77,7 @@ DEFAULT_VOICE_RULES = [
     "Use exact nouns from saved context instead of polished category language.",
     "Sound like a useful thought the writer would actually post, not an AI recap.",
     "Vary how the product is mentioned; avoid default product-definition sentences.",
+    "Vary the editorial job across posts: teach, explain, diagnose, compare, or unpack evidence instead of repeating one positioning thesis.",
 ]
 
 REQUIRED_REVIEW_RULES = [
@@ -76,6 +87,8 @@ REQUIRED_REVIEW_RULES = [
     ),
     "Reject drafts that could apply to any workspace after swapping company or product names.",
     "Reject cookie-cutter product closers that define the product the same way instead of earning the mention through the post.",
+    "Reject drafts that restate a saturated recent thesis with new synonyms when the user's brief did not explicitly require that thesis.",
+    "Require one concrete reader payoff: a mechanism, diagnostic, decision rule, step, tradeoff, example, or evidence boundary.",
     (
         "A post-worthy draft must answer why this is worth posting now: concrete reader payoff, "
         "timely trigger, or saved-context proof."

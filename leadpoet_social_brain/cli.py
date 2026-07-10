@@ -30,6 +30,7 @@ from leadpoet_social_brain.core.models import (
     TrendItem,
     utc_now,
 )
+from leadpoet_social_brain.editorial import dedupe_editorial_trends
 from leadpoet_social_brain.generation import (
     MISSING_PROVIDER_MESSAGE,
     PRODUCT_NAME_OPTIONAL_LANE_NAMES,
@@ -38,6 +39,7 @@ from leadpoet_social_brain.generation import (
     leadpoet_sentence_template_fingerprint,
     leadpoet_sentence_grammar_fingerprint,
     primary_closing_target,
+    primary_editorial_value_mode,
     primary_human_rhythm_target,
     primary_layout_target,
     primary_product_mention_lane,
@@ -922,6 +924,9 @@ def cmd_audit_naturalness_x(store: SQLiteStore, args: argparse.Namespace) -> int
     print("Primary structure option counts:")
     for key, value in sorted(payload["primary_structure_option_counts"].items()):
         print(f"- {key}: {value}")
+    print("Primary reader value mode counts:")
+    for key, value in sorted(payload["primary_editorial_value_mode_counts"].items()):
+        print(f"- {key}: {value}")
     print("Primary product mention lane counts:")
     for key, value in sorted(payload["primary_product_mention_lane_counts"].items()):
         print(f"- {key}: {value}")
@@ -1003,7 +1008,9 @@ def build_naturalness_plan_audit(
     if count <= 0:
         raise SystemExit("--count must be greater than 0.")
     effective_trend_limit = trend_limit if trend_limit > 0 else 1000
-    trends = store.list_trends(status=trend_status or None, limit=effective_trend_limit)
+    trends = dedupe_editorial_trends(
+        store.list_trends(status=trend_status or None, limit=effective_trend_limit)
+    )
     if not trends:
         raise SystemExit("No trends found for naturalness audit.")
     requested_count = count
@@ -1031,6 +1038,7 @@ def build_naturalness_plan_audit(
     covered_trend_ids = {str(row["trend_id"]) for row in rows if row["trend_id"]}
     uncovered_trend_count = max(0, len(trends) - len(covered_trend_ids))
     primary_structure_counts = Counter(str(row["primary_structure_option"]) for row in rows)
+    primary_editorial_value_counts = Counter(str(row["primary_editorial_value_mode"]) for row in rows)
     primary_product_lane_counts = Counter(str(row["primary_product_mention_lane"]) for row in rows)
     primary_product_placement_counts = Counter(str(row["primary_product_mention_placement_target"]) for row in rows)
     primary_product_syntax_counts = Counter(str(row["primary_product_mention_syntax_target"]) for row in rows)
@@ -1048,6 +1056,8 @@ def build_naturalness_plan_audit(
     warnings: list[str] = []
     if len(primary_structure_counts) < min(5, len(trends), count):
         warnings.append("Structure guidance did not vary enough across trends.")
+    if len(primary_editorial_value_counts) < min(6, len(trends), count):
+        warnings.append("Reader value guidance did not vary enough across trends.")
     if len(primary_product_lane_counts) < min(5, len(trends), count):
         warnings.append("Product mention guidance did not vary enough across trends.")
     if len(primary_product_placement_counts) < min(4, len(trends), count):
@@ -1067,6 +1077,7 @@ def build_naturalness_plan_audit(
     if len(covered_trend_ids) > 1 and len(request_angle_counts) < min(5, len(covered_trend_ids), count):
         warnings.append("Request angles did not vary enough across covered trends.")
     append_plan_concentration_warning(warnings, "Structure guidance", primary_structure_counts, len(rows))
+    append_plan_concentration_warning(warnings, "Reader value guidance", primary_editorial_value_counts, len(rows))
     append_plan_concentration_warning(warnings, "Product mention guidance", primary_product_lane_counts, len(rows))
     append_plan_concentration_warning(
         warnings,
@@ -1112,6 +1123,7 @@ def build_naturalness_plan_audit(
         "loaded_all_matching_trends": trend_limit <= 0,
         "trend_limit": trend_limit,
         "primary_structure_option_counts": dict(primary_structure_counts),
+        "primary_editorial_value_mode_counts": dict(primary_editorial_value_counts),
         "primary_product_mention_lane_counts": dict(primary_product_lane_counts),
         "primary_product_mention_placement_target_counts": dict(primary_product_placement_counts),
         "primary_product_mention_syntax_target_counts": dict(primary_product_syntax_counts),
@@ -1220,6 +1232,7 @@ def append_plan_concentration_warning(
 
 NATURALNESS_ASSIGNMENT_FIELDS = (
     "primary_structure_option",
+    "primary_editorial_value_mode",
     "primary_product_mention_lane",
     "primary_product_mention_placement_target",
     "primary_product_mention_syntax_target",
@@ -1237,6 +1250,9 @@ def naturalness_audit_request_plan(
     post_type: str,
     length_mode: str,
 ) -> list[tuple[int, TrendItem, DraftRequest, dict[str, str]]]:
+    trends = dedupe_editorial_trends(trends)
+    if not trends:
+        raise ValueError("At least one distinct trend is required for a naturalness audit plan.")
     counters: dict[str, Counter[str]] = {
         field: Counter()
         for field in NATURALNESS_ASSIGNMENT_FIELDS
@@ -1281,6 +1297,7 @@ def naturalness_guidance_assignment(request: DraftRequest, trend: TrendItem) -> 
     trends = [trend]
     return {
         "primary_structure_option": primary_structure_shape(request, trends)[0],
+        "primary_editorial_value_mode": primary_editorial_value_mode(request, trends)[0],
         "primary_product_mention_lane": primary_product_mention_lane(request, trends)[0],
         "primary_product_mention_placement_target": primary_product_mention_placement_target(request, trends)[0],
         "primary_product_mention_syntax_target": primary_product_mention_syntax_target(request, trends)[0],
@@ -1298,7 +1315,7 @@ def naturalness_assignment_balance_score(
     combo_counts: Counter[tuple[str, ...]],
     previous_assignment: dict[str, str] | None,
     slot: int,
-) -> tuple[int, int, int, int, int, int, int, int]:
+) -> tuple[int, ...]:
     next_counts = [
         counters[field][assignment[field]] + 1
         for field in NATURALNESS_ASSIGNMENT_FIELDS
@@ -1321,6 +1338,8 @@ def naturalness_assignment_balance_score(
         )
     return (
         max(core_next_counts),
+        counters["primary_structure_option"][assignment["primary_structure_option"]] + 1,
+        counters["primary_editorial_value_mode"][assignment["primary_editorial_value_mode"]] + 1,
         counters["primary_product_mention_lane"][assignment["primary_product_mention_lane"]] + 1,
         max(next_counts),
         sum(count * count for count in core_next_counts),
@@ -1371,7 +1390,9 @@ def build_naturalness_audit(
     if count <= 0:
         raise SystemExit("--count must be greater than 0.")
     effective_trend_limit = trend_limit if trend_limit > 0 else 1000
-    trends = store.list_trends(status=trend_status or None, limit=effective_trend_limit)
+    trends = dedupe_editorial_trends(
+        store.list_trends(status=trend_status or None, limit=effective_trend_limit)
+    )
     if not trends:
         raise SystemExit("No trends found for naturalness audit.")
     requested_count = count
@@ -1409,6 +1430,14 @@ def build_naturalness_audit(
             first_structure = str(options[0].get("name") or "")
         if not primary_structure:
             primary_structure = first_structure
+        primary_editorial_value = ""
+        editorial_value_option = (
+            draft.context_snapshot.get("primary_editorial_value_mode")
+            if isinstance(draft.context_snapshot, dict)
+            else None
+        )
+        if isinstance(editorial_value_option, dict):
+            primary_editorial_value = str(editorial_value_option.get("name") or "")
         primary_product_lane = ""
         first_product_lane = ""
         primary_product_option = (
@@ -1493,6 +1522,7 @@ def build_naturalness_audit(
                 "first_line": first_nonempty_line(draft.text),
                 "last_line": last_nonempty_line(draft.text),
                 "primary_structure_option": primary_structure,
+                "primary_editorial_value_mode": primary_editorial_value,
                 "first_structure_option": first_structure,
                 "primary_product_mention_lane": primary_product_lane,
                 "first_product_mention_lane": first_product_lane,
@@ -1519,9 +1549,16 @@ def build_naturalness_audit(
     if unique_last_lines < min(5, len(rows)):
         warnings.append("Closing lines are not varied enough.")
     primary_structure_counts = Counter(str(row["primary_structure_option"]) for row in rows if row["primary_structure_option"])
+    primary_editorial_value_counts = Counter(
+        str(row["primary_editorial_value_mode"])
+        for row in rows
+        if row["primary_editorial_value_mode"]
+    )
     first_structure_counts = Counter(str(row["first_structure_option"]) for row in rows if row["first_structure_option"])
     if len(primary_structure_counts) < min(5, len(trends), count):
         warnings.append("Structure guidance did not vary enough across trends.")
+    if len(primary_editorial_value_counts) < min(6, len(trends), count):
+        warnings.append("Reader value guidance did not vary enough across trends.")
     primary_product_lane_counts = Counter(
         str(row["primary_product_mention_lane"]) for row in rows if row["primary_product_mention_lane"]
     )
@@ -1572,6 +1609,7 @@ def build_naturalness_audit(
     if len(covered_trend_ids) > 1 and len(request_angle_counts) < min(5, len(covered_trend_ids), count):
         warnings.append("Request angles did not vary enough across covered trends.")
     append_plan_concentration_warning(warnings, "Structure guidance", primary_structure_counts, len(rows))
+    append_plan_concentration_warning(warnings, "Reader value guidance", primary_editorial_value_counts, len(rows))
     append_plan_concentration_warning(warnings, "Product mention guidance", primary_product_lane_counts, len(rows))
     append_plan_concentration_warning(
         warnings,
@@ -1724,6 +1762,7 @@ def build_naturalness_audit(
         "unique_first_lines": unique_first_lines,
         "unique_last_lines": unique_last_lines,
         "primary_structure_option_counts": dict(primary_structure_counts),
+        "primary_editorial_value_mode_counts": dict(primary_editorial_value_counts),
         "primary_product_mention_lane_counts": dict(primary_product_lane_counts),
         "primary_product_mention_placement_target_counts": dict(primary_product_placement_counts),
         "primary_product_mention_syntax_target_counts": dict(primary_product_syntax_counts),

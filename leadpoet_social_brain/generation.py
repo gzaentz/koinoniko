@@ -8,6 +8,13 @@ from dataclasses import replace
 
 from leadpoet_social_brain.context import ContextManager
 from leadpoet_social_brain.core.models import ContextBundle, ContextSection, DraftRequest, GeneratedDraft, TrendItem, ViralPattern
+from leadpoet_social_brain.editorial import (
+    EDITORIAL_VALUE_MODES,
+    dedupe_editorial_trends,
+    editorial_theme_fingerprints,
+    explicitly_requested_editorial_themes,
+    unsupported_quantified_claims,
+)
 from leadpoet_social_brain.pattern_scout import select_relevant_patterns
 from leadpoet_social_brain.platforms.x import get_x_adapter
 from leadpoet_social_brain.providers import DraftProvider, ModelRouting, generate_with_provider, resolve_model_routing
@@ -215,6 +222,12 @@ POST_LAYOUT_TARGETS = [
         "Use one slightly longer observation followed by a short final sentence. Do not make it a tidy slogan.",
     ),
 ]
+
+NATURAL_MULTILINE_LAYOUT_TARGETS = {
+    "two short paragraphs",
+    "micro-list turn",
+    "three clipped lines",
+}
 
 POST_CLOSING_TARGETS = [
     (
@@ -569,6 +582,8 @@ class SocialBrainGenerator:
                 draft_options=cleaned_options,
                 avoid_phrases=avoid_phrases,
                 max_chars=max_chars,
+                trends=trends,
+                recent_outputs_section=recent_output_context["section"],
             )
         else:
             evaluation_prompt = build_evaluation_prompt(
@@ -590,6 +605,57 @@ class SocialBrainGenerator:
         )[0]
         if request.prompt_profile == "natural":
             final_text, quality_notes, evaluation = parse_natural_evaluation_result(evaluation_raw, cleaned_options)
+            final_text, evaluation = prefer_semantically_fresh_natural_option(
+                final_text,
+                cleaned_options,
+                evaluation,
+                request=request,
+                recent_output_context=recent_output_context,
+            )
+            final_text, evaluation = prefer_layout_diverse_natural_option(
+                final_text,
+                cleaned_options,
+                evaluation,
+                request=request,
+                trends=trends,
+                recent_output_context=recent_output_context,
+            )
+            final_text, evaluation = prefer_grounded_natural_option(
+                final_text,
+                cleaned_options,
+                evaluation,
+                request=request,
+                bundle=bundle,
+                trends=trends,
+            )
+            final_text, evaluation = repair_natural_grounding_if_needed(
+                self.provider,
+                final_text,
+                evaluation,
+                request=request,
+                bundle=bundle,
+                trends=trends,
+                max_chars=max_chars,
+                model=model_routing.evaluator,
+            )
+            final_text, evaluation = prefer_coherent_natural_option(
+                final_text,
+                cleaned_options,
+                evaluation,
+                request=request,
+                bundle=bundle,
+                trends=trends,
+            )
+            final_text, evaluation = repair_natural_coherence_if_needed(
+                self.provider,
+                final_text,
+                evaluation,
+                request=request,
+                bundle=bundle,
+                trends=trends,
+                max_chars=max_chars,
+                model=model_routing.evaluator,
+            )
         else:
             final_text, quality_notes, evaluation = parse_evaluation_result(evaluation_raw, cleaned_options)
         text = fit_generated_text_to_limit(
@@ -710,13 +776,15 @@ class SocialBrainGenerator:
 
     def _trends_for(self, request: DraftRequest) -> list[TrendItem]:
         if request.trend_ids:
-            return [
+            return dedupe_editorial_trends([
                 trend for trend_id in request.trend_ids
                 if (trend := self.store.get_trend_item(trend_id)) is not None
-            ]
+            ])
         if not request.use_trends:
             return []
-        return self.store.relevant_trends(topic=request.topic, angle=request.angle, limit=3)
+        return dedupe_editorial_trends(
+            self.store.relevant_trends(topic=request.topic, angle=request.angle, limit=12)
+        )[:3]
 
     def _patterns_for(self, request: DraftRequest) -> list[ViralPattern]:
         if not request.use_patterns and not request.pattern_ids:
@@ -825,6 +893,31 @@ def natural_voice_prompt_section(bundle: ContextBundle | None = None, anchor: st
         "- Do not default to standalone product-definition sentences that put the product name before 'is' or 'is building'.\n"
         "- If the product name appears, earn it through the specific mechanism, scene, or consequence in the post.\n"
         f"{example_line}"
+    )
+
+
+def editorial_value_prompt_section(request: DraftRequest, trends: list[TrendItem]) -> str:
+    selected = selected_editorial_value_modes(request, trends, count=3)
+    primary_name, primary_guidance = selected[0]
+    option_lines = "\n".join(
+        f"- Draft payoff {index}: {name}: {guidance}"
+        for index, (name, guidance) in enumerate(selected, start=1)
+    )
+    return (
+        "Editorial Depth & Reader Value:\n"
+        "- Preserve the saved voice, but vary the substance: each post should do a different job for the reader.\n"
+        "- Treat saved positioning as a fact boundary and idea library, not a checklist or a required destination. "
+        "A post may be fully useful and product-free.\n"
+        "- Earn credibility with one useful unit: a mechanism, diagnostic, decision rule, process step, grounded example, "
+        "tradeoff, or evidence boundary. A point of view without that unit is too one-dimensional.\n"
+        "- The recurring argument that writing/messages are easy while upstream targeting/context is hard is one possible thesis, "
+        "not the default thesis. Use it only when the user's brief explicitly asks for it or new evidence materially advances it.\n"
+        "- Changing the hook or synonyms does not make a repeated thesis new. Move to genuinely adjacent ground when recent output "
+        "already made the same point.\n"
+        f"Primary reader payoff for this request: {primary_name}: {primary_guidance}\n"
+        "Use the primary payoff when it fits the brief. For three draft options, use these distinct payoff assignments; "
+        "do not force a format or invent evidence to satisfy one.\n"
+        f"{option_lines}"
     )
 
 
@@ -1057,6 +1150,33 @@ def primary_structure_shape(request: DraftRequest, trends: list[TrendItem]) -> t
     return selected_structure_shapes(request, trends, count=1)[0]
 
 
+def selected_editorial_value_modes(
+    request: DraftRequest,
+    trends: list[TrendItem],
+    *,
+    count: int,
+) -> list[tuple[str, str]]:
+    digest = hashlib.sha256(f"editorial-value|{variation_seed_source(request, trends)}".encode("utf-8")).hexdigest()
+    start = int(digest[:8], 16) % len(EDITORIAL_VALUE_MODES)
+    selected = [
+        EDITORIAL_VALUE_MODES[(start + offset) % len(EDITORIAL_VALUE_MODES)]
+        for offset in range(len(EDITORIAL_VALUE_MODES))
+    ]
+    requested_mode = " ".join(str(request.editorial_value_mode or "").lower().split())
+    angle = " ".join(str(request.angle or "").lower().split())
+    explicit_mode = next(
+        (mode for mode in EDITORIAL_VALUE_MODES if mode[0] == requested_mode),
+        None,
+    ) or next((mode for mode in EDITORIAL_VALUE_MODES if mode[0] in angle), None)
+    if explicit_mode:
+        selected = [explicit_mode, *[mode for mode in selected if mode[0] != explicit_mode[0]]]
+    return selected[: min(count, len(EDITORIAL_VALUE_MODES))]
+
+
+def primary_editorial_value_mode(request: DraftRequest, trends: list[TrendItem]) -> tuple[str, str]:
+    return selected_editorial_value_modes(request, trends, count=1)[0]
+
+
 def selected_layout_targets(
     request: DraftRequest,
     trends: list[TrendItem],
@@ -1174,10 +1294,11 @@ def build_recent_output_context(
     batch_summary = batch_recent_output_summary(extra_texts or [])
     rows = recent_output_rows(store, request, limit=limit, extra_texts=extra_texts)
     if not rows:
-        return {"section": "", "rows": [], "batch_summary": batch_summary}
+        return {"section": "", "rows": [], "batch_summary": batch_summary, "theme_counts": {}}
+    theme_counts = recent_output_editorial_theme_counts(rows, batch_summary)
     lines = [
         "Recent Output Anti-Sameness:",
-        "These recent or queued posts are not examples to copy. Use them to avoid repeated openings, closings, layouts, and Leadpoet grammar.",
+        "These recent or queued posts are not examples to copy. Use them to avoid repeated theses, reader payoffs, openings, closings, layouts, and Leadpoet grammar.",
     ]
     for row in rows:
         leadpoet_fragment_is_redacted = recent_output_fragment_should_redact(row["leadpoet_sentence"])
@@ -1203,6 +1324,8 @@ def build_recent_output_context(
                 else row["leadpoet_sentence_template"]
             )
             details.append(f"leadpoet_template={template}")
+        if row["editorial_themes"]:
+            details.append(f"editorial_themes={row['editorial_themes']}")
         lines.append(f"- {'; '.join(details)}")
     if batch_summary["post_count"]:
         grammar_counts = batch_summary.get("leadpoet_grammar_counts", {})
@@ -1210,6 +1333,7 @@ def build_recent_output_context(
         template_counts = batch_summary.get("leadpoet_sentence_template_counts", {})
         layout_counts = batch_summary.get("layout_counts", {})
         name_usage_counts = batch_summary.get("leadpoet_name_usage_counts", {})
+        editorial_theme_counts = batch_summary.get("editorial_theme_counts", {})
         lines.append(f"Batch outputs so far: {batch_summary['post_count']}")
         if isinstance(name_usage_counts, dict) and name_usage_counts:
             lines.append(f"Batch Leadpoet name usage: {recent_output_count_summary(name_usage_counts)}")
@@ -1221,8 +1345,14 @@ def build_recent_output_context(
             lines.append(f"Batch Leadpoet sentence template counts: {recent_output_count_summary(template_counts)}")
         if isinstance(layout_counts, dict) and layout_counts:
             lines.append(f"Batch layout counts: {recent_output_count_summary(layout_counts)}")
+        if isinstance(editorial_theme_counts, dict) and editorial_theme_counts:
+            lines.append(f"Batch editorial theme counts: {recent_output_count_summary(editorial_theme_counts)}")
+    if theme_counts:
+        lines.append(f"Recent editorial theme counts: {recent_output_count_summary(theme_counts)}")
     lines.extend(
         [
+            "Treat an editorial theme used 2+ times as saturated. Unless the user's brief explicitly requires it, choose a different underlying thesis and reader payoff; changing synonyms is not enough.",
+            "In particular, do not keep returning to 'copy/messages are easy; upstream targeting/context is hard' after that argument is saturated.",
             "Avoid repeating those first-line shapes, final-line moves, and Leadpoet grammar fingerprints.",
             "Treat any Leadpoet grammar fingerprint used 3+ times in this batch as saturated; choose a different product role or omit the name if the point still works.",
             "Treat any Leadpoet phrase pattern used 3+ times in this batch as saturated; choose a different way the name enters the sentence.",
@@ -1232,7 +1362,12 @@ def build_recent_output_context(
             "If Leadpoet appears, change its sentence role, placement, and neighboring words from the recent examples.",
         ]
     )
-    return {"section": "\n".join(lines), "rows": rows, "batch_summary": batch_summary}
+    return {
+        "section": "\n".join(lines),
+        "rows": rows,
+        "batch_summary": batch_summary,
+        "theme_counts": theme_counts,
+    }
 
 
 def batch_recent_output_summary(texts: list[str]) -> dict[str, object]:
@@ -1246,6 +1381,12 @@ def batch_recent_output_summary(texts: list[str]) -> dict[str, object]:
     template_counts = Counter(row["leadpoet_sentence_template"] for row in rows if row["leadpoet_sentence_template"])
     layout_counts = Counter(row["layout"] for row in rows if row["layout"])
     name_usage_counts = Counter("mentioned" if row["leadpoet_sentence"] else "omitted" for row in rows)
+    editorial_counts = Counter(
+        theme
+        for row in rows
+        for theme in row["editorial_themes"].split(",")
+        if theme
+    )
     return {
         "post_count": len(rows),
         "leadpoet_name_usage_counts": dict(name_usage_counts),
@@ -1253,6 +1394,28 @@ def batch_recent_output_summary(texts: list[str]) -> dict[str, object]:
         "leadpoet_phrase_pattern_counts": dict(phrase_counts),
         "leadpoet_sentence_template_counts": dict(template_counts),
         "layout_counts": dict(layout_counts),
+        "editorial_theme_counts": dict(editorial_counts),
+    }
+
+
+def recent_output_editorial_theme_counts(
+    rows: list[dict[str, str]],
+    batch_summary: dict[str, object] | None = None,
+) -> dict[str, int]:
+    row_counts = Counter(
+        theme
+        for row in rows
+        for theme in str(row.get("editorial_themes") or "").split(",")
+        if theme
+    )
+    batch_counts = (batch_summary or {}).get("editorial_theme_counts", {})
+    if not isinstance(batch_counts, dict):
+        batch_counts = {}
+    themes = {*row_counts, *(str(theme) for theme in batch_counts)}
+    return {
+        theme: max(int(row_counts.get(theme, 0) or 0), int(batch_counts.get(theme, 0) or 0))
+        for theme in themes
+        if theme
     }
 
 
@@ -1361,6 +1524,7 @@ def recent_output_row(text: str, *, source: str, topic_scope: str = "same_topic"
     leadpoet_phrase_pattern = leadpoet_phrase_pattern_fingerprint(leadpoet_sentence)
     leadpoet_sentence_template = leadpoet_sentence_template_fingerprint(leadpoet_sentence)
     layout = recent_output_layout(cleaned)
+    editorial_themes = ",".join(editorial_theme_fingerprints(cleaned))
     fingerprint = "|".join(
         [
             first.lower(),
@@ -1370,6 +1534,7 @@ def recent_output_row(text: str, *, source: str, topic_scope: str = "same_topic"
             leadpoet_phrase_pattern,
             leadpoet_sentence_template,
             layout,
+            editorial_themes,
         ]
     )
     return {
@@ -1382,6 +1547,7 @@ def recent_output_row(text: str, *, source: str, topic_scope: str = "same_topic"
         "leadpoet_phrase_pattern": leadpoet_phrase_pattern,
         "leadpoet_sentence_template": leadpoet_sentence_template,
         "layout": layout,
+        "editorial_themes": editorial_themes,
         "fingerprint": fingerprint,
     }
 
@@ -1584,6 +1750,7 @@ def build_generation_prompt(
     )
     anchor = workspace_anchor_name(bundle, active_rules or {})
     natural_voice_section = natural_voice_prompt_section(bundle, anchor=anchor)
+    editorial_value_section = editorial_value_prompt_section(request, trends)
     human_rhythm_section = human_rhythm_prompt_section(request, trends)
     structure_section = structure_variation_prompt_section(request, trends)
     product_mention_section = product_mention_prompt_section(anchor, request=request, trends=trends)
@@ -1600,6 +1767,8 @@ Voice profile:
 {voice or "- No saved Voice profile yet."}
 
 {natural_voice_section}
+
+{editorial_value_section}
 
 {human_rhythm_section}
 
@@ -1660,6 +1829,7 @@ def build_strategy_prompt(
     length_section = length_prompt_section(request, max_chars)
     anchor = workspace_anchor_name(bundle, active_rules or {})
     natural_voice_section = natural_voice_prompt_section(bundle, anchor=anchor)
+    editorial_value_section = editorial_value_prompt_section(request, trends)
     human_rhythm_section = human_rhythm_prompt_section(request, trends)
     structure_section = structure_variation_prompt_section(request, trends)
     product_mention_section = product_mention_prompt_section(anchor, request=request, trends=trends)
@@ -1693,6 +1863,8 @@ Facts & Context:
 {active_rules_section}
 
 {natural_voice_section}
+
+{editorial_value_section}
 
 {human_rhythm_section}
 
@@ -1757,6 +1929,7 @@ def build_best_writer_prompt(
     length_section = length_prompt_section(request, max_chars)
     anchor = workspace_anchor_name(bundle, active_rules or {})
     natural_voice_section = natural_voice_prompt_section(bundle, anchor=anchor)
+    editorial_value_section = editorial_value_prompt_section(request, trends)
     human_rhythm_section = human_rhythm_prompt_section(request, trends)
     structure_section = structure_variation_prompt_section(request, trends)
     product_mention_section = product_mention_prompt_section(anchor, request=request, trends=trends)
@@ -1793,6 +1966,8 @@ Facts & Context:
 {active_rules_section}
 
 {natural_voice_section}
+
+{editorial_value_section}
 
 {human_rhythm_section}
 
@@ -1850,10 +2025,7 @@ def build_natural_writer_prompt(
 ) -> str:
     examples_text = "\n\n".join(_format_example(post, bundle) for post in bundle.examples)
     context = positioning_context_prompt_text(bundle.positioning_sections)
-    trends_text = "\n".join(
-        f"- {trend.title}: {trend.summary} Useful angle: {trend_angle_for_generation(trend)}"
-        for trend in trends
-    )
+    trends_text = "\n\n".join(natural_trend_evidence_for_prompt(trend) for trend in trends)
     patterns_text = "\n".join(
         f"- {(pattern.pattern_name or pattern.structure or 'Observed pattern')}: "
         f"{pattern.adaptation_rule or pattern.why_it_worked or pattern.source_summary or 'Use the structure, not the wording.'}"
@@ -1862,6 +2034,8 @@ def build_natural_writer_prompt(
     positioning_rules = (active_rules or {}).get("positioning_rules", [])
     positioning_text = "\n".join(f"- {prompt_safe_positioning_rule(rule)}" for rule in positioning_rules)
     avoid_section = avoid_phrases_prompt_section(avoid_phrases or [])
+    editorial_value_section = editorial_value_prompt_section(request, trends)
+    layout_section = natural_layout_prompt_section(request, trends)
     return f"""Write 3 X draft options for this workspace.
 
 Goal: produce a post this founder would actually publish with little or no editing.
@@ -1889,14 +2063,22 @@ Selected timely context:
 Optional pattern mechanics:
 {patterns_text or "- None selected."}
 
+{editorial_value_section}
+
+{layout_section}
+
 {recent_outputs_section}
 
 Writing standard:
 - Make one clear, specific point. Do not try to cover the whole category.
+- Build one complete argument: premise -> what it means -> reader takeaway. Do not join two individually plausible facts with "so" or "therefore" unless the brief or source establishes the missing bridge.
+- Define abstract phrases such as "accounts are moving", "intent", "timing", or "the evidence" with an observable behavior, event, or decision. If the evidence does not supply one, make a narrower point.
 - Match the authored examples' cadence and level of polish without copying their wording.
 - Prefer the user's direct framing when it is already strong.
 - Use only the few facts needed to make the point. Do not name the product unless it improves the post.
 - No invented anecdotes, quotes, metrics, customer claims, product claims, or first-person experiences.
+- Treat the selected source evidence as a closed factual set. Every number, benchmark, timing window, product capability, and causal claim must appear there or in the user's brief.
+- Never write "X did Y because...", "most teams...", "most people...", "sellers hate...", or a similar causal/universal claim unless the evidence states it. Use "suggests" or "points to" for an interpretation, and make the boundary visible.
 - Avoid brand voice, generic AI commentary, fake profundity, em dashes, forced CTAs, and tidy motivational endings.
 - Let the three options differ in the actual take or emphasis, not through arbitrary formatting assignments.
 
@@ -1911,10 +2093,15 @@ def build_natural_evaluation_prompt(
     strategy_summary: dict[str, object],
     draft_options: list[str],
     max_chars: int,
+    trends: list[TrendItem],
     avoid_phrases: list[str] | None = None,
+    recent_outputs_section: str = "",
 ) -> str:
     options = "\n\n".join(f"Draft {index}:\n{text}" for index, text in enumerate(draft_options, start=1))
     avoid_section = avoid_phrases_prompt_section(avoid_phrases or [])
+    editorial_value_section = editorial_value_prompt_section(request, trends)
+    layout_section = natural_layout_prompt_section(request, trends)
+    trends_text = "\n\n".join(natural_trend_evidence_for_prompt(trend) for trend in trends)
     return f"""Choose the best X post for this workspace.
 
 Original brief:
@@ -1926,25 +2113,107 @@ Original brief:
 Fact boundary and core point:
 {json.dumps(strategy_summary, indent=2)}
 
+Closed source evidence:
+{trends_text or "- No external source selected. Only the user's brief and saved facts may support factual claims."}
+
 Draft options:
 {options}
 
+{editorial_value_section}
+
+{layout_section}
+
+{recent_outputs_section}
+
 Judge the options on:
 - clarity: one sharp point that is immediately understandable
+- logical continuity: the conclusion follows from the stated premise without an unstated assumption or a second unsupported thesis
+- operational clarity: abstract words such as movement, intent, timing, context, or evidence are attached to an observable event, behavior, or decision when they carry the argument
 - voice: sounds like a real founder, not a brand or content template
 - specificity: contains a concrete mechanism or consequence without cramming in nouns
-- usefulness: gives the reader a thought worth keeping
+- usefulness: gives the reader a mechanism, diagnostic, decision rule, step, tradeoff, or evidence boundary worth keeping
+- editorial novelty: does not restate a recent thesis with new synonyms unless the original brief explicitly requires that thesis
+- credibility: teaches something concrete enough to help the reader think or act, even when the product is never mentioned
 - grounding: makes no unsupported claim and stays inside the brief
+- claim audit: every externally checkable clause in the final version has either an exact support snippet from the closed evidence or is explicitly labeled as interpretation
+- layout: do not prefer a single compact paragraph merely because it is compact; use the preferred layout as a tie-breaker and preserve intentional line breaks when they make the turn, list, question, or consequence easier to read
 
 Selection-first rule:
 - If one option passes, copy it exactly into suggested_final_version.
 - Rewrite only when every option has a concrete defect. Make the smallest possible fix.
 - Never combine drafts or add positioning merely to make the post sound more complete.
 - The product name is optional. Shorter and clearer beats more comprehensive.
+- Positioning is a factual boundary, not a requirement to turn every post back into the same product thesis.
+- If every option repeats a saturated recent thesis that the original brief did not require, make the smallest grounded rewrite toward a different reader payoff and add "repeated_editorial_thesis" to warnings.
+- Reject or rewrite any number, threshold, timing window, benchmark, product capability, causal explanation, or universal claim absent from the closed evidence.
+- Reject a post that connects two true-sounding but distinct claims with "so", "therefore", or "that means" without evidence for the connection. A buyer researching before a sales call does not by itself establish that most contacts are out of market.
+- If the conclusion depends on "accounts moving" or "seeing the evidence", name the observable evidence or narrow the conclusion. Do not replace one vague abstraction with another.
+- Source interpretation must use language such as "suggests" or "points to." Do not convert a headline into "X did Y because...", "X instead of Y", or a universal claim about what most people do unless the evidence explicitly states it.
+- In claim_audit, copy each claim as a verbatim clause from suggested_final_version. Set support to an exact short evidence fragment, "interpretation", "evidence boundary", or "unsupported". An interpretation must visibly use "suggests", "points to", "may", "might", or "could" in the final clause. If any item is unsupported, remove or narrow it in suggested_final_version and add "unsupported_source_claim" to warnings.
 
 {avoid_section}
 
-Return compact JSON only with keys ranked_drafts, quality_notes, warnings, suggested_final_version. The final version must be a complete post no longer than {max_chars} characters."""
+Return compact JSON only with keys ranked_drafts, quality_notes, warnings, logic_audit, claim_audit, suggested_final_version. In logic_audit, assess only the suggested final version and return premise, conclusion, and bridge_status (supported, explicit_interpretation, or missing). If bridge_status is missing, fix the final version and add unsupported_logical_bridge to warnings. The final version must be a complete post no longer than {max_chars} characters."""
+
+
+def natural_layout_prompt_section(request: DraftRequest, trends: list[TrendItem]) -> str:
+    layout_name, layout_guidance = primary_layout_target(request, trends)
+    length_mode = normalize_length_mode(request.length_mode)
+    if length_mode == "standard":
+        length_guidance = (
+            "Across the three options, include at least one compact single-paragraph option and at least one "
+            "intentional multiline option using two short paragraphs or a few purposeful lines. Do not make all "
+            "three options share the same paragraph and line shape."
+        )
+    elif length_mode == "long":
+        length_guidance = (
+            "Use short paragraphs so the post does not become one dense block. Vary the paragraph shape across "
+            "the options without turning the post into a thread."
+        )
+    else:
+        length_guidance = (
+            "A short post may stay compact. Use a line break only when it creates a real turn or improves readability."
+        )
+    return (
+        "Natural Layout Variation:\n"
+        f"Preferred layout target for this request: {layout_name}: {layout_guidance}\n"
+        "Treat the target as a preference, not a reason to distort the idea. "
+        f"{length_guidance}\n"
+        "Line breaks should mark a question and answer, a short list, a turn, or a consequence. "
+        "Do not put every sentence on its own line by habit."
+    )
+
+
+def natural_trend_evidence_for_prompt(trend: TrendItem) -> str:
+    claims = _trend_json_list(trend.important_claims_json)
+    key_points = _trend_json_list(trend.key_points_json)
+    fields = [
+        f"Source title: {trend.title}",
+        f"What happened: {trend.summary}",
+        f"Why it matters: {trend.why_it_matters}",
+        f"Evidence strength: {'supports causal explanation' if trend_supports_causal_explanation(trend) else 'thin headline/snippet evidence'}",
+    ]
+    if trend.source_excerpt:
+        fields.append(f"Source excerpt: {truncate_for_prompt(trend.source_excerpt, 600)}")
+    if key_points:
+        fields.append("Saved key points: " + " | ".join(key_points[:5]))
+    if claims:
+        fields.append("Saved important claims: " + " | ".join(claims[:5]))
+    if not trend_supports_causal_explanation(trend):
+        fields.append(
+            "Evidence boundary: state only the observed source fact. Frame any added lesson as a question, "
+            "heuristic, or interpretation using 'suggests'/'points to'. Do not infer architecture, data movement, "
+            "causes, motives, or outcomes."
+        )
+    fields.append(f"Editorial direction: {trend_angle_for_generation(trend)}")
+    return "\n".join(fields)
+
+
+def trend_supports_causal_explanation(trend: TrendItem) -> bool:
+    claims = _trend_json_list(trend.important_claims_json)
+    key_points = _trend_json_list(trend.key_points_json)
+    source_text = str(trend.source_text_excerpt or "").strip()
+    return bool(claims or len(key_points) >= 2 or len(source_text) >= 240)
 
 
 def build_evaluation_prompt(
@@ -1969,6 +2238,7 @@ def build_evaluation_prompt(
     length_section = length_prompt_section(request, max_chars)
     anchor = workspace_anchor_from_active_rules(active_rules or {})
     natural_voice_section = natural_voice_prompt_section(anchor=anchor)
+    editorial_value_section = editorial_value_prompt_section(request, trends)
     human_rhythm_section = human_rhythm_prompt_section(request, trends)
     structure_section = structure_variation_prompt_section(request, trends)
     product_mention_section = product_mention_prompt_section(anchor, request=request, trends=trends)
@@ -1998,6 +2268,8 @@ Voice and review rules:
 {active_rules_section}
 
 {natural_voice_section}
+
+{editorial_value_section}
 
 {human_rhythm_section}
 
@@ -2087,6 +2359,7 @@ def build_context_snapshot(
     primary_layout = primary_layout_target(request, trends)
     primary_closing = primary_closing_target(request, trends)
     primary_rhythm = primary_human_rhythm_target(request, trends)
+    primary_editorial_value = primary_editorial_value_mode(request, trends)
     return {
         "workspace_id": bundle.workspace_id,
         "request": request.__dict__,
@@ -2115,6 +2388,19 @@ def build_context_snapshot(
             if isinstance(recent_output_context, dict)
             else {}
         ),
+        "recent_output_editorial_theme_counts": (
+            recent_output_context.get("theme_counts", {})
+            if isinstance(recent_output_context, dict)
+            else {}
+        ),
+        "primary_editorial_value_mode": {
+            "name": primary_editorial_value[0],
+            "guidance": primary_editorial_value[1],
+        },
+        "editorial_value_options": [
+            {"name": name, "guidance": guidance}
+            for name, guidance in selected_editorial_value_modes(request, trends, count=4)
+        ],
         "primary_structure_option": {
             "name": primary_structure[0],
             "guidance": primary_structure[1],
@@ -2246,6 +2532,7 @@ def natural_strategy_summary(
     patterns: list[ViralPattern],
 ) -> dict[str, object]:
     idea = str(request.angle or request.topic or "").strip()
+    reader_value_name, reader_value_guidance = primary_editorial_value_mode(request, trends)
     source_labels = ["user brief and saved workspace context"]
     source_labels.extend(f"trend:{trend.title}" for trend in trends)
     source_labels.extend(
@@ -2258,6 +2545,11 @@ def natural_strategy_summary(
         "core_point": idea,
         "intended_audience": request.audience or "the saved target audience",
         "reader_problem": "Use only what the brief and saved context establish.",
+        "reader_payoff": {
+            "mode": reader_value_name,
+            "guidance": reader_value_guidance,
+        },
+        "positioning_role": "Use positioning as a factual boundary and optional idea source, not a mandatory thesis or product mention.",
         "why_this_is_worth_posting": request.extra_context or idea,
         "concrete_detail": "Choose the single most useful concrete mechanism from the brief.",
         "source_material": source_labels,
@@ -2269,7 +2561,7 @@ def natural_strategy_summary(
         "claims_to_make": [idea] if idea else [],
         "claims_to_avoid": [],
         "forbidden_moves": ["invented evidence", "generic AI recap", "forced product pitch"],
-        "success_criteria": "Clear, specific, grounded, natural, and easy to publish without another rewrite.",
+        "success_criteria": "Clear, specific, grounded, natural, meaningfully distinct from recent posts, and useful enough to teach the reader something concrete.",
     }
 
 
@@ -2337,19 +2629,640 @@ def parse_natural_evaluation_result(raw: str, draft_options: list[str]) -> tuple
     final, notes, evaluation = parse_evaluation_result(raw, draft_options)
     warnings = evaluation.get("warnings") if isinstance(evaluation, dict) else None
     actionable_warnings = [str(value).strip() for value in warnings or [] if str(value).strip()]
+    if claim_audit_has_unsupported(evaluation.get("claim_audit") if isinstance(evaluation, dict) else None):
+        if "unsupported_source_claim" not in actionable_warnings:
+            actionable_warnings.append("unsupported_source_claim")
+        evaluation = {**evaluation, "warnings": actionable_warnings}
+    if logic_audit_has_missing_bridge(evaluation.get("logic_audit") if isinstance(evaluation, dict) else None):
+        if "unsupported_logical_bridge" not in actionable_warnings:
+            actionable_warnings.append("unsupported_logical_bridge")
+        evaluation = {**evaluation, "warnings": actionable_warnings}
     if actionable_warnings:
         return final, notes, evaluation
 
-    ranked = evaluation.get("ranked_drafts") if isinstance(evaluation, dict) else None
-    if isinstance(ranked, list):
-        for value in ranked:
-            try:
-                index = int(value) - 1
-            except (TypeError, ValueError):
-                continue
-            if 0 <= index < len(draft_options):
-                return draft_options[index], notes, evaluation
+    ranked_indexes = ranked_draft_indexes(evaluation, draft_options)
+    if ranked_indexes:
+        return draft_options[ranked_indexes[0]], notes, evaluation
     return draft_options[0], notes, evaluation
+
+
+def ranked_draft_indexes(evaluation: dict[str, object], draft_options: list[str]) -> list[int]:
+    ranked = evaluation.get("ranked_drafts") if isinstance(evaluation, dict) else None
+    if not isinstance(ranked, list):
+        return []
+    parsed: list[tuple[int, int, int]] = []
+    for position, value in enumerate(ranked):
+        rank = position + 1
+        candidate: object = value
+        if isinstance(value, dict):
+            candidate = next(
+                (
+                    value.get(key)
+                    for key in ("draft", "draft_index", "option", "option_index", "index")
+                    if value.get(key) is not None
+                ),
+                None,
+            )
+            try:
+                rank = int(value.get("rank") or rank)
+            except (TypeError, ValueError):
+                rank = position + 1
+        if isinstance(candidate, bool):
+            continue
+        if isinstance(candidate, int):
+            draft_number = candidate
+        else:
+            match = re.search(r"\b(?:draft|option)?\s*#?\s*(\d+)\b", str(candidate or ""), flags=re.I)
+            if not match:
+                continue
+            draft_number = int(match.group(1))
+        index = draft_number - 1
+        if 0 <= index < len(draft_options):
+            parsed.append((rank, position, index))
+    ordered: list[int] = []
+    for _rank, _position, index in sorted(parsed):
+        if index not in ordered:
+            ordered.append(index)
+    return ordered
+
+
+def claim_audit_has_unsupported(value: object) -> bool:
+    rows: list[object]
+    if isinstance(value, list):
+        rows = value
+    elif isinstance(value, dict):
+        rows = list(value.values())
+    else:
+        return False
+    for row in rows:
+        if isinstance(row, dict):
+            support = row.get("support")
+            if support is False or str(support or "").strip().casefold() == "unsupported":
+                return True
+        elif str(row or "").strip().casefold() == "unsupported":
+            return True
+    return False
+
+
+def logic_audit_has_missing_bridge(value: object) -> bool:
+    rows = value if isinstance(value, list) else list(value.values()) if isinstance(value, dict) else []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        status = str(row.get("bridge_status") or row.get("status") or "").strip().casefold()
+        if status in {"missing", "unsupported", "unstated", "unrelated"}:
+            return True
+    return False
+
+
+def prefer_semantically_fresh_natural_option(
+    selected_text: str,
+    draft_options: list[str],
+    evaluation: dict[str, object],
+    *,
+    request: DraftRequest,
+    recent_output_context: dict[str, object],
+) -> tuple[str, dict[str, object]]:
+    evaluation_warnings = evaluation.get("warnings") if isinstance(evaluation, dict) else None
+    if isinstance(evaluation_warnings, list) and any(str(value).strip() for value in evaluation_warnings):
+        return selected_text, evaluation
+    theme_counts = recent_output_context.get("theme_counts", {})
+    if not isinstance(theme_counts, dict):
+        return selected_text, evaluation
+    saturated = {
+        str(theme)
+        for theme, count in theme_counts.items()
+        if str(theme) and int(count or 0) >= 2
+    }
+    if not saturated:
+        return selected_text, evaluation
+
+    brief_text = " ".join(
+        str(value or "")
+        for value in [request.angle, request.extra_context, request.call_to_action]
+    )
+    explicitly_requested = set(explicitly_requested_editorial_themes(brief_text))
+    avoid_themes = saturated - explicitly_requested
+    selected_overlap = set(editorial_theme_fingerprints(selected_text)) & avoid_themes
+    if not selected_overlap:
+        return selected_text, evaluation
+
+    ranked_indexes = ranked_draft_indexes(evaluation, draft_options)
+    ranked_indexes.extend(index for index in range(len(draft_options)) if index not in ranked_indexes)
+
+    for index in ranked_indexes:
+        candidate = draft_options[index]
+        if not (set(editorial_theme_fingerprints(candidate)) & avoid_themes):
+            return candidate, {
+                **evaluation,
+                "freshness_override": {
+                    "selected_draft": index + 1,
+                    "avoided_saturated_themes": sorted(selected_overlap),
+                },
+            }
+
+    warnings = evaluation.get("warnings") if isinstance(evaluation, dict) else []
+    warning_values = [str(value) for value in warnings] if isinstance(warnings, list) else []
+    warning = "repeated_editorial_thesis: " + ", ".join(sorted(selected_overlap))
+    if warning not in warning_values:
+        warning_values.append(warning)
+    return selected_text, {**evaluation, "warnings": warning_values}
+
+
+def prefer_layout_diverse_natural_option(
+    selected_text: str,
+    draft_options: list[str],
+    evaluation: dict[str, object],
+    *,
+    request: DraftRequest,
+    trends: list[TrendItem],
+    recent_output_context: dict[str, object],
+) -> tuple[str, dict[str, object]]:
+    if normalize_length_mode(request.length_mode) != "standard" or natural_text_is_multiline(selected_text):
+        return selected_text, evaluation
+    evaluation_warnings = evaluation.get("warnings") if isinstance(evaluation, dict) else None
+    if isinstance(evaluation_warnings, list) and any(str(value).strip() for value in evaluation_warnings):
+        return selected_text, evaluation
+
+    preferred_layout = primary_layout_target(request, trends)[0]
+    compact_count = recent_compact_layout_count(recent_output_context)
+    if preferred_layout not in NATURAL_MULTILINE_LAYOUT_TARGETS and compact_count < 3:
+        return selected_text, evaluation
+
+    ranked_indexes = ranked_draft_indexes(evaluation, draft_options)
+    ranked_indexes.extend(index for index in range(len(draft_options)) if index not in ranked_indexes)
+    for index in ranked_indexes:
+        candidate = draft_options[index]
+        if not natural_text_is_multiline(candidate):
+            continue
+        if natural_voice_violations(candidate, request):
+            continue
+        return candidate, {
+            **evaluation,
+            "layout_override": {
+                "selected_draft": index + 1,
+                "preferred_layout": preferred_layout,
+                "recent_compact_layout_count": compact_count,
+            },
+        }
+    return selected_text, evaluation
+
+
+def natural_text_is_multiline(text: str) -> bool:
+    return len([line for line in str(text or "").splitlines() if line.strip()]) > 1
+
+
+def recent_compact_layout_count(recent_output_context: dict[str, object]) -> int:
+    rows = recent_output_context.get("rows", []) if isinstance(recent_output_context, dict) else []
+    row_count = sum(
+        1
+        for row in rows
+        if isinstance(row, dict) and str(row.get("layout") or "").startswith("p1|l1|")
+    )
+    batch_summary = recent_output_context.get("batch_summary", {}) if isinstance(recent_output_context, dict) else {}
+    layout_counts = batch_summary.get("layout_counts", {}) if isinstance(batch_summary, dict) else {}
+    batch_count = 0
+    if isinstance(layout_counts, dict):
+        for layout, count in layout_counts.items():
+            if str(layout).startswith("p1|l1|"):
+                try:
+                    batch_count += int(count or 0)
+                except (TypeError, ValueError):
+                    continue
+    return max(row_count, batch_count)
+
+
+def prefer_coherent_natural_option(
+    selected_text: str,
+    draft_options: list[str],
+    evaluation: dict[str, object],
+    *,
+    request: DraftRequest,
+    bundle: ContextBundle,
+    trends: list[TrendItem],
+) -> tuple[str, dict[str, object]]:
+    evidence_text = grounding_evidence_text(request, bundle, trends)
+    selected_violations = natural_coherence_violations(selected_text, evidence_text=evidence_text)
+    if not selected_violations:
+        return selected_text, evaluation
+
+    source_evidence_text = trend_grounding_evidence_text(trends)
+    ranked_indexes = ranked_draft_indexes(evaluation, draft_options)
+    ranked_indexes.extend(index for index in range(len(draft_options)) if index not in ranked_indexes)
+    for index in ranked_indexes:
+        candidate = draft_options[index]
+        if natural_coherence_violations(candidate, evidence_text=evidence_text):
+            continue
+        if unsupported_quantified_claims(candidate, evidence_text):
+            continue
+        if trends and unsupported_source_language(candidate, source_evidence_text):
+            continue
+        return candidate, {
+            **evaluation,
+            "coherence_override": {
+                "selected_draft": index + 1,
+                "removed_violations": selected_violations,
+            },
+            "coherence_repair_required": [],
+        }
+    return selected_text, {
+        **evaluation,
+        "coherence_repair_required": selected_violations,
+    }
+
+
+def natural_coherence_violations(text: str, *, evidence_text: str) -> list[str]:
+    cleaned = " ".join(str(text or "").replace("’", "'").split())
+    evidence = " ".join(str(evidence_text or "").replace("’", "'").split())
+    violations: list[str] = []
+    if re.search(r"\bmost\b", cleaned, flags=re.I) and not re.search(r"\bmost\b", evidence, flags=re.I):
+        violations.append("remove or support the broad 'most' claim")
+
+    vague_movement = re.search(
+        r"\b(?:which\s+)?(?:accounts?|prospects?|buyers?|companies?)\s+(?:are\s+)?(?:moving|in motion|heating up)\b",
+        cleaned,
+        flags=re.I,
+    )
+    concrete_evidence = re.search(
+        r"\b(?:funding|funded|hiring|job postings?|leadership (?:hire|change)|new (?:stakeholder|champion)|"
+        r"confirmed timeline|procurement|security review|budget|contract|trial|demo|pricing|rfp|renewal|"
+        r"expansion|acquisition|merger|website visit|vendor evaluation|documented blocker)\b",
+        cleaned,
+        flags=re.I,
+    )
+    if vague_movement and not concrete_evidence:
+        violations.append("define account movement with observable evidence")
+    return violations
+
+
+def repair_natural_coherence_if_needed(
+    provider: DraftProvider,
+    text: str,
+    evaluation: dict[str, object],
+    *,
+    request: DraftRequest,
+    bundle: ContextBundle,
+    trends: list[TrendItem],
+    max_chars: int,
+    model: str | None,
+) -> tuple[str, dict[str, object]]:
+    reasons = evaluation.get("coherence_repair_required") if isinstance(evaluation, dict) else None
+    reason_values = [str(value).strip() for value in reasons or [] if str(value).strip()]
+    if not reason_values:
+        return text, evaluation
+
+    evidence_text = grounding_evidence_text(request, bundle, trends)
+    repaired_raw = generate_with_provider(
+        provider,
+        build_natural_coherence_repair_prompt(
+            text,
+            evidence_text=evidence_text,
+            reasons=reason_values,
+            max_chars=max_chars,
+        ),
+        variants=1,
+        model=model,
+    )
+    repaired_options = clean_draft_options(
+        provider,
+        repaired_raw,
+        max_chars=max_chars,
+        model=model,
+        repair_context="logically coherent X post",
+    )
+    repaired = repaired_options[0] if repaired_options else text
+    remaining = natural_coherence_violations(repaired, evidence_text=evidence_text)
+    remaining.extend(unsupported_quantified_claims(repaired, evidence_text))
+    if trends:
+        remaining.extend(unsupported_source_language(repaired, trend_grounding_evidence_text(trends)))
+    remaining = dedupe_preserve_order(remaining)
+    if repaired == text or remaining:
+        warnings = evaluation.get("warnings") if isinstance(evaluation, dict) else []
+        warning_values = [str(value) for value in warnings] if isinstance(warnings, list) else []
+        warning = "clarity_gap: " + ", ".join(remaining or reason_values)
+        if warning not in warning_values:
+            warning_values.append(warning)
+        return text, {**evaluation, "warnings": warning_values}
+
+    warnings = evaluation.get("warnings") if isinstance(evaluation, dict) else []
+    warning_values = [
+        str(value)
+        for value in warnings
+        if str(value).strip() and str(value).strip() != "unsupported_logical_bridge"
+    ] if isinstance(warnings, list) else []
+    return repaired, {
+        **evaluation,
+        "warnings": warning_values,
+        "coherence_repair": {
+            "reasons": reason_values,
+            "source_only": True,
+        },
+        "coherence_repair_required": [],
+    }
+
+
+def build_natural_coherence_repair_prompt(
+    text: str,
+    *,
+    evidence_text: str,
+    reasons: list[str],
+    max_chars: int,
+) -> str:
+    return f"""Rewrite this X post so the argument is immediately understandable.
+
+Current post:
+{text}
+
+Allowed evidence and user-supplied premises:
+{evidence_text or "- No additional evidence supplied."}
+
+Detected clarity problems:
+{json.dumps(reasons)}
+
+Rules:
+- Keep one argument: premise -> what it means -> useful takeaway.
+- Remove any conclusion that requires an unstated premise. Do not connect separate claims with "so", "therefore", or "that means" unless the evidence supports the connection.
+- Replace vague account movement, intent, timing, context, or evidence language with an observable event or decision only when supplied above. Otherwise narrow the conclusion.
+- Do not add anecdotes, numbers, examples, product claims, or causal claims.
+- Keep the post natural, complete, and no longer than {max_chars} characters.
+
+Return only the repaired post."""
+
+
+def prefer_grounded_natural_option(
+    selected_text: str,
+    draft_options: list[str],
+    evaluation: dict[str, object],
+    *,
+    request: DraftRequest,
+    bundle: ContextBundle,
+    trends: list[TrendItem],
+) -> tuple[str, dict[str, object]]:
+    evidence_text = grounding_evidence_text(request, bundle, trends)
+    source_evidence_text = trend_grounding_evidence_text(trends)
+    selected_unsupported = unsupported_quantified_claims(selected_text, evidence_text)
+    selected_source_language = unsupported_source_language(selected_text, source_evidence_text) if trends else []
+    selected_claim_audit = claim_audit_violations(
+        evaluation.get("claim_audit") if isinstance(evaluation, dict) else None,
+        final_text=selected_text,
+        source_evidence_text=source_evidence_text,
+    ) if trends else []
+    if not selected_unsupported and not selected_source_language and not selected_claim_audit:
+        return selected_text, evaluation
+
+    ranked_indexes = ranked_draft_indexes(evaluation, draft_options)
+    ranked_indexes.extend(index for index in range(len(draft_options)) if index not in ranked_indexes)
+    for index in ranked_indexes:
+        candidate = draft_options[index]
+        if selected_claim_audit and " ".join(candidate.split()) == " ".join(selected_text.split()):
+            continue
+        candidate_unsupported = unsupported_quantified_claims(candidate, evidence_text)
+        candidate_source_language = unsupported_source_language(candidate, source_evidence_text) if trends else []
+        if not candidate_unsupported and not candidate_source_language:
+            updated_evaluation = {
+                **evaluation,
+                "grounding_override": {
+                    "selected_draft": index + 1,
+                    "removed_unsupported_quantified_claims": selected_unsupported,
+                    "removed_unsupported_source_language": selected_source_language,
+                    "removed_claim_audit_violations": selected_claim_audit,
+                },
+            }
+            if selected_source_language or selected_claim_audit:
+                updated_evaluation["grounding_repair_required"] = [
+                    *selected_source_language,
+                    *selected_claim_audit,
+                ]
+            return candidate, updated_evaluation
+
+    warnings = evaluation.get("warnings") if isinstance(evaluation, dict) else []
+    warning_values = [str(value) for value in warnings] if isinstance(warnings, list) else []
+    warning_parts = [*selected_unsupported, *selected_source_language, *selected_claim_audit]
+    warning = "unsupported_source_claim: " + ", ".join(warning_parts)
+    if warning not in warning_values:
+        warning_values.append(warning)
+    updated_evaluation = {**evaluation, "warnings": warning_values}
+    if selected_source_language or selected_claim_audit:
+        updated_evaluation["grounding_repair_required"] = [
+            *selected_source_language,
+            *selected_claim_audit,
+        ]
+    return selected_text, updated_evaluation
+
+
+def repair_natural_grounding_if_needed(
+    provider: DraftProvider,
+    text: str,
+    evaluation: dict[str, object],
+    *,
+    request: DraftRequest,
+    bundle: ContextBundle,
+    trends: list[TrendItem],
+    max_chars: int,
+    model: str | None,
+) -> tuple[str, dict[str, object]]:
+    reasons = evaluation.get("grounding_repair_required") if isinstance(evaluation, dict) else None
+    reason_values = [str(value).strip() for value in reasons or [] if str(value).strip()]
+    if not reason_values or not trends:
+        return text, evaluation
+    source_evidence = trend_grounding_evidence_text(trends)
+    repair_input = text
+    repair_reasons = list(reason_values)
+    repaired = text
+    numeric_issues: list[str] = []
+    language_issues: list[str] = []
+    attempts = 0
+    for attempts in range(1, 3):
+        repair_raw = generate_with_provider(
+            provider,
+            build_natural_grounding_repair_prompt(
+                repair_input,
+                source_evidence=source_evidence,
+                reasons=repair_reasons,
+                max_chars=max_chars,
+            ),
+            variants=1,
+            model=model,
+        )
+        repaired_options = clean_draft_options(
+            provider,
+            repair_raw,
+            max_chars=max_chars,
+            model=model,
+            repair_context="source-grounded X post",
+        )
+        if not repaired_options:
+            break
+        repaired = repaired_options[0]
+        numeric_issues = unsupported_quantified_claims(
+            repaired,
+            grounding_evidence_text(request, bundle, trends),
+        )
+        language_issues = unsupported_source_language(repaired, source_evidence)
+        if not numeric_issues and not language_issues:
+            break
+        repair_input = repaired
+        repair_reasons = [*numeric_issues, *language_issues]
+    if numeric_issues or language_issues or repaired == text:
+        warnings = evaluation.get("warnings") if isinstance(evaluation, dict) else []
+        warning_values = [str(value) for value in warnings] if isinstance(warnings, list) else []
+        warning = "unsupported_source_claim: " + ", ".join([*numeric_issues, *language_issues] or reason_values)
+        if warning not in warning_values:
+            warning_values.append(warning)
+        return text, {**evaluation, "warnings": warning_values}
+
+    warnings = evaluation.get("warnings") if isinstance(evaluation, dict) else []
+    warning_values = [
+        str(value)
+        for value in warnings
+        if str(value).strip() and not str(value).startswith("unsupported_source_claim")
+    ] if isinstance(warnings, list) else []
+    return repaired, {
+        **evaluation,
+        "warnings": warning_values,
+        "grounding_repair": {
+            "reasons": reason_values,
+            "source_only": True,
+            "attempts": attempts,
+        },
+        "grounding_repair_required": [],
+    }
+
+
+def build_natural_grounding_repair_prompt(
+    text: str,
+    *,
+    source_evidence: str,
+    reasons: list[str],
+    max_chars: int,
+) -> str:
+    return f"""Rewrite this X post so every factual and causal statement stays inside the closed source evidence.
+
+Current post:
+{text}
+
+Closed source evidence:
+{source_evidence}
+
+Detected grounding problems:
+{json.dumps(reasons)}
+
+Rules:
+- State only facts literally supported by the source.
+- Do not infer architecture, data movement, motives, causes, workflow completeness, qualification, or outcomes.
+- Do not invent session, screen, timing, or setting details such as "all in one sitting", "one session", or "on one screen" unless those words appear in the source.
+- Do not use "proves", "because", "instead of", "rather than", "most people", or other causal/universal wording absent from the source.
+- A useful added lesson must be visibly framed as a question, heuristic, or interpretation using "suggests", "points to", "may", "might", or "could".
+- If the evidence is thin, say what it establishes and what it does not establish.
+- Keep the post natural, useful, complete, and no longer than {max_chars} characters.
+
+Return only the repaired post."""
+
+
+def unsupported_source_language(text: str, evidence_text: str) -> list[str]:
+    """Catch high-confidence causal/universal phrasing absent from the closed source."""
+
+    evidence = " ".join(str(evidence_text or "").casefold().replace("’", "'").split())
+    patterns = [
+        ("because", r"\bbecause\b"),
+        ("instead of/rather than", r"\b(?:instead of|rather than)\b"),
+        ("proves", r"(?<!not )(?<!n't )\bproves?\b"),
+        (
+            "most-group universal",
+            r"\bmost\s+(?:(?:of\s+)?(?:your|the)\s+)?(?:people|teams?|vendors?|companies?|buyers?|sellers?|leaders?|agents?|platforms?|accounts?|prospects?|leads?|contacts?|lists?)\b",
+        ),
+        ("absolute universal", r"\b(?:always|never)\b"),
+        ("causal outcome", r"\b(?:caused?|leads? to|led to|results? in|resulted in)\b"),
+        ("unsupported impossibility", r"\b(?:cannot|can't|does neither)\b"),
+        ("invented session detail", r"\b(?:all|everything)\s+(?:inside|in)\s+(?:one|a single)\s+(?:sitting|session|screen)\b|\ball in one sitting\b"),
+        ("unsupported direct integration", r"\b(?:straight|directly)\s+into\b|\bbuilt\b.{0,40}\binto\b|\bruns?\b.{0,40}\b(?:inside|on)\b"),
+    ]
+    violations: list[str] = []
+    for label, pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.I):
+            phrase = " ".join(match.group(0).casefold().replace("’", "'").split())
+            if phrase not in evidence:
+                violations.append(label)
+                break
+    return violations
+
+
+def claim_audit_violations(
+    value: object,
+    *,
+    final_text: str,
+    source_evidence_text: str,
+) -> list[str]:
+    rows = value if isinstance(value, list) else list(value.values()) if isinstance(value, dict) else []
+    if not rows:
+        return []
+    normalized_final = " ".join(str(final_text or "").casefold().replace("’", "'").split())
+    normalized_source = " ".join(str(source_evidence_text or "").casefold().replace("’", "'").split())
+    violations: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        claim = " ".join(
+            str(row.get("claim") or row.get("clause") or "").casefold().replace("’", "'").split()
+        )
+        support = " ".join(str(row.get("support") or "").casefold().replace("’", "'").split())
+        if claim and claim not in normalized_final:
+            violations.append("claim audit does not quote final text")
+        if support == "unsupported" or not support:
+            violations.append("claim audit marks unsupported support")
+            continue
+        if support.startswith("interpretation"):
+            if not re.search(r"\b(?:suggests?|points? to|may|might|could)\b", claim):
+                violations.append("interpretation is not visibly hedged")
+            continue
+        if support.startswith("evidence boundary") or support.startswith("general observation"):
+            continue
+        if support not in normalized_source:
+            violations.append("claim audit support is not an exact source fragment")
+    return list(dict.fromkeys(violations))
+
+
+def trend_grounding_evidence_text(trends: list[TrendItem]) -> str:
+    parts: list[str] = []
+    for trend in trends:
+        parts.extend(
+            [
+                trend.title,
+                trend.summary,
+                trend.why_it_matters,
+                trend.source_excerpt or "",
+                trend.source_text_excerpt or "",
+                trend.key_points_json or "",
+                trend.important_claims_json or "",
+            ]
+        )
+    return "\n".join(part for part in parts if part)
+
+
+def grounding_evidence_text(
+    request: DraftRequest,
+    bundle: ContextBundle,
+    trends: list[TrendItem],
+) -> str:
+    parts = [
+        request.angle or "",
+        request.extra_context or "",
+        request.call_to_action or "",
+        *(section.content for section in bundle.positioning_sections),
+    ]
+    for trend in trends:
+        parts.extend(
+            [
+                trend.title,
+                trend.summary,
+                trend.why_it_matters,
+                trend.source_excerpt or "",
+                trend.source_text_excerpt or "",
+                trend.key_points_json or "",
+                trend.important_claims_json or "",
+            ]
+        )
+    return "\n".join(part for part in parts if part)
 
 
 STALE_REPAIRED_WARNING_LABELS = {
@@ -2386,6 +3299,10 @@ def clean_evaluation_warnings_after_final_text(
         recent_output_rows=recent_output_rows,
         recent_output_batch_summary=recent_output_batch_summary,
     )
+    coherence_violations = natural_coherence_violations(
+        text,
+        evidence_text=grounding_evidence_text(request, bundle, trends),
+    )
     cleaned: list[object] = []
     for warning in warnings:
         normalized = " ".join(str(warning or "").split())
@@ -2393,6 +3310,11 @@ def clean_evaluation_warnings_after_final_text(
         if not normalized:
             continue
         if repaired_successfully and normalized in STALE_REPAIRED_WARNING_LABELS:
+            continue
+        if (
+            ("unsupported_logical_bridge" in lowered or "clarity_gap" in lowered)
+            and not coherence_violations
+        ):
             continue
         if (
             anchor
@@ -3332,7 +4254,21 @@ def draft_rule_violations(
         violations.append("return a publishable post, not a refusal, caveat, or request for more details")
     anchor = workspace_anchor_name(bundle, active_rules)
     violations.extend(natural_voice_violations(text, request))
-    violations.extend(recent_output_repetition_violations(text, recent_output_rows, recent_output_batch_summary))
+    violations.extend(
+        f"remove unsupported quantified claim: {claim}"
+        for claim in unsupported_quantified_claims(
+            text,
+            grounding_evidence_text(request, bundle, trends),
+        )
+    )
+    violations.extend(
+        recent_output_repetition_violations(
+            text,
+            recent_output_rows,
+            recent_output_batch_summary,
+            request=request,
+        )
+    )
     violations.extend(product_name_usage_violations(text, request, trends, anchor=anchor))
     if (
         anchor
@@ -3415,6 +4351,8 @@ def recent_output_repetition_violations(
     text: str,
     recent_output_rows: list[dict[str, str]] | None,
     recent_output_batch_summary: dict[str, object] | None = None,
+    *,
+    request: DraftRequest | None = None,
 ) -> list[str]:
     cleaned = clean_recent_output_text(text)
     first = normalize_recent_output_fragment(first_sentence_or_line(cleaned))
@@ -3424,6 +4362,7 @@ def recent_output_repetition_violations(
     leadpoet_phrase_pattern = leadpoet_phrase_pattern_fingerprint(first_sentence_with_word(cleaned, "Leadpoet"))
     leadpoet_sentence_template = leadpoet_sentence_template_fingerprint(first_sentence_with_word(cleaned, "Leadpoet"))
     layout = recent_output_layout(cleaned)
+    editorial_themes = set(editorial_theme_fingerprints(cleaned))
     violations: list[str] = []
     for row in recent_output_rows or []:
         row_first = normalize_recent_output_fragment(row.get("first_line", ""))
@@ -3457,6 +4396,25 @@ def recent_output_repetition_violations(
         layout_counts = recent_output_batch_summary.get("layout_counts", {})
         if isinstance(layout_counts, dict) and int(layout_counts.get(layout, 0) or 0) >= 3:
             violations.append(f"change saturated batch layout: {layout}")
+    requested_themes = set(
+        explicitly_requested_editorial_themes(
+            " ".join(
+                str(value or "")
+                for value in [
+                    request.angle if request else "",
+                    request.extra_context if request else "",
+                    request.call_to_action if request else "",
+                ]
+            )
+        )
+    )
+    theme_counts = recent_output_editorial_theme_counts(
+        recent_output_rows or [],
+        recent_output_batch_summary,
+    )
+    for theme in sorted(editorial_themes - requested_themes):
+        if theme_counts.get(theme, 0) >= 2:
+            violations.append(f"change saturated recent editorial thesis: {theme}")
     return dedupe_preserve_order(violations)
 
 
@@ -4146,6 +5104,14 @@ def _format_trend(trend: TrendItem) -> str:
 GENERIC_TREND_ANGLE_TEXTS = {
     "tie the signal back to buyer timing, proprietary context, and why generic sales automation is not enough.",
     "use the source as market proof, then make the angle specific to the account-timing question it raises before copy or outreach.",
+    (
+        "use the source to teach one concrete gtm mechanism, tradeoff, or decision rule. "
+        "connect it to leadpoet only when that connection materially improves the reader's understanding."
+    ),
+    (
+        "use this source to explain one concrete gtm mechanism, tradeoff, or evaluation question. "
+        "keep the post product-free unless leadpoet's saved context materially sharpens the lesson."
+    ),
 }
 
 GENERIC_TREND_PROMPT_LINE_TEXTS = {
@@ -4153,6 +5119,9 @@ GENERIC_TREND_PROMPT_LINE_TEXTS = {
     "lead generation is becoming a timing problem, not just a volume problem.",
     "the sales ai debate is really a context debate.",
     "the ai trend that matters is the one that changes buyer behavior.",
+    "a useful lead generation take should change what an operator does next.",
+    "the useful sales ai question is what changed in the actual workflow.",
+    "the useful ai signal is the concrete behavior, cost, or constraint that changed.",
 }
 
 GENERIC_TREND_PROMPT_LINE_PATTERNS = [
@@ -4191,9 +5160,17 @@ def trend_specific_generation_angle(trend: TrendItem) -> str:
     title = " ".join(str(trend.title or "").split())
     topic = " ".join(str(trend.topic or "").split())
     proof = title or topic or "this source"
+    digest = hashlib.sha256(f"trend-editorial-value|{trend.id}|{proof}".encode("utf-8")).hexdigest()
+    supported_modes = [
+        mode
+        for mode in EDITORIAL_VALUE_MODES
+        if trend_supports_causal_explanation(trend) or mode[0] != "mechanism explainer"
+    ]
+    value_name, value_guidance = supported_modes[int(digest[:8], 16) % len(supported_modes)]
+    article = "an" if value_name[:1].lower() in {"a", "e", "i", "o", "u"} else "a"
     return (
-        f"Use {proof} as market proof; make the post about the specific account-timing "
-        "question it raises before copy, outreach, or account selection."
+        f"Use {proof} as source evidence for {article} {value_name}: {value_guidance} "
+        "Stay with the source-specific lesson and do not force a product, buyer-timing, or account-context conclusion."
     )
 
 

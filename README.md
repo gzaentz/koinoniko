@@ -338,6 +338,8 @@ Then open `Account -> Model Routing` and set:
 
 Normal Create Post, CLI generation, and Autopilot planning use a two-call natural pipeline: natural writer -> evaluator. The writer gets the original brief, authored examples, saved facts, selected sources, and evidence limits without the legacy structure/rhythm/product-placement matrices. The evaluator ranks the options and preserves a passing winner verbatim; it rewrites only when every option has a concrete defect. Strategist routing remains available for Topic Scout and the legacy naturalness-audit pipeline.
 
+For standard-length posts, the natural writer produces both compact and intentionally multiline options. A rotating layout preference and recent-output saturation check keep the selected posts from collapsing into the same single-paragraph shape, while line breaks still need to mark a real turn, list, question, or consequence.
+
 Role models are optional. If a role is blank, it falls back to the default model. If no Account model is saved, env fallbacks such as `SOCIAL_BRAIN_DEFAULT_MODEL` or legacy `OPENROUTER_MODEL` are used.
 
 Example OpenRouter model IDs:
@@ -844,14 +846,25 @@ evidence boundary. When no posts have been explicitly marked as Voice Examples, 
 automatically fills the calibration set with the most relevant high-performing authored
 posts. Explicit Voice Examples always take precedence.
 
+Normal generation separates voice from editorial substance. Each request receives a rotating
+reader-payoff assignment such as a mechanism explanation, diagnostic, decision rule, practical
+playbook, evidence boundary, or buyer question. Positioning remains available as a factual
+boundary and idea library, but it is not required in every post. In particular, the recurring
+"copy is easy; upstream targeting/context is hard" argument is treated as one thesis rather
+than the default destination for unrelated topics.
+
 The evaluator selects before editing. A passing writer option is saved verbatim. It only
 rewrites when every option has a concrete factual, clarity, avoid-phrase, or length defect.
+For source-backed posts, claim-audit receipts are checked against the literal source text;
+unsupported causal language triggers a bounded source-only repair and local revalidation.
 The detailed structure/rhythm/product-placement matrix and automatic style-repair loop remain
 available to the legacy naturalness audit, but they no longer shape normal or Autopilot copy.
 Recent queued and published posts, including cross-topic queue context after same-topic
 matches, add anti-sameness context so new drafts avoid repeating their openings, closers,
-layouts, and Leadpoet grammar fingerprints. Newer queue items are prioritized so fresh batch
-outputs guide the next draft. Final drafts are also repaired if they exactly repeat a
+layouts, Leadpoet grammar fingerprints, and underlying editorial themes. Newer queue items are
+prioritized so fresh batch outputs guide the next draft. When a recent thesis is saturated and
+the brief did not explicitly request it, the natural pipeline prefers the highest-ranked fresh
+draft option. Final legacy-audit drafts are also repaired if they exactly repeat a
 recent opener or closer, repeat a Leadpoet sentence, or reuse a recent Leadpoet grammar fingerprint.
 During batch audits, the generator also summarizes all prior batch output grammar and
 layout, then treats any Leadpoet grammar or layout fingerprint used 3+ times as saturated.
@@ -862,6 +875,18 @@ The user only reviews the final queued post, not the internal brief.
 ## Weekly Content Queue
 
 The web planner defaults to `Autopilot: choose topics and angles`. With Autopilot on, Koinoniko refreshes the Topics feed, selects the highest-priority unused ideas, carries any referenced trends into generation, and creates the scheduled week in `needs_review`. The user can still set post count, cadence, length, trends/pattern use, or an optional instruction. Turn Autopilot off to use a manual topic mix.
+
+Topic Scout builds an editorial portfolio rather than a list of paraphrases: at least half of
+the ideas must be useful without a product mention, reader-payoff modes are mixed across the
+set, the combined signals/timing/context family has a portfolio-wide cap, and repeated core
+theses are capped before suggestions are saved. It samples substantive authored posts across
+multiple expertise lanes instead of relying only on the top-performing examples. Source-backed
+ideas retain exact evidence receipts and an observed-versus-interpretation boundary; rejected
+candidates trigger replacement passes rather than silently shrinking the requested topic set.
+The chosen reader-payoff mode is persisted with the topic and carried into weekly generation.
+Trend Scout likewise
+extracts a source-specific mechanism, tradeoff, diagnostic, or evidence boundary instead of
+forcing every external signal back to buyer timing or account context.
 
 The protected `autopilot-weekly` task provides the same low-touch workflow for Railway Cron. It is idempotent for a calendar week: if non-skipped queue items already exist in that week, it returns without creating duplicates. It never approves or publishes posts.
 
