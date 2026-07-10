@@ -169,13 +169,55 @@ class LeadMagnetWebTest(unittest.TestCase):
         self.assertEqual(payload["run"]["sources_qualified"], 1)
         self.assertTrue(any("deterministic research continued" in warning for warning in payload["warnings"]))
 
+    def test_research_backed_suggestion_prefills_complete_grounded_brief(self):
+        with patch("leadpoet_social_brain.web.app.load_configured_provider", return_value=None):
+            status, research = self.request(
+                "POST",
+                "/api/lead-magnets/research",
+                {"window_days": 30, "candidates": [candidate()]},
+            )
+        self.assertEqual(status, 200)
+
+        status, payload = self.request("GET", "/api/lead-magnets/suggestions?limit=3")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(payload["items"]), 3)
+        suggestion = payload["items"][0]
+        self.assertTrue(suggestion["recommended"])
+        self.assertEqual(suggestion["research_run_id"], research["run"]["id"])
+        self.assertEqual(suggestion["source_ids"], [research["sources"][0]["id"]])
+        self.assertTrue(suggestion["title"])
+        self.assertTrue(suggestion["audience"])
+        self.assertTrue(suggestion["sales_outcome"])
+        self.assertTrue(suggestion["instruction"])
+
+        request = {
+            key: suggestion[key]
+            for key in [
+                "title",
+                "format",
+                "audience",
+                "sales_outcome",
+                "depth",
+                "product_integration",
+                "cta",
+                "instruction",
+                "source_ids",
+                "research_run_id",
+                "evidence_summary",
+            ]
+        }
+        with patch("leadpoet_social_brain.web.app.load_configured_provider", return_value=FakeProvider()):
+            status, created = self.request("POST", "/api/lead-magnets", request)
+        self.assertEqual(status, 200)
+        self.assertEqual(created["item"]["source_ids"], suggestion["source_ids"])
+        self.assertEqual(created["item"]["research_run_id"], suggestion["research_run_id"])
+        self.assertEqual(created["item"]["generation_brief"]["audience"], suggestion["audience"])
+
     def test_autopilot_is_idempotent_for_fourteen_day_period(self):
         payload = {
             "now": "2026-07-06T12:00:00+00:00",
             "candidates": [candidate()],
             "window_days": 30,
-            "audience": "sales teams",
-            "sales_outcome": "improve prospecting research",
         }
         with patch("leadpoet_social_brain.web.app.load_configured_provider", return_value=FakeProvider()):
             first_status, first = self.request("POST", "/tasks/autopilot-lead-magnet", payload)
@@ -183,6 +225,9 @@ class LeadMagnetWebTest(unittest.TestCase):
         self.assertEqual(first_status, 200)
         self.assertFalse(first["skipped"])
         self.assertEqual(first["status"], "needs_review")
+        self.assertTrue(first["suggestion_id"])
+        self.assertTrue(first["suggestion_title"])
+        self.assertNotEqual(first["item"]["generation_brief"]["audience"], "sales and GTM operators")
         self.assertEqual(second_status, 200)
         self.assertTrue(second["skipped"])
         self.assertEqual(second["created"], 1)
@@ -205,12 +250,15 @@ class LeadMagnetWebTest(unittest.TestCase):
         self.assertNotIn("Turn recent high-performing sales and tech ideas", html)
         self.assertIn('id="researchLeadMagnetsButton"', html)
         self.assertIn('id="leadMagnetCreateModal"', html)
+        self.assertIn('id="leadMagnetSuggestionList"', html)
         self.assertIn('id="approveLeadMagnetButton"', html)
         self.assertIn('id="publishLeadMagnetButton"', html)
         self.assertIn('api("/api/lead-magnets/research"', javascript)
+        self.assertIn('api("/api/lead-magnets/suggestions?limit=3"', javascript)
         self.assertIn('/api/lead-magnets/${encodeURIComponent(id)}/${action}', javascript)
         self.assertIn("observed_metrics", javascript)
         self.assertIn(".lead-magnet-evidence-card", styles)
+        self.assertIn(".lead-magnet-suggestion-card", styles)
         self.assertIn(".lead-magnet-markdown", styles)
 
 

@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260710-background-post-1">
+    <link rel="stylesheet" href="/static/styles.css?v=20260710-lead-magnet-autopilot-1">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -734,7 +734,7 @@
 
     <section class="modal hidden" id="leadMagnetCreateModal" aria-hidden="true">
       <div class="modal-backdrop" data-close-modal="leadMagnetCreateModal"></div>
-      <div class="modal-card">
+      <div class="modal-card wide lead-magnet-create-card">
         <div class="modal-header">
           <div>
             <span class="eyebrow">New artifact</span>
@@ -742,48 +742,62 @@
           </div>
           <button class="icon-button" data-close-modal="leadMagnetCreateModal" aria-label="Close">x</button>
         </div>
-        <p class="muted">Choose a direction or leave the title open so Koinoniko can shape the strongest resource from recent evidence.</p>
-        <div class="form-grid">
-          <label class="full-span">Working title
-            <input id="leadMagnetTitle" placeholder="Optional — let research suggest the title">
-          </label>
-          <label>Format
-            <select id="leadMagnetFormat">
-              <option value="prompt_library">Notion prompt library</option>
-              <option value="playbook">Sales playbook</option>
-              <option value="template_pack">Template pack / checklist</option>
-              <option value="scorecard">Scorecard / diagnostic</option>
-            </select>
-          </label>
-          <label>Audience
-            <input id="leadMagnetAudience" placeholder="Sales leaders, RevOps, founders...">
-          </label>
-          <label>Depth
-            <select id="leadMagnetDepth">
-              <option value="standard">Standard</option>
-              <option value="quick">Quick win</option>
-              <option value="deep">Deep resource</option>
-            </select>
-          </label>
-          <label>Call to action
-            <input id="leadMagnetCta" placeholder="Optional next step">
-          </label>
-          <label class="full-span">Sales outcome
-            <textarea id="leadMagnetSalesOutcome" rows="3" placeholder="Example: help teams turn account signals into a prioritized prospecting workflow."></textarea>
-          </label>
-          <label class="full-span">Leadpoet integration
-            <select id="leadMagnetProductIntegration">
-              <option value="light">Light — one useful product touchpoint</option>
-              <option value="embedded" selected>Embedded — Leadpoet supports a core workflow step</option>
-              <option value="strong">Strong — the resource is built around a Leadpoet workflow</option>
-            </select>
-          </label>
-          <label class="full-span">Optional instructions
-            <textarea id="leadMagnetInstructions" rows="4" placeholder="Include preferred sections, examples, constraints, or how Leadpoet should appear."></textarea>
-          </label>
-        </div>
+        <p class="muted">Koinoniko ranked these directions from qualified sources and current trends. The strongest option is selected and ready to generate.</p>
+        <section class="lead-magnet-suggestion-panel" aria-labelledby="leadMagnetSuggestionHeading">
+          <div class="lead-magnet-suggestion-heading">
+            <div>
+              <span class="eyebrow">Research-backed directions</span>
+              <h3 id="leadMagnetSuggestionHeading">Choose one, or use the recommendation</h3>
+            </div>
+            <span class="lead-magnet-autopilot-note">Autopilot uses the top direction</span>
+          </div>
+          <div class="lead-magnet-suggestion-list" id="leadMagnetSuggestionList" aria-live="polite"></div>
+          <p class="lead-magnet-suggestion-status" id="leadMagnetSuggestionStatus"></p>
+        </section>
+        <details class="lead-magnet-custom-details" id="leadMagnetCustomDetails">
+          <summary>Review or adjust the selected direction</summary>
+          <div class="form-grid">
+            <label class="full-span">Working title
+              <input id="leadMagnetTitle" placeholder="Optional — let research suggest the title">
+            </label>
+            <label>Format
+              <select id="leadMagnetFormat">
+                <option value="prompt_library">Notion prompt library</option>
+                <option value="playbook">Sales playbook</option>
+                <option value="template_pack">Template pack / checklist</option>
+                <option value="scorecard">Scorecard / diagnostic</option>
+              </select>
+            </label>
+            <label>Audience
+              <input id="leadMagnetAudience" placeholder="Sales leaders, RevOps, founders...">
+            </label>
+            <label>Depth
+              <select id="leadMagnetDepth">
+                <option value="standard">Standard</option>
+                <option value="quick">Quick win</option>
+                <option value="deep">Deep resource</option>
+              </select>
+            </label>
+            <label>Call to action
+              <input id="leadMagnetCta" placeholder="Optional next step">
+            </label>
+            <label class="full-span">Sales outcome
+              <textarea id="leadMagnetSalesOutcome" rows="3" placeholder="Example: help teams turn account signals into a prioritized prospecting workflow."></textarea>
+            </label>
+            <label class="full-span">Leadpoet integration
+              <select id="leadMagnetProductIntegration">
+                <option value="light">Light — one useful product touchpoint</option>
+                <option value="embedded" selected>Embedded — Leadpoet supports a core workflow step</option>
+                <option value="strong">Strong — the resource is built around a Leadpoet workflow</option>
+              </select>
+            </label>
+            <label class="full-span">Optional instructions
+              <textarea id="leadMagnetInstructions" rows="4" placeholder="Include preferred sections, examples, constraints, or how Leadpoet should appear."></textarea>
+            </label>
+          </div>
+        </details>
         <div class="modal-actions">
-          <button id="createLeadMagnetButton" type="button">Generate Draft</button>
+          <button id="createLeadMagnetButton" type="button">Generate Recommended Draft</button>
           <button class="quiet-button" data-close-modal="leadMagnetCreateModal" type="button">Cancel</button>
         </div>
       </div>
@@ -859,6 +873,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260710-background-post-1"></script>
+    <script src="/static/app.js?v=20260710-lead-magnet-autopilot-1"></script>
   </body>
 </html>

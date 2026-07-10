@@ -62,6 +62,10 @@ from leadpoet_social_brain.core.models import (
 )
 from leadpoet_social_brain.generation import MISSING_PROVIDER_MESSAGE, SocialBrainGenerator, parse_json_object
 from leadpoet_social_brain.lead_magnet_scout import research_lead_magnets
+from leadpoet_social_brain.lead_magnet_suggestions import (
+    LeadMagnetSuggestion,
+    build_lead_magnet_suggestions,
+)
 from leadpoet_social_brain.lead_magnets import (
     approve_lead_magnet,
     archive_lead_magnet,
@@ -802,6 +806,23 @@ def route_api(
             limit=int(one(query, "limit") or 50),
         )
         return 200, {"items": [lead_magnet_payload(store, item) for item in items]}
+    if method == "GET" and parts == ["api", "lead-magnets", "suggestions"]:
+        suggestions = lead_magnet_suggestions_for_store(
+            store,
+            limit=max(1, min(int(one(query, "limit") or 3), 6)),
+        )
+        return 200, {
+            "items": [
+                lead_magnet_suggestion_payload(suggestion, recommended=index == 0)
+                for index, suggestion in enumerate(suggestions)
+            ],
+            "recommended_id": suggestions[0].id if suggestions else None,
+            "message": (
+                "Choose a research-backed direction or generate the recommended draft."
+                if suggestions
+                else "Research recent winners to unlock evidence-backed directions."
+            ),
+        }
     if method == "POST" and parts == ["api", "lead-magnets"]:
         provider = load_configured_provider(store)
         result = generate_lead_magnet(
@@ -1797,12 +1818,35 @@ def autopilot_lead_magnet_task_payload(store: SQLiteStore, payload: dict[str, An
             period_key=period_key,
         )
         save_lead_magnet_research_sync(store, research)
-        format = clean_optional(payload.get("format")) or best_lead_magnet_format(research.sources)
-        audience = clean_optional(payload.get("audience")) or first_source_value(research.sources, "audience") or "sales and GTM operators"
+        suggestions = build_lead_magnet_suggestions(
+            research.sources,
+            trends=active_lead_magnet_trends(store),
+            topic_ideas=store.list_topic_ideas(status="suggested", limit=20),
+            research_run_id=research.run.id,
+            limit=3,
+        )
+        direction = suggestions[0] if suggestions else None
+        format = (
+            clean_optional(payload.get("format"))
+            or (direction.format if direction else None)
+            or best_lead_magnet_format(research.sources)
+        )
+        audience = (
+            clean_optional(payload.get("audience"))
+            or (direction.audience if direction else None)
+            or first_source_value(research.sources, "audience")
+            or "sales and GTM operators"
+        )
         sales_outcome = (
             clean_optional(payload.get("sales_outcome") or payload.get("sales_problem"))
+            or (direction.sales_outcome if direction else None)
             or first_source_value(research.sources, "sales_topic")
             or "turn buyer research into a repeatable, signal-aware sales workflow"
+        )
+        selected_source_ids = (
+            string_list_payload(payload.get("source_ids"))
+            if "source_ids" in payload
+            else (direction.source_ids if direction else [source.id for source in research.sources])
         )
         generated = generate_lead_magnet(
             store,
@@ -1810,14 +1854,17 @@ def autopilot_lead_magnet_task_payload(store: SQLiteStore, payload: dict[str, An
             audience=audience,
             sales_outcome=sales_outcome,
             format=format,
-            depth=str(payload.get("depth") or "standard"),
-            product_integration=str(payload.get("product_integration") or "embedded"),
-            title=clean_optional(payload.get("title")),
-            cta=clean_optional(payload.get("cta")),
-            instruction=clean_optional(payload.get("instruction")),
-            source_ids=[source.id for source in research.sources],
+            depth=str(payload.get("depth") or (direction.depth if direction else "standard")),
+            product_integration=str(
+                payload.get("product_integration") or (direction.product_integration if direction else "embedded")
+            ),
+            title=clean_optional(payload.get("title")) or (direction.title if direction else None),
+            cta=clean_optional(payload.get("cta")) or (direction.cta if direction else None),
+            instruction=clean_optional(payload.get("instruction")) or (direction.instruction if direction else None),
+            source_ids=selected_source_ids,
             research_run_id=research.run.id,
-            evidence_summary=(
+            evidence_summary=(direction.evidence_summary if direction else None)
+            or (
                 f"Rolling {int(payload.get('window_days') or 30)}-day research run; "
                 f"{len(research.sources)} qualified source(s)."
             ),
@@ -1834,6 +1881,8 @@ def autopilot_lead_magnet_task_payload(store: SQLiteStore, payload: dict[str, An
                 1 for source in research.sources if source.evidence_strength == "metric_backed"
             ),
             "lead_magnet_id": generated.item.id,
+            "suggestion_id": direction.id if direction else None,
+            "suggestion_title": direction.title if direction else None,
             "status": generated.item.status,
             "warnings": warnings,
             "completed_at": completed_at,
@@ -1893,6 +1942,48 @@ def first_source_value(sources: list[LeadMagnetSource], field_name: str) -> str 
         if value:
             return value
     return None
+
+
+def active_lead_magnet_trends(store: SQLiteStore, *, limit: int = 20) -> list[TrendItem]:
+    trends = store.list_trends(status="unused", limit=limit)
+    return trends or store.list_trends(limit=limit)
+
+
+def lead_magnet_suggestions_for_store(
+    store: SQLiteStore,
+    *,
+    limit: int = 3,
+) -> list[LeadMagnetSuggestion]:
+    research_run = next(
+        (
+            run
+            for run in store.list_lead_magnet_research_runs(limit=20)
+            if run.source_ids and run.status in {"completed", "success", "partial"}
+        ),
+        None,
+    )
+    sources = (
+        [source for source_id in research_run.source_ids if (source := store.get_lead_magnet_source(source_id))]
+        if research_run
+        else []
+    )
+    if not sources:
+        sources = store.list_lead_magnet_sources(status="active", limit=20)
+    return build_lead_magnet_suggestions(
+        sources,
+        trends=active_lead_magnet_trends(store),
+        topic_ideas=store.list_topic_ideas(status="suggested", limit=20),
+        research_run_id=research_run.id if research_run else None,
+        limit=limit,
+    )
+
+
+def lead_magnet_suggestion_payload(
+    suggestion: LeadMagnetSuggestion,
+    *,
+    recommended: bool,
+) -> dict[str, Any]:
+    return {**asdict(suggestion), "recommended": recommended}
 
 
 def run_x_posts_sync(

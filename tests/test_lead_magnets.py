@@ -14,6 +14,7 @@ from leadpoet_social_brain.core.models import (
     LeadMagnetResearchRun,
     LeadMagnetSource,
     LeadMagnetVersion,
+    TrendItem,
 )
 from leadpoet_social_brain.lead_magnet_scout import (
     default_lead_magnet_candidate_fetcher,
@@ -21,6 +22,7 @@ from leadpoet_social_brain.lead_magnet_scout import (
     research_lead_magnets,
 )
 from leadpoet_social_brain.lead_magnets import generate_lead_magnet
+from leadpoet_social_brain.lead_magnet_suggestions import build_lead_magnet_suggestions
 from leadpoet_social_brain.platforms.x_api import XApiClient, XWriteClient
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 
@@ -109,6 +111,53 @@ class LeadMagnetTest(unittest.TestCase):
         self.assertEqual(response["data"][0]["id"], "123")
         self.assertEqual(urlopen.call_count, 2)
         sleep.assert_called_once_with(2.0)
+
+    def test_suggestions_rank_sources_with_aligned_trends_and_diverse_formats(self):
+        sources = [
+            LeadMagnetSource(
+                id="source-buyer-signals",
+                title="Buyer intent and account signals for outbound prompt library",
+                sales_topic="buyer intent",
+                format="prompt_library",
+                performance_score=88,
+                evidence_strength="metric_backed",
+            ),
+            LeadMagnetSource(
+                id="source-revops",
+                title="RevOps pipeline prioritization scorecard",
+                sales_topic="revops",
+                format="scorecard",
+                performance_score=55,
+                evidence_strength="metric_backed",
+            ),
+        ]
+        trends = [
+            TrendItem(
+                id="trend-signals",
+                title="Buyer signals are moving closer to the sales workflow",
+                source_type="news",
+                topic="buyer intent",
+                summary="Teams are using account signals and timing to prioritize outbound.",
+                why_it_matters="Better timing can focus sales effort.",
+                leadpoet_angle="Use verified account context before outreach.",
+                urgency="high",
+            )
+        ]
+
+        suggestions = build_lead_magnet_suggestions(
+            sources,
+            trends=trends,
+            research_run_id="run-1",
+            limit=3,
+        )
+
+        self.assertEqual(len(suggestions), 3)
+        self.assertIn("Buyer Signal-to-Outbound", suggestions[0].title)
+        self.assertEqual(suggestions[0].research_run_id, "run-1")
+        self.assertIn("source-buyer-signals", suggestions[0].source_ids)
+        self.assertEqual(suggestions[0].trend_ids, ["trend-signals"])
+        self.assertEqual(len({suggestion.format for suggestion in suggestions}), 3)
+        self.assertIn("do not invent metrics", suggestions[0].instruction)
 
     def test_storage_round_trip_status_and_version_cascade(self):
         source = self.store.save_lead_magnet_source(

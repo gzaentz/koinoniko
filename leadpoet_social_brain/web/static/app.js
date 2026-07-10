@@ -20,6 +20,10 @@ const state = {
   leadMagnetsLoading: false,
   leadMagnetError: "",
   leadMagnetResearch: null,
+  leadMagnetSuggestions: [],
+  leadMagnetSuggestionsLoading: false,
+  leadMagnetSuggestionError: "",
+  selectedLeadMagnetSuggestion: null,
   leadMagnetDetail: null,
   leadMagnetDetailLoading: false,
   leadMagnetDetailError: "",
@@ -2611,10 +2615,16 @@ async function researchLeadMagnets() {
 function openLeadMagnetCreateModal() {
   resetLeadMagnetCreateForm();
   openModal("leadMagnetCreateModal");
-  window.setTimeout(() => $("leadMagnetTitle")?.focus(), 0);
+  loadLeadMagnetSuggestions({ force: true }).catch((error) => {
+    state.leadMagnetSuggestionError = error.message || "Could not load research-backed directions.";
+    state.leadMagnetSuggestionsLoading = false;
+    renderLeadMagnetSuggestions();
+  });
 }
 
 function resetLeadMagnetCreateForm() {
+  state.selectedLeadMagnetSuggestion = null;
+  state.leadMagnetSuggestionError = "";
   $("leadMagnetTitle").value = "";
   $("leadMagnetFormat").value = "prompt_library";
   $("leadMagnetAudience").value = "";
@@ -2623,6 +2633,99 @@ function resetLeadMagnetCreateForm() {
   $("leadMagnetSalesOutcome").value = "";
   $("leadMagnetProductIntegration").value = "embedded";
   $("leadMagnetInstructions").value = "";
+  $("leadMagnetCustomDetails").open = false;
+  renderLeadMagnetSuggestions();
+}
+
+async function loadLeadMagnetSuggestions({ force = false } = {}) {
+  if (state.leadMagnetSuggestionsLoading) return;
+  if (state.leadMagnetSuggestions.length && !force) {
+    selectLeadMagnetSuggestion(state.leadMagnetSuggestions[0].id);
+    return;
+  }
+  state.leadMagnetSuggestionsLoading = true;
+  state.leadMagnetSuggestionError = "";
+  state.leadMagnetSuggestions = [];
+  renderLeadMagnetSuggestions();
+  try {
+    const payload = await api("/api/lead-magnets/suggestions?limit=3");
+    state.leadMagnetSuggestions = Array.isArray(payload?.items)
+      ? payload.items.filter((item) => item && typeof item === "object")
+      : [];
+    const recommendedId = cleanString(payload?.recommended_id || state.leadMagnetSuggestions[0]?.id);
+    if (recommendedId) selectLeadMagnetSuggestion(recommendedId, { render: false });
+    if (!state.leadMagnetSuggestions.length) {
+      state.leadMagnetSuggestionError = cleanString(payload?.message);
+      $("leadMagnetCustomDetails").open = true;
+    }
+  } finally {
+    state.leadMagnetSuggestionsLoading = false;
+    renderLeadMagnetSuggestions();
+  }
+}
+
+function selectLeadMagnetSuggestion(id, { render = true } = {}) {
+  const suggestion = state.leadMagnetSuggestions.find((item) => cleanString(item?.id) === cleanString(id));
+  if (!suggestion) return;
+  state.selectedLeadMagnetSuggestion = suggestion;
+  $("leadMagnetTitle").value = cleanString(suggestion.title);
+  $("leadMagnetFormat").value = cleanString(suggestion.format) || "prompt_library";
+  $("leadMagnetAudience").value = cleanString(suggestion.audience);
+  $("leadMagnetDepth").value = cleanString(suggestion.depth) || "standard";
+  $("leadMagnetCta").value = cleanString(suggestion.cta);
+  $("leadMagnetSalesOutcome").value = cleanString(suggestion.sales_outcome);
+  $("leadMagnetProductIntegration").value = cleanString(suggestion.product_integration) || "embedded";
+  $("leadMagnetInstructions").value = cleanString(suggestion.instruction);
+  if (render) renderLeadMagnetSuggestions();
+}
+
+function renderLeadMagnetSuggestions() {
+  const list = $("leadMagnetSuggestionList");
+  const status = $("leadMagnetSuggestionStatus");
+  const createButton = $("createLeadMagnetButton");
+  if (!list || !status || !createButton) return;
+  if (state.leadMagnetSuggestionsLoading) {
+    list.innerHTML = [1, 2, 3]
+      .map(() => '<article class="lead-magnet-suggestion-card skeleton-card" aria-hidden="true"><span class="skeleton-line short"></span><span class="skeleton-line long"></span><span class="skeleton-line medium"></span></article>')
+      .join("");
+    status.textContent = "Ranking qualified sources against current trends...";
+    createButton.disabled = true;
+    return;
+  }
+  createButton.disabled = false;
+  if (!state.leadMagnetSuggestions.length) {
+    list.innerHTML = '<article class="empty-state"><strong>No recommendations yet</strong><span>Research recent winners first, or open the fields below to create manually.</span></article>';
+    status.textContent = state.leadMagnetSuggestionError || "Research recent winners to unlock one-click directions.";
+    createButton.textContent = "Generate Draft";
+    return;
+  }
+  const selectedId = cleanString(state.selectedLeadMagnetSuggestion?.id);
+  list.innerHTML = state.leadMagnetSuggestions
+    .map((suggestion, index) => {
+      const id = cleanString(suggestion?.id);
+      const sourceCount = Array.isArray(suggestion?.source_ids) ? suggestion.source_ids.length : 0;
+      const trendCount = Array.isArray(suggestion?.trend_ids) ? suggestion.trend_ids.length : 0;
+      return `
+        <button class="lead-magnet-suggestion-card${id === selectedId ? " selected" : ""}" type="button" data-lead-magnet-suggestion-id="${escapeAttr(id)}" aria-pressed="${id === selectedId}">
+          <span class="lead-magnet-suggestion-card-topline">
+            <span>${escapeHtml(label(suggestion?.format || "resource"))}</span>
+            <span>${index === 0 || suggestion?.recommended ? "Recommended" : "Alternative"}</span>
+          </span>
+          <strong>${escapeHtml(cleanString(suggestion?.title) || "Untitled direction")}</strong>
+          <p>${escapeHtml(cleanString(suggestion?.sales_outcome))}</p>
+          <span class="lead-magnet-suggestion-evidence">${escapeHtml(`${sourceCount} source${sourceCount === 1 ? "" : "s"} · ${trendCount} aligned trend${trendCount === 1 ? "" : "s"}`)}</span>
+        </button>
+      `;
+    })
+    .join("");
+  status.textContent = cleanString(state.selectedLeadMagnetSuggestion?.reason);
+  createButton.textContent = "Generate Recommended Draft";
+}
+
+function handleLeadMagnetSuggestionClick(event) {
+  const control = event.target.closest("[data-lead-magnet-suggestion-id]");
+  if (!control) return;
+  selectLeadMagnetSuggestion(control.dataset.leadMagnetSuggestionId);
 }
 
 async function createLeadMagnet() {
@@ -2645,6 +2748,13 @@ async function createLeadMagnet() {
   Object.entries(optionalFields).forEach(([key, value]) => {
     if (value) request[key] = value;
   });
+  const suggestion = state.selectedLeadMagnetSuggestion;
+  if (suggestion) {
+    request.suggestion_id = cleanString(suggestion.id);
+    request.source_ids = Array.isArray(suggestion.source_ids) ? suggestion.source_ids : [];
+    request.research_run_id = cleanString(suggestion.research_run_id);
+    request.evidence_summary = cleanString(suggestion.evidence_summary);
+  }
   const payload = await api("/api/lead-magnets", {
     method: "POST",
     body: JSON.stringify(request),
@@ -4323,6 +4433,7 @@ function setup() {
     runButton(event.currentTarget, "Researching...", researchLeadMagnets)
   );
   $("openLeadMagnetCreateButton").addEventListener("click", openLeadMagnetCreateModal);
+  $("leadMagnetSuggestionList").addEventListener("click", handleLeadMagnetSuggestionClick);
   $("createLeadMagnetButton").addEventListener("click", (event) =>
     runButton(event.currentTarget, "Generating...", createLeadMagnet)
   );

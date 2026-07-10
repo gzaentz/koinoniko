@@ -1208,6 +1208,8 @@ The Lead Magnets view is a separate review-first workflow for long-form sales re
 
 When `X_BEARER_TOKEN` is configured, live research first searches X and stores public likes, replies, reposts, bookmarks, impressions, author reach, and the observation timestamp. The default `recent` endpoint covers the newest seven-day subset of the rolling month. Set `X_LEAD_MAGNET_SEARCH_ENDPOINT=all` only when the X project has full-archive search access; that queries the complete 30-day window. ScrapingDog discovery remains a qualitative fallback rather than being mislabeled as performance evidence.
 
+The creation modal turns the latest qualified sources, unused trends, and suggested topic ideas into three ranked directions. The strongest is selected automatically and supplies the title, format, audience, outcome, CTA, instructions, research run, and evidence source IDs; the detailed form remains available as an override. The same deterministic direction engine drives unattended lead-magnet autopilot, so manual and scheduled artifacts use the same evidence-backed brief instead of generic fallback fields.
+
 Generated artifacts preserve source receipts, render portable Markdown, include one operational Leadpoet workflow section grounded in saved product context, and enter `needs_review`. Approval is required before Notion publishing. Re-publishing updates the saved Notion page ID instead of creating a duplicate.
 
 CLI workflow:
@@ -1226,7 +1228,7 @@ python3 -m leadpoet_social_brain.cli approve-lead-magnet --lead-magnet-id "<id>"
 python3 -m leadpoet_social_brain.cli publish-lead-magnet --lead-magnet-id "<id>"
 ```
 
-The weekly `autopilot-lead-magnet` task uses a unique 14-day period key. It researches, creates exactly one review-ready artifact, and stops; it never auto-approves or auto-publishes.
+The scheduled `autopilot-lead-magnet` task uses a unique 14-day period key. It researches, selects the strongest ranked direction, creates exactly one review-ready artifact, and stops; it never auto-approves or auto-publishes.
 
 ## Skills
 
