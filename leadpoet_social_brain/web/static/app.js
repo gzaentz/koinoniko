@@ -322,7 +322,7 @@ function renderCurrentView() {
 }
 
 function updateGlobalControls() {
-  const reviewCount = state.reviewItems.length;
+  const reviewCount = state.reviewItems.length + state.pendingReviewCreations.length;
   $("reviewNavBadge").textContent = String(reviewCount);
   $("reviewNavBadge").classList.toggle("muted-badge", reviewCount === 0);
 
@@ -1761,11 +1761,13 @@ function pendingQueueCard(item) {
 
 function addPendingReviewCreation(item) {
   state.pendingReviewCreations = [item, ...state.pendingReviewCreations];
+  updateGlobalControls();
   if (state.view === "reviewer") renderReviewer();
 }
 
 function removePendingReviewCreation(id) {
   state.pendingReviewCreations = state.pendingReviewCreations.filter((item) => item.id !== id);
+  updateGlobalControls();
   if (state.view === "reviewer") renderReviewer();
 }
 
@@ -1773,6 +1775,7 @@ function showCreatedQueueItem(item) {
   if (!item?.id) return;
   state.reviewItems = [item, ...state.reviewItems.filter((existing) => existing.id !== item.id)];
   markQueueItemArrived(item.id);
+  updateGlobalControls();
   if (state.view === "reviewer") renderReviewer();
 }
 
@@ -2133,7 +2136,7 @@ async function createPost() {
   clearMessage();
   resetCreatePostForm();
   closeModal("createPostModal");
-  setView("reviewer");
+  showMessage("Generating post in the background. You can keep working.");
   let payload;
   try {
     payload = await api("/api/content/create-post", {
@@ -2157,6 +2160,7 @@ async function createPost() {
     if (!payload.item) markQueueItemArrived(createdQueueId);
   }
   await refresh();
+  showMessage("Post added to Review.");
 }
 
 async function planWeek() {
