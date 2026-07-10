@@ -121,9 +121,17 @@ def research_lead_magnets(
             discovered = list(candidates)
         else:
             discovered.extend(stored_pattern_candidates(store))
-            candidate_fetcher = fetch_candidates or default_lead_magnet_candidate_fetcher
             try:
-                discovered.extend(candidate_fetcher(limit=max(limit * 2, 20), query=query))
+                if fetch_candidates is None:
+                    discovered.extend(
+                        default_lead_magnet_candidate_fetcher(
+                            limit=max(limit * 2, 20),
+                            query=query,
+                            warnings=warnings,
+                        )
+                    )
+                else:
+                    discovered.extend(fetch_candidates(limit=max(limit * 2, 20), query=query))
             except Exception as exc:  # noqa: BLE001 - stored/manual evidence remains usable.
                 warnings.append(f"Live lead-magnet discovery was unavailable: {exc}")
 
@@ -217,7 +225,12 @@ def research_lead_magnets(
         raise
 
 
-def default_lead_magnet_candidate_fetcher(*, limit: int = 20, query: str | None = None) -> list[dict[str, object]]:
+def default_lead_magnet_candidate_fetcher(
+    *,
+    limit: int = 20,
+    query: str | None = None,
+    warnings: list[str] | None = None,
+) -> list[dict[str, object]]:
     candidates: list[dict[str, object]] = []
     errors: list[str] = []
     if os.getenv("X_BEARER_TOKEN"):
@@ -239,6 +252,8 @@ def default_lead_magnet_candidate_fetcher(*, limit: int = 20, query: str | None 
         errors.append(str(exc))
     if not candidates and errors:
         raise ValueError("; ".join(unique_texts(errors)))
+    if errors and warnings is not None:
+        warnings.extend(unique_texts(errors))
     if query:
         query_terms = set(clean_text(query).lower().split())
         candidates.sort(key=lambda row: len(query_terms & set(candidate_text(row).lower().split())), reverse=True)
@@ -267,7 +282,10 @@ def fetch_x_lead_magnet_candidates(
         raise ValueError(f"{X_LEAD_MAGNET_SEARCH_ENDPOINT_ENV} must be 'recent' or 'all'.")
     x_client = client or XApiClient.from_env()
     requested_start = current - timedelta(days=max(1, min(int(window_days), 30)))
-    search_end = current if search_mode == "all" else current - timedelta(seconds=15)
+    # X rejects search requests whose end_time is less than ten seconds behind
+    # the request. Keep a larger buffer for both endpoints so clock skew and
+    # request latency cannot turn an otherwise valid refresh into a 400.
+    search_end = current - timedelta(seconds=30)
     start = requested_start if search_mode == "all" else max(requested_start, search_end - timedelta(days=6, hours=23))
     search_query = clean_text(query) or X_LEAD_MAGNET_QUERY
     if query and "-is:retweet" not in search_query:

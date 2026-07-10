@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from leadpoet_social_brain.core.models import (
     ContextSection,
@@ -342,7 +344,32 @@ class LeadMagnetTest(unittest.TestCase):
         self.assertEqual(candidates[0]["follower_count"], 12_000)
         self.assertEqual(requests[0][0], "/tweets/search/all")
         self.assertEqual(requests[0][1]["start_time"], "2026-06-10T12:00:00Z")
+        self.assertEqual(requests[0][1]["end_time"], "2026-07-10T11:59:30Z")
         self.assertIn("prompt library", requests[0][1]["query"])
+
+    def test_scout_reports_x_failure_when_qualitative_fallback_runs(self):
+        fallback = {
+            "title": "Free outbound sales prompt library",
+            "source_url": "https://example.com/fallback",
+        }
+        with patch.dict(os.environ, {"X_BEARER_TOKEN": "test-token"}):
+            with patch(
+                "leadpoet_social_brain.lead_magnet_scout.fetch_x_lead_magnet_candidates",
+                side_effect=RuntimeError("X API request failed (429): Too Many Requests"),
+            ):
+                with patch(
+                    "leadpoet_social_brain.lead_magnet_scout.fetch_scrapingdog_pattern_candidates",
+                    return_value=[fallback],
+                ):
+                    result = research_lead_magnets(
+                        self.store,
+                        now=NOW,
+                        period_key="x-fallback-warning-test",
+                    )
+
+        self.assertEqual(result.sources, [])
+        self.assertTrue(any("X API request failed (429)" in warning for warning in result.warnings))
+        self.assertTrue(any("without a verifiable publish date" in warning for warning in result.warnings))
 
     def test_workspace_isolation_and_period_idempotency(self):
         first = research_lead_magnets(
