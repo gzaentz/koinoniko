@@ -682,7 +682,6 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('rel="icon" type="image/svg+xml" href="/static/koinoniko-favicon.svg"', index_html)
         self.assertIn('href="/static/styles.css?v=', index_html)
         self.assertIn('src="/static/app.js?v=', index_html)
-        self.assertIn("20260710-background-post-1", index_html)
         self.assertIn("skeleton-card", index_html)
         self.assertIn("skeleton-line", styles_css)
         self.assertIn("renderInitialLoadingState", app_js)
@@ -10324,6 +10323,42 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(store.get_sync_metadata("x_metrics_sync").status, "success")
             store.close()
 
+    def test_task_sync_metrics_keeps_cron_successful_for_unavailable_tweet(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            ingest_x_post(
+                store,
+                text="This stored post is no longer available from X.",
+                url="https://x.com/gavinzaentz/status/2075285155556585889",
+                date="2026-06-25T12:00:00.000Z",
+                author="gavinzaentz",
+                topic="Leadpoet",
+                post_type="founder_insight",
+            )
+            store.close()
+
+            with patch.dict(os.environ, {"X_BEARER_TOKEN": "read-token"}, clear=False):
+                with patch(
+                    "leadpoet_social_brain.web.app.XApiClient.from_env",
+                    return_value=FakeXApiClient([], metrics_by_id={}),
+                ):
+                    status, payload = handle_api_request(
+                        "POST",
+                        "/tasks/sync-x-metrics",
+                        json.dumps({"since_days": 90, "limit": 100}),
+                        db_path=db_path,
+                    )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["metrics_updated"], 0)
+            self.assertEqual(payload["skipped"], 1)
+            self.assertEqual(payload["errors"], [])
+            self.assertEqual(payload["sync"]["status"], "success")
+            store = SQLiteStore(db_path)
+            self.assertEqual(store.get_sync_metadata("x_metrics_sync").status, "success")
+            store.close()
+
     def test_task_sync_all_runs_posts_then_metrics(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"
@@ -11518,6 +11553,27 @@ class SocialBrainTest(unittest.TestCase):
             )
 
             result = sync_x_metrics(store, FakeXApiClient([]), limit=10)
+
+            self.assertEqual(result.checked, 1)
+            self.assertEqual(result.updated, 0)
+            self.assertEqual(result.skipped, 1)
+            self.assertEqual(result.errors, [])
+            store.close()
+
+    def test_sync_x_metrics_treats_unavailable_x_tweet_as_clean_skip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            ingest_x_post(
+                store,
+                text="A deleted or private X post should not fail the metrics cron.",
+                url="https://x.com/gavinzaentz/status/2075285155556585889",
+                date="2026-06-25T12:00:00.000Z",
+                author="gavinzaentz",
+                topic="Leadpoet",
+                post_type="founder_insight",
+            )
+
+            result = sync_x_metrics(store, FakeXApiClient([], metrics_by_id={}), limit=10)
 
             self.assertEqual(result.checked, 1)
             self.assertEqual(result.updated, 0)

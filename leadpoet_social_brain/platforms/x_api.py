@@ -488,7 +488,6 @@ def sync_x_metrics(
             tweet = tweets_by_id.get(tweet_id)
             if not tweet:
                 skipped += 1
-                errors.append(f"post {post.id}: no X API metrics returned for tweet {tweet_id}")
                 continue
             metrics = metrics_from_x_public_metrics(tweet.get("public_metrics") or {}, measured_at=collected_at)
             if not metrics:
