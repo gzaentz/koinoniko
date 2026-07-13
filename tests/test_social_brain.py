@@ -1058,7 +1058,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('class="meta-primary"', app_js)
         self.assertIn('class="meta-secondary"', app_js)
         self.assertIn('class="meta-tertiary"', app_js)
-        self.assertIn(".dashboard-top-grid .panel-header {\n  min-height: 44px;", styles_css)
+        self.assertIn(".dashboard-top-grid .panel-header {\n  flex: 0 0 44px;\n  height: 44px;\n  min-height: 44px;", styles_css)
         self.assertIn(".dashboard-top-grid {\n  align-items: stretch;", styles_css)
         self.assertIn("overflow-y: auto;", styles_css)
         self.assertIn("overscroll-behavior: contain;", styles_css)
