@@ -2603,8 +2603,6 @@ async function researchLeadMagnets() {
     });
     state.leadMagnetResearch = payload || {};
     await loadLeadMagnets({ force: true, throwOnError: true });
-    const retained = Array.isArray(payload.sources) ? payload.sources.length : 0;
-    showMessage(payload.message || `Lead magnet research complete. Retained ${retained} source${retained === 1 ? "" : "s"}.`);
   } catch (error) {
     state.leadMagnetResearch = { message: "Research could not be completed", warnings: [error.message] };
     renderLeadMagnetResearchSummary();
