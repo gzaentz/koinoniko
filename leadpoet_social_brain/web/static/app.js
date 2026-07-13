@@ -58,6 +58,7 @@ const state = {
     open: false,
     panel: "connections",
   },
+  inlineStatusAnchor: null,
 };
 
 const DEFAULT_TOPIC_OPTIONS = [
@@ -190,41 +191,62 @@ async function api(path, options = {}) {
   return payload;
 }
 
-function showMessage(text, isError = false) {
-  if (!isError && state.view === "reviewer") {
-    clearMessage();
-    return;
-  }
-  const box = $("message");
-  box.textContent = text;
-  box.classList.toggle("error", isError);
-  box.classList.remove("hidden");
-  window.setTimeout(() => box.classList.add("hidden"), isError ? 9000 : 5000);
+function inlineStatusHost(anchor) {
+  if (!anchor?.isConnected) return null;
+  return anchor.closest(
+    ".actions, .card-actions, .modal-actions, .account-detail-actions, .queue-detail-toolbar, .assistant-form, form"
+  ) || anchor.parentElement;
 }
 
-function clearMessage() {
-  const box = $("message");
-  box.textContent = "";
-  box.classList.remove("error");
-  box.classList.add("hidden");
+function showMessage(text, isError = false, anchor = state.inlineStatusAnchor) {
+  const message = cleanString(text);
+  if (!message) return;
+  if (!anchor?.isConnected) {
+    if (isError) console.error(message);
+    return;
+  }
+  if (!isError && anchor.closest(".panel-header")) return;
+  const host = inlineStatusHost(anchor);
+  if (!host) return;
+  clearMessage(anchor);
+  const status = document.createElement("span");
+  status.className = `inline-action-status${isError ? " error" : ""}`;
+  status.dataset.inlineActionStatus = "true";
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+  status.textContent = message;
+  host.appendChild(status);
+}
+
+function clearMessage(anchor = state.inlineStatusAnchor) {
+  const host = inlineStatusHost(anchor);
+  if (host) {
+    host.querySelectorAll("[data-inline-action-status]").forEach((status) => status.remove());
+    return;
+  }
+  document.querySelectorAll("[data-inline-action-status]").forEach((status) => status.remove());
 }
 
 async function runButton(button, loadingText, work) {
   const original = button?.textContent || "";
   const originallyDisabled = Boolean(button?.disabled);
+  const previousStatusAnchor = state.inlineStatusAnchor;
   if (button) {
+    state.inlineStatusAnchor = button;
+    clearMessage(button);
     button.disabled = true;
     button.textContent = loadingText;
   }
   try {
     await work();
   } catch (error) {
-    showMessage(error.message, true);
+    showMessage(error.message, true, button);
   } finally {
     if (button) {
       button.disabled = originallyDisabled;
       button.textContent = original;
     }
+    if (state.inlineStatusAnchor === button) state.inlineStatusAnchor = previousStatusAnchor;
     if (state.status) updateGlobalControls();
   }
 }
@@ -2161,7 +2183,6 @@ async function createPost() {
   clearMessage();
   resetCreatePostForm();
   closeModal("createPostModal");
-  showMessage("Generating post in the background. You can keep working.");
   let payload;
   try {
     payload = await api("/api/content/create-post", {
@@ -2185,7 +2206,6 @@ async function createPost() {
     if (!payload.item) markQueueItemArrived(createdQueueId);
   }
   await refresh();
-  showMessage("Post added to Review.");
 }
 
 async function planWeek() {

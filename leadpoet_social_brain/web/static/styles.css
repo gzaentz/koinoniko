@@ -443,27 +443,15 @@ main {
   animation: view-enter 160ms ease-out;
 }
 
-.message {
-  position: fixed;
-  top: var(--page-block-pad);
-  right: var(--page-inline-pad);
-  left: calc(var(--sidebar-width) + var(--page-inline-pad));
-  z-index: 90;
-  margin: 0;
-  padding: 11px 13px;
-  border: 1px solid var(--line);
-  background: var(--soft);
-  border-radius: 8px;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
+.inline-action-status {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
-.sidebar-collapsed .message {
-  left: calc(var(--sidebar-rail-width) + var(--page-inline-pad));
-}
-
-.message.error {
-  border-color: var(--black);
-  background: var(--white);
+.inline-action-status.error {
+  color: var(--ink);
+  font-weight: 650;
 }
 
 .hidden {
@@ -3430,12 +3418,6 @@ main {
   .view {
     padding-left: 20px;
     padding-right: 20px;
-  }
-
-  .message {
-    top: 18px;
-    right: 20px;
-    left: 20px;
   }
 
   .compact-meta-row {
