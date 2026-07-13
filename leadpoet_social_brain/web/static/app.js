@@ -1063,7 +1063,7 @@ function renderDashboardTrends() {
   if (!state.dashboard) {
     $("trendDailyButton").classList.toggle("active", state.selectedTrendWindow === "daily");
     $("trendWeeklyButton").classList.toggle("active", state.selectedTrendWindow === "weekly");
-    $("trendList").innerHTML = skeletonCards(2, "trend-row");
+    $("trendList").innerHTML = skeletonCards(2, "dashboard-feed-card trend-row");
     return;
   }
   const groups = state.dashboard?.trend_groups || {};
@@ -1077,7 +1077,7 @@ function renderDashboardTopics() {
   const list = $("topicIdeaList");
   if (!list) return;
   if (!state.dashboard) {
-    list.innerHTML = skeletonCards(2, "topic-idea-card");
+    list.innerHTML = skeletonCards(2, "dashboard-feed-card topic-idea-card");
     return;
   }
   const ideas = state.dashboard.topic_ideas || [];
@@ -1094,14 +1094,14 @@ function renderDashboardTopics() {
 
 function topicIdeaCard(idea) {
   return `
-    <article class="topic-idea-card">
+    <article class="dashboard-feed-card topic-idea-card">
       <div class="meta-row">
         <span>${escapeHtml(topicLabel(idea.topic || ""))}</span>
         <span>${escapeHtml(label(idea.source_type || "evergreen"))}</span>
         <span>Priority ${escapeHtml(String(idea.priority || 0))}</span>
       </div>
       <h3>${escapeHtml(idea.title || "Untitled topic")}</h3>
-      <p class="topic-angle">${escapeHtml(idea.angle || "")}</p>
+      <p class="dashboard-feed-card-summary topic-angle">${escapeHtml(idea.angle || "")}</p>
       <div class="actions left">
         <button class="secondary" data-topic-action="use" data-topic-id="${escapeAttr(idea.id)}">Use in Post</button>
         <button class="quiet-button" data-topic-action="dismiss" data-topic-id="${escapeAttr(idea.id)}">Dismiss</button>
@@ -1146,14 +1146,14 @@ function dashboardTrendRow(item) {
   const summary = trendCardSummary(item);
   const date = trendCardDate(item);
   return `
-    <article class="trend-row" role="button" tabindex="0" onclick='openTrendDetails(${jsArg(item.id)})' onkeydown='openTrendDetailsFromKey(event, ${jsArg(item.id)})'>
+    <article class="dashboard-feed-card trend-row" role="button" tabindex="0" onclick='openTrendDetails(${jsArg(item.id)})' onkeydown='openTrendDetailsFromKey(event, ${jsArg(item.id)})'>
       <div class="meta-row">
         <span>${escapeHtml(topicLabel(item.topic || ""))}</span>
         ${date ? `<span class="trend-date">${escapeHtml(date)}</span>` : ""}
         ${item.source_url ? `<a href="${escapeAttr(item.source_url)}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">Source</a>` : ""}
       </div>
       <h3>${escapeHtml(item.title)}</h3>
-      ${summary ? `<p class="trend-summary">${escapeHtml(summary)}</p>` : ""}
+      ${summary ? `<p class="dashboard-feed-card-summary trend-summary">${escapeHtml(summary)}</p>` : ""}
       <div class="actions left">
         <button class="secondary" onclick='useTrendInPost(event, ${jsArg(item.id)})'>Use in Post</button>
       </div>
@@ -1187,7 +1187,7 @@ function renderDashboardPatterns() {
   if (!state.dashboard) {
     $("patternWeeklyButton").classList.toggle("active", state.selectedPatternWindow === "weekly");
     $("patternMonthlyButton").classList.toggle("active", state.selectedPatternWindow === "monthly");
-    $("patternList").innerHTML = skeletonCards(2, "pattern-card");
+    $("patternList").innerHTML = skeletonCards(2, "dashboard-feed-card pattern-card");
     return;
   }
   const groups = state.dashboard?.pattern_groups || {};
@@ -1244,14 +1244,14 @@ function replacePatternInList(patterns, updatedPattern) {
 function patternCard(pattern) {
   const summary = patternCardSummary(pattern);
   return `
-    <article class="pattern-card" role="button" tabindex="0" onclick='openPatternDetails(${jsArg(pattern.id)})' onkeydown='openPatternDetailsFromKey(event, ${jsArg(pattern.id)})'>
+    <article class="dashboard-feed-card pattern-card" role="button" tabindex="0" onclick='openPatternDetails(${jsArg(pattern.id)})' onkeydown='openPatternDetailsFromKey(event, ${jsArg(pattern.id)})'>
       <div class="meta-row">
         <span>${escapeHtml(label(pattern.category || "other"))}</span>
         <span>${escapeHtml(topicLabel(pattern.topic || "No topic"))}</span>
         ${pattern.source_url ? `<a href="${escapeAttr(pattern.source_url)}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">Source</a>` : ""}
       </div>
       <h3>${escapeHtml(pattern.pattern_name || "Observed pattern")}</h3>
-      ${summary ? `<p class="pattern-summary">${escapeHtml(summary)}</p>` : ""}
+      ${summary ? `<p class="dashboard-feed-card-summary pattern-summary">${escapeHtml(summary)}</p>` : ""}
       <div class="actions left">
         ${patternSaveButton(pattern)}
         <button class="secondary" onclick='usePatternInPost(event, ${jsArg(pattern.id)})'>Use Pattern</button>
@@ -3027,9 +3027,9 @@ function renderInitialLoadingState() {
 
 function renderDashboardLoading() {
   renderRecentPostSortHeaders();
-  $("trendList").innerHTML = skeletonCards(2, "trend-row");
-  $("patternList").innerHTML = skeletonCards(2, "pattern-card");
-  $("topicIdeaList").innerHTML = skeletonCards(2, "topic-idea-card");
+  $("trendList").innerHTML = skeletonCards(2, "dashboard-feed-card trend-row");
+  $("patternList").innerHTML = skeletonCards(2, "dashboard-feed-card pattern-card");
+  $("topicIdeaList").innerHTML = skeletonCards(2, "dashboard-feed-card topic-idea-card");
   $("recentPostsTable").innerHTML = skeletonTableRows(6);
 }
 
