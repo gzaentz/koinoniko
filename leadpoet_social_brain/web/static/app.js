@@ -2893,17 +2893,31 @@ function syncLeadMagnetDetailActions() {
   const id = cleanString(item.id);
   const approveButton = $("approveLeadMagnetButton");
   const publishButton = $("publishLeadMagnetButton");
-  approveButton.disabled = !id || state.leadMagnetDetailLoading || ["approved", "published"].includes(status);
-  approveButton.textContent = ["approved", "published"].includes(status) ? "Approved" : "Approve";
+  const actionHint = $("leadMagnetDetailActionHint");
+  const canApprove = Boolean(id) && !state.leadMagnetDetailLoading && ["needs_review", "failed"].includes(status);
   const canPublish = ["approved", "ready", "ready_to_publish"].includes(status);
+  approveButton.classList.toggle("hidden", !canApprove);
+  approveButton.disabled = !canApprove;
+  publishButton.classList.toggle("hidden", !canPublish || state.leadMagnetDetailLoading || !id);
   publishButton.disabled = !id || state.leadMagnetDetailLoading || !canPublish;
-  publishButton.textContent = status === "published" ? "Published" : "Publish to Notion";
 
   const link = $("openPublishedLeadMagnetLink");
   const publishedUrl = leadMagnetPublishedUrl(item);
   link.classList.toggle("hidden", !publishedUrl);
   if (publishedUrl) link.href = publishedUrl;
   else link.removeAttribute("href");
+
+  if (state.leadMagnetDetailLoading) {
+    actionHint.textContent = "Loading the review draft...";
+  } else if (status === "published") {
+    actionHint.textContent = "Published to Notion. Open the page to review the final result.";
+  } else if (canPublish) {
+    actionHint.textContent = "Approved and ready to publish to Notion.";
+  } else if (status === "failed") {
+    actionHint.textContent = "Review the saved draft and approve it again when the issue is resolved.";
+  } else {
+    actionHint.textContent = "Review the draft below, then approve it when it is ready.";
+  }
 }
 
 async function mutateLeadMagnet(action) {
@@ -2935,7 +2949,6 @@ async function mutateLeadMagnet(action) {
   renderLeadMagnetDetail();
   renderLeadMagnets();
   await loadLeadMagnets({ force: true });
-  showMessage(payload.message || (action === "approve" ? "Lead magnet approved." : "Lead magnet published to Notion."));
 }
 
 async function copyLeadMagnetMarkdown() {

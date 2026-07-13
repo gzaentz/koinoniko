@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260712-brand-guidelines-1">
+    <link rel="stylesheet" href="/static/styles.css?v=20260712-lead-magnet-review-1">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -806,7 +806,6 @@
       <div class="modal-card wide lead-magnet-detail-card">
         <div class="modal-header lead-magnet-detail-header">
           <div>
-            <span class="eyebrow">Lead magnet</span>
             <h2 id="leadMagnetDetailTitle">Artifact details</h2>
           </div>
           <div class="modal-header-actions">
@@ -814,12 +813,15 @@
             <button class="icon-button" data-close-modal="leadMagnetDetailModal" aria-label="Close">x</button>
           </div>
         </div>
-        <div id="leadMagnetDetailBody" class="detail-stack"></div>
-        <div class="modal-actions lead-magnet-detail-actions">
-          <button class="secondary" id="approveLeadMagnetButton" type="button">Approve</button>
-          <button id="publishLeadMagnetButton" type="button">Publish to Notion</button>
-          <a class="button-link secondary-link hidden" id="openPublishedLeadMagnetLink" target="_blank" rel="noopener noreferrer">Open Published Page</a>
+        <div class="lead-magnet-detail-actions" aria-live="polite">
+          <p id="leadMagnetDetailActionHint">Review the draft below, then approve it when it is ready.</p>
+          <div class="lead-magnet-detail-action-buttons">
+            <button id="approveLeadMagnetButton" type="button">Approve</button>
+            <button class="hidden" id="publishLeadMagnetButton" type="button">Publish to Notion</button>
+            <a class="button-link hidden" id="openPublishedLeadMagnetLink" target="_blank" rel="noopener noreferrer">Open Published Page</a>
+          </div>
         </div>
+        <div id="leadMagnetDetailBody" class="detail-stack"></div>
       </div>
     </section>
 
@@ -871,6 +873,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260712-brand-guidelines-1"></script>
+    <script src="/static/app.js?v=20260712-lead-magnet-review-1"></script>
   </body>
 </html>

@@ -1693,12 +1693,15 @@ main {
   align-content: center;
 }
 
-.lead-magnet-detail-card {
-  grid-template-rows: auto minmax(0, 1fr) auto;
+.modal-card.lead-magnet-detail-card {
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .lead-magnet-detail-card .detail-stack {
   min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .lead-magnet-detail-section {
@@ -1805,8 +1808,28 @@ main {
 }
 
 .lead-magnet-detail-actions {
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
+  min-height: 62px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.lead-magnet-detail-actions p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.lead-magnet-detail-action-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  flex: 0 0 auto;
 }
 
 .account-hub {
@@ -3404,8 +3427,7 @@ main {
     grid-template-columns: 1fr;
   }
 
-  .lead-magnets-header-actions,
-  .lead-magnet-detail-actions {
+  .lead-magnets-header-actions {
     display: grid;
     grid-template-columns: 1fr;
     align-items: stretch;
@@ -3423,8 +3445,19 @@ main {
     grid-template-columns: 1fr;
   }
 
-  .lead-magnets-header-actions > *,
-  .lead-magnet-detail-actions > * {
+  .lead-magnets-header-actions > * {
+    width: 100%;
+  }
+
+  .lead-magnet-detail-actions {
+    display: grid;
+  }
+
+  .lead-magnet-detail-action-buttons {
+    justify-content: stretch;
+  }
+
+  .lead-magnet-detail-action-buttons > * {
     width: 100%;
   }
 
