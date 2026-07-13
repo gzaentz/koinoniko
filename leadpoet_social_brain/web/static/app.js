@@ -1096,14 +1096,14 @@ function topicIdeaCard(idea) {
   return `
     <article class="dashboard-feed-card topic-idea-card">
       <div class="meta-row">
-        <span>${escapeHtml(topicLabel(idea.topic || ""))}</span>
-        <span>${escapeHtml(label(idea.source_type || "evergreen"))}</span>
-        <span>Priority ${escapeHtml(String(idea.priority || 0))}</span>
+        <span class="meta-primary">${escapeHtml(topicLabel(idea.topic || ""))}</span>
+        <span class="meta-secondary">${escapeHtml(label(idea.source_type || "evergreen"))}</span>
+        <span class="meta-tertiary">Priority ${escapeHtml(String(idea.priority || 0))}</span>
       </div>
       <h3>${escapeHtml(idea.title || "Untitled topic")}</h3>
       <p class="dashboard-feed-card-summary topic-angle">${escapeHtml(idea.angle || "")}</p>
       <div class="actions left">
-        <button class="secondary" data-topic-action="use" data-topic-id="${escapeAttr(idea.id)}">Use in Post</button>
+        <button data-topic-action="use" data-topic-id="${escapeAttr(idea.id)}">Use in Post</button>
         <button class="quiet-button" data-topic-action="dismiss" data-topic-id="${escapeAttr(idea.id)}">Dismiss</button>
       </div>
     </article>
@@ -1148,14 +1148,14 @@ function dashboardTrendRow(item) {
   return `
     <article class="dashboard-feed-card trend-row" role="button" tabindex="0" onclick='openTrendDetails(${jsArg(item.id)})' onkeydown='openTrendDetailsFromKey(event, ${jsArg(item.id)})'>
       <div class="meta-row">
-        <span>${escapeHtml(topicLabel(item.topic || ""))}</span>
-        ${date ? `<span class="trend-date">${escapeHtml(date)}</span>` : ""}
-        ${item.source_url ? `<a href="${escapeAttr(item.source_url)}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">Source</a>` : ""}
+        <span class="meta-primary">${escapeHtml(topicLabel(item.topic || ""))}</span>
+        ${date ? `<span class="meta-secondary trend-date">${escapeHtml(date)}</span>` : ""}
+        ${item.source_url ? `<a class="meta-tertiary" href="${escapeAttr(item.source_url)}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">Source</a>` : ""}
       </div>
       <h3>${escapeHtml(item.title)}</h3>
       ${summary ? `<p class="dashboard-feed-card-summary trend-summary">${escapeHtml(summary)}</p>` : ""}
       <div class="actions left">
-        <button class="secondary" onclick='useTrendInPost(event, ${jsArg(item.id)})'>Use in Post</button>
+        <button onclick='useTrendInPost(event, ${jsArg(item.id)})'>Use in Post</button>
       </div>
     </article>
   `;
@@ -1246,15 +1246,15 @@ function patternCard(pattern) {
   return `
     <article class="dashboard-feed-card pattern-card" role="button" tabindex="0" onclick='openPatternDetails(${jsArg(pattern.id)})' onkeydown='openPatternDetailsFromKey(event, ${jsArg(pattern.id)})'>
       <div class="meta-row">
-        <span>${escapeHtml(label(pattern.category || "other"))}</span>
-        <span>${escapeHtml(topicLabel(pattern.topic || "No topic"))}</span>
-        ${pattern.source_url ? `<a href="${escapeAttr(pattern.source_url)}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">Source</a>` : ""}
+        <span class="meta-primary">${escapeHtml(label(pattern.category || "other"))}</span>
+        <span class="meta-secondary">${escapeHtml(topicLabel(pattern.topic || "No topic"))}</span>
+        ${pattern.source_url ? `<a class="meta-tertiary" href="${escapeAttr(pattern.source_url)}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">Source</a>` : ""}
       </div>
       <h3>${escapeHtml(pattern.pattern_name || "Observed pattern")}</h3>
       ${summary ? `<p class="dashboard-feed-card-summary pattern-summary">${escapeHtml(summary)}</p>` : ""}
       <div class="actions left">
+        <button onclick='usePatternInPost(event, ${jsArg(pattern.id)})'>Use Pattern</button>
         ${patternSaveButton(pattern)}
-        <button class="secondary" onclick='usePatternInPost(event, ${jsArg(pattern.id)})'>Use Pattern</button>
       </div>
     </article>
   `;
