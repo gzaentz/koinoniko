@@ -72,6 +72,7 @@ def plan_week_x(
     length_mode: str = "standard",
     topic_ideas: list[TopicIdea] | None = None,
     extra_instruction: str | None = None,
+    continue_on_generation_error: bool = False,
 ) -> PlanWeekResult:
     _ = variants_per_slot
     if posts <= 0:
@@ -149,11 +150,19 @@ def plan_week_x(
             prompt_profile="natural",
             editorial_value_mode=topic_idea.reader_value_mode if topic_idea else None,
         )
-        drafts = generator.generate(
-            request,
-            variants=1,
-            recent_output_texts=[item.text for item in queued],
-        )
+        try:
+            drafts = generator.generate(
+                request,
+                variants=1,
+                recent_output_texts=[item.text for item in queued],
+            )
+        except Exception as exc:  # noqa: BLE001 - unattended planning should preserve other valid slots.
+            if not continue_on_generation_error:
+                raise
+            warnings.append(
+                f"Slot {index + 1}: skipped after generation or quality validation failed: {exc}"
+            )
+            continue
         draft = drafts[0]
         quality_warnings = draft_quality_warnings(draft)
         warnings.extend(f"Slot {index + 1}: Quality warning: {warning}" for warning in quality_warnings)
@@ -175,6 +184,8 @@ def plan_week_x(
         queued.append(item)
         if topic_idea:
             store.mark_topic_idea_status(topic_idea.id, "used")
+    if continue_on_generation_error and not queued:
+        raise ValueError("Autopilot did not produce any review-ready posts; every slot failed validation.")
     return PlanWeekResult(queued=queued, warnings=warnings)
 
 

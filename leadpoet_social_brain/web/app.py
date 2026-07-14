@@ -1105,6 +1105,7 @@ def route_api(
             length_mode=str(payload.get("length_mode") or "standard"),
             topic_ideas=topic_ideas,
             extra_instruction=clean_optional(payload.get("instruction")),
+            continue_on_generation_error=autopilot,
         )
         return 200, {
             "queued": [queue_item_payload(store, item) for item in result.queued],
@@ -1739,6 +1740,7 @@ def autopilot_weekly_task_payload(store: SQLiteStore, payload: dict[str, Any]) -
             length_mode=str(payload.get("length_mode") or "standard"),
             topic_ideas=topic_result.ideas,
             extra_instruction=clean_optional(payload.get("instruction")),
+            continue_on_generation_error=True,
         )
         completed_at = utc_now()
         warnings = [*topic_result.warnings, *result.warnings]

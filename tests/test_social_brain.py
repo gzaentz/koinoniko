@@ -7394,6 +7394,61 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(store.list_content_queue(), [])
             store.close()
 
+    def test_autopilot_plan_skips_failed_slot_and_keeps_review_ready_slots(self):
+        class PartiallyFailingGenerator:
+            def __init__(self, store):
+                self.store = store
+                self.calls = 0
+
+            def generate(self, request, *, variants, recent_output_texts):
+                self.calls += 1
+                if self.calls == 1:
+                    raise ValueError("exact-final audit did not pass")
+                draft = GeneratedDraft(
+                    text="A review-ready post from the second grounded topic.",
+                    request=request,
+                    explanation="The post passed the configured quality gates.",
+                    influences=[],
+                )
+                return [self.store.save_generated_draft(draft)]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            ideas = [
+                store.save_topic_idea(
+                    TopicIdea(
+                        title=f"Grounded topic {index}",
+                        topic="sales AI",
+                        angle=f"Offer grounded diagnostic {index}.",
+                        why_now="It is useful now.",
+                    )
+                )
+                for index in range(2)
+            ]
+
+            result = plan_week_x(
+                store,
+                PartiallyFailingGenerator(store),
+                week_start="2026-07-20",
+                posts=2,
+                use_trends=False,
+                trend_window_days=14,
+                topic_mix=None,
+                cadence="weekday_mornings",
+                default_post_type="founder_insight",
+                variants_per_slot=1,
+                allow_evergreen=True,
+                topic_ideas=ideas,
+                continue_on_generation_error=True,
+            )
+
+            self.assertEqual(len(result.queued), 1)
+            self.assertEqual(result.queued[0].scheduled_at[:10], "2026-07-21")
+            self.assertTrue(any("Slot 1: skipped" in warning for warning in result.warnings))
+            self.assertEqual(store.get_topic_idea(ideas[0].id).status, "suggested")
+            self.assertEqual(store.get_topic_idea(ideas[1].id).status, "used")
+            store.close()
+
     def test_plan_week_x_requires_evergreen_opt_in_when_trends_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
