@@ -74,6 +74,7 @@ def plan_week_x(
     extra_instruction: str | None = None,
     continue_on_generation_error: bool = False,
     occupied_schedule_dates: set[date] | None = None,
+    generation_attempt_limit: int | None = None,
 ) -> PlanWeekResult:
     _ = variants_per_slot
     if posts <= 0:
@@ -82,11 +83,16 @@ def plan_week_x(
     get_x_adapter().validate_post_type(default_post_type)
     start_date = date.fromisoformat(week_start)
     topics = expand_topic_mix(topic_mix, posts)
-    selected_topic_ideas = [idea for idea in (topic_ideas or []) if idea.status == "suggested"][:posts]
+    candidate_limit = posts
+    if continue_on_generation_error and generation_attempt_limit is not None:
+        candidate_limit = max(posts, int(generation_attempt_limit))
+    selected_topic_ideas = [
+        idea for idea in (topic_ideas or []) if idea.status == "suggested"
+    ][:candidate_limit]
     if topic_ideas is not None:
         if not selected_topic_ideas:
             raise ValueError("No grounded topic ideas are available for Autopilot planning.")
-        posts = len(selected_topic_ideas)
+        posts = min(posts, len(selected_topic_ideas))
     scheduled_times = schedule_slots(
         start_date,
         posts=posts,
@@ -112,7 +118,10 @@ def plan_week_x(
 
     used_trends: set[str] = set()
     queued: list[ContentQueueItem] = []
-    for index in range(posts):
+    candidate_count = len(selected_topic_ideas) if topic_ideas is not None else posts
+    for index in range(candidate_count):
+        if len(queued) >= posts:
+            break
         topic_idea = selected_topic_ideas[index] if index < len(selected_topic_ideas) else None
         topic = (
             prompt_safe_automated_label(
@@ -182,7 +191,7 @@ def plan_week_x(
                 post_type=post_type,
                 angle=angle,
                 trend_ids=[trend.id] if trend else [],
-                scheduled_at=scheduled_times[index].isoformat(),
+                scheduled_at=scheduled_times[len(queued)].isoformat(),
                 status="needs_review",
                 reviewer_notes=queue_notes(draft.explanation, trend, quality_warnings=quality_warnings),
             )

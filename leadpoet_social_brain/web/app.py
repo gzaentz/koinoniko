@@ -1753,6 +1753,7 @@ def autopilot_weekly_task_payload(store: SQLiteStore, payload: dict[str, Any]) -
             extra_instruction=clean_optional(payload.get("instruction")),
             continue_on_generation_error=True,
             occupied_schedule_dates=occupied_schedule_dates,
+            generation_attempt_limit=remaining_posts + 2,
         )
         completed_at = utc_now()
         warnings = [*topic_result.warnings, *result.warnings]

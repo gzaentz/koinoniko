@@ -7431,7 +7431,7 @@ class SocialBrainTest(unittest.TestCase):
                 store,
                 PartiallyFailingGenerator(store),
                 week_start="2026-07-20",
-                posts=2,
+                posts=1,
                 use_trends=False,
                 trend_window_days=14,
                 topic_mix=None,
@@ -7441,10 +7441,11 @@ class SocialBrainTest(unittest.TestCase):
                 allow_evergreen=True,
                 topic_ideas=ideas,
                 continue_on_generation_error=True,
+                generation_attempt_limit=2,
             )
 
             self.assertEqual(len(result.queued), 1)
-            self.assertEqual(result.queued[0].scheduled_at[:10], "2026-07-21")
+            self.assertEqual(result.queued[0].scheduled_at[:10], "2026-07-20")
             self.assertTrue(any("Slot 1: skipped" in warning for warning in result.warnings))
             self.assertEqual(store.get_topic_idea(ideas[0].id).status, "suggested")
             self.assertEqual(store.get_topic_idea(ideas[1].id).status, "used")
@@ -12781,6 +12782,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["existing"], 1)
             self.assertEqual(payload["target"], 5)
             self.assertEqual(planner.call_args.kwargs["posts"], 4)
+            self.assertEqual(planner.call_args.kwargs["generation_attempt_limit"], 6)
             self.assertEqual(
                 planner.call_args.kwargs["occupied_schedule_dates"],
                 {datetime.fromisoformat("2026-07-13").date()},
