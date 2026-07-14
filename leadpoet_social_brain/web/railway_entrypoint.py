@@ -19,6 +19,7 @@ TASK_BY_SERVICE_NAME = {
     "refresh-patterns-weekly": "refresh-patterns-weekly",
     "refresh-topics": "refresh-topics",
     "autopilot-weekly": "autopilot-weekly",
+    "weekly-autopilot": "autopilot-weekly",
     "autopilot-lead-magnet": "autopilot-lead-magnet",
 }
 

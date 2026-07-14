@@ -90,7 +90,7 @@ from leadpoet_social_brain.platforms.x_api import (
 )
 from leadpoet_social_brain.providers import load_provider_from_env, resolve_model_routing
 from leadpoet_social_brain.storage.sqlite_store import DEFAULT_DB_PATH, DEFAULT_WEB_AUTH_USERNAME, SQLiteStore
-from leadpoet_social_brain.trend_scout import refresh_web_trends
+from leadpoet_social_brain.trend_scout import DEFAULT_WEB_TRENDS_PER_WINDOW, refresh_web_trends
 
 REPEATED_PHRASE_STOPWORDS = {
     "a",
@@ -316,7 +316,7 @@ def build_parser() -> argparse.ArgumentParser:
     refresh_pattern_parser.set_defaults(func=cmd_refresh_patterns)
 
     refresh_trends_parser = subparsers.add_parser("refresh-trends", help="Refresh Trend Scout sources and enrich selected trends.")
-    refresh_trends_parser.add_argument("--limit", type=int, default=5)
+    refresh_trends_parser.add_argument("--limit", type=int, default=DEFAULT_WEB_TRENDS_PER_WINDOW)
     refresh_trends_parser.add_argument("--no-enrich", action="store_true")
     refresh_trends_parser.set_defaults(func=cmd_refresh_trends)
 

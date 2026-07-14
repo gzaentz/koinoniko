@@ -19,7 +19,7 @@ TASK_DEFAULTS: dict[str, dict[str, Any]] = {
     "sync-x-daily": {"post_limit": 25, "metrics_limit": 250, "since_days": 30},
     "publish-due-x": {"limit": 20},
     "refresh-trends": {
-        "limit": 5,
+        "limit": 10,
         "no_enrich": True,
         "scrapingdog_timeout_seconds": 12,
         "max_news_queries_per_window": 2,
@@ -27,10 +27,10 @@ TASK_DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "refresh-patterns": {"limit": 5, "window": "weekly"},
     "refresh-patterns-weekly": {"limit": 5, "windows": ["weekly", "monthly"]},
-    "refresh-topics": {"limit": 10},
+    "refresh-topics": {"limit": 20},
     "autopilot-weekly": {
         "posts": 5,
-        "topic_limit": 10,
+        "topic_limit": 20,
         "use_trends": True,
         "use_patterns": True,
         "length_mode": "standard",

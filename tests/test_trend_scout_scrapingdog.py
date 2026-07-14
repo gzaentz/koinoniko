@@ -249,12 +249,13 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
                 timeout_seconds: int = 45,
             ):
                 self.assertEqual(api_key, "dog-key")
-                self.assertIn("sales AI", query or "")
+                self.assertTrue(query)
                 slug = tbs.replace(":", "-")
+                query_slug = sum((index + 1) * ord(char) for index, char in enumerate(query or ""))
                 return [
                     {
-                        "title": f"Generative AI sales workflow {slug} {index}",
-                        "link": f"https://example.com/{slug}/{index}",
+                        "title": f"Generative AI sales workflow {slug} {query_slug} {index}",
+                        "link": f"https://example.com/{slug}/{query_slug}/{index}",
                         "source": "Example News",
                         "snippet": "Lead generation and sales automation teams are changing pipeline work.",
                     }
@@ -272,8 +273,8 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
                     ):
                         groups = refresh_web_trends(store)
 
-            self.assertEqual(len(groups.daily), 5)
-            self.assertEqual(len(groups.weekly), 5)
+            self.assertEqual(len(groups.daily), 10)
+            self.assertEqual(len(groups.weekly), 10)
             self.assertEqual(groups.errors, [])
             self.assertIn("Scrapingdog Google Trends", groups.sources)
             self.assertIn("Scrapingdog Google News", groups.sources)
@@ -396,13 +397,14 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
                 sources=["Scrapingdog Google Trends"],
             )
 
-            with patch("leadpoet_social_brain.web.app.refresh_web_trends", return_value=groups):
+            with patch("leadpoet_social_brain.web.app.refresh_web_trends", return_value=groups) as refresh:
                 status, payload = handle_api_request("POST", "/api/trends/refresh", b"{}", db_path=db_path)
 
             self.assertEqual(status, 200)
             self.assertEqual(payload["trend_groups"]["daily"][0]["title"], "Daily AI sales signal")
             self.assertEqual(payload["errors"], groups.errors)
             self.assertEqual(payload["sources"], groups.sources)
+            self.assertEqual(refresh.call_args.kwargs["limit"], 10)
 
     def test_trend_refresh_stores_source_metadata_and_enriched_digest(self):
         with tempfile.TemporaryDirectory() as tmpdir:

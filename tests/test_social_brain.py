@@ -8586,16 +8586,16 @@ class SocialBrainTest(unittest.TestCase):
                         "seendate": "20260626120000",
                         "sourceCommonName": "Example News",
                     }
-                    for index in range(7)
+                    for index in range(12)
                 ]
 
             refreshed = refresh_web_trends(store, fetch_articles=fake_fetch)
             grouped = web_trend_groups(store, now=datetime(2026, 6, 26, 12, 30, tzinfo=timezone.utc))
 
-            self.assertEqual(len(refreshed.daily), 5)
-            self.assertEqual(len(refreshed.weekly), 5)
-            self.assertEqual(len(grouped.daily), 5)
-            self.assertEqual(len(grouped.weekly), 5)
+            self.assertEqual(len(refreshed.daily), 10)
+            self.assertEqual(len(refreshed.weekly), 10)
+            self.assertEqual(len(grouped.daily), 10)
+            self.assertEqual(len(grouped.weekly), 10)
             self.assertTrue(all(trend.source_type == "web_daily" for trend in grouped.daily))
             self.assertTrue(all(trend.source_type == "web_weekly" for trend in grouped.weekly))
             self.assertTrue(all(trend.id.startswith("trend_web_daily_") for trend in grouped.daily))
@@ -8704,7 +8704,7 @@ class SocialBrainTest(unittest.TestCase):
                         date=(now - timedelta(days=3 + index)).isoformat(),
                     )
                 )
-                for index in range(4)
+                for index in range(9)
             ]
             store.save_trend_item(
                 TrendItem(
@@ -8721,7 +8721,7 @@ class SocialBrainTest(unittest.TestCase):
             grouped = web_trend_groups(store, now=now)
 
             self.assertEqual([trend.id for trend in grouped.daily], [recent.id, *[trend.id for trend in older]])
-            self.assertEqual(len(grouped.daily), 5)
+            self.assertEqual(len(grouped.daily), 10)
             self.assertTrue(all(trend.source_type == "web_daily" for trend in grouped.daily))
             store.close()
 
@@ -10416,13 +10416,16 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(
             TASK_DEFAULTS["refresh-trends"],
             {
-                "limit": 5,
+                "limit": 10,
                 "no_enrich": True,
                 "scrapingdog_timeout_seconds": 12,
                 "max_news_queries_per_window": 2,
                 "deadline_seconds": 85,
             },
         )
+        self.assertEqual(TASK_DEFAULTS["refresh-topics"], {"limit": 20})
+        self.assertEqual(TASK_DEFAULTS["autopilot-weekly"]["topic_limit"], 20)
+        self.assertEqual(build_cli_parser().parse_args(["refresh-trends"]).limit, 10)
         self.assertEqual(TASK_DEFAULTS["refresh-patterns"], {"limit": 5, "window": "weekly"})
         self.assertEqual(TASK_DEFAULTS["refresh-patterns-weekly"], {"limit": 5, "windows": ["weekly", "monthly"]})
         self.assertEqual(task_client.DEFAULT_TASK_TIMEOUT_SECONDS, 180)
@@ -10538,6 +10541,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(task_from_environment({"RAILWAY_SERVICE_NAME": "publish-due-x"}), "publish-due-x")
         self.assertEqual(task_from_environment({"RAILWAY_SERVICE_NAME": "sync-x-posts"}), "sync-x-posts")
         self.assertEqual(task_from_environment({"RAILWAY_SERVICE_NAME": "refresh-patterns"}), "refresh-patterns-weekly")
+        self.assertEqual(task_from_environment({"RAILWAY_SERVICE_NAME": "weekly-autopilot"}), "autopilot-weekly")
         self.assertEqual(task_from_environment({"SOCIAL_BRAIN_TASK": "sync-x-metrics"}), "sync-x-metrics")
         self.assertIsNone(task_from_environment({"RAILWAY_SERVICE_NAME": "koinoniko"}))
 
@@ -12354,6 +12358,140 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(ideas[0].source_type, "evergreen")
         self.assertEqual(ideas[0].post_type, "founder_insight")
         self.assertEqual(ideas[0].priority, 100)
+
+    def test_topic_scout_default_can_fill_twenty_diverse_topics(self):
+        subjects = [
+            "handoff ownership",
+            "release notes",
+            "operating cadence",
+            "data contracts",
+            "demo preparation",
+            "discovery calls",
+            "workflow boundaries",
+            "source provenance",
+            "review queues",
+            "customer interviews",
+            "support triage",
+            "roadmap tradeoffs",
+            "onboarding friction",
+            "model routing",
+            "founder delegation",
+            "quality checks",
+            "market narratives",
+            "technical debt",
+            "team rituals",
+            "product feedback",
+        ]
+        value_modes = [
+            "practical playbook",
+            "mechanism explainer",
+            "diagnostic",
+            "decision framework",
+            "evidence unpacking",
+            "build note",
+            "buyer question",
+            "useful distinction",
+        ]
+        rows = [
+            {
+                "title": f"A review prompt for {subject}",
+                "topic": subject,
+                "angle": f"Propose a {value_modes[index % len(value_modes)]} for examining {subject} without asserting an outcome.",
+                "why_now": "Use this as a proposed editorial exercise.",
+                "reader_value_mode": value_modes[index % len(value_modes)],
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 90 - index,
+            }
+            for index, subject in enumerate(subjects)
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            provider = FakeProvider([json.dumps({"topics": rows})])
+
+            result = refresh_topic_ideas(store, provider)
+
+            self.assertEqual(len(result.ideas), 20)
+            self.assertEqual(len({idea.reader_value_mode for idea in result.ideas}), 8)
+            self.assertEqual(result.warnings, [])
+            store.close()
+
+    def test_topic_scout_retries_malformed_json_response(self):
+        valid_rows = [
+            {
+                "title": "A provenance handoff checklist",
+                "topic": "RevOps",
+                "angle": "Offer a checklist for inspecting how a field keeps its source across a handoff.",
+                "why_now": "Use it as a practical audit prompt.",
+                "reader_value_mode": "practical playbook",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 92,
+            },
+            {
+                "title": "A buyer question for evidence conflicts",
+                "topic": "sales AI",
+                "angle": "Give buyers a question for testing how a system handles contradictory evidence.",
+                "why_now": "Use it to make a demo easier to evaluate.",
+                "reader_value_mode": "buyer question",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 90,
+            },
+            {
+                "title": "A proposed review-cost ledger",
+                "topic": "sales operations",
+                "angle": "Propose a decision framework for listing the review work attached to each option.",
+                "why_now": "Use it as a bounded comparison method.",
+                "reader_value_mode": "decision framework",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 88,
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            provider = SequentialProvider(
+                [
+                    '{"topics":[{"title":"Broken response" "topic":"GTM"}]}',
+                    json.dumps({"topics": valid_rows}),
+                ]
+            )
+
+            result = refresh_topic_ideas(store, provider, limit=3)
+
+            self.assertEqual(len(result.ideas), 3)
+            self.assertEqual(len(provider.prompts), 2)
+            self.assertIn("previous response could not be parsed as JSON", provider.prompts[1])
+            self.assertTrue(any("Recovered after 1 malformed" in item for item in result.diagnostics))
+            store.close()
+
+    def test_topic_scout_bounds_malformed_json_retries_and_preserves_existing_topics(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            existing = store.save_topic_idea(
+                TopicIdea(
+                    title="Keep this topic until replacement succeeds",
+                    topic="operations",
+                    angle="Offer a checklist for reviewing a handoff.",
+                    why_now="Use it as a practical audit prompt.",
+                )
+            )
+            provider = SequentialProvider(['{"topics":[' for _ in range(5)])
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "Topic Scout did not return valid topic JSON after 5 attempts",
+            ):
+                refresh_topic_ideas(store, provider, limit=3)
+
+            self.assertEqual(len(provider.prompts), 5)
+            self.assertEqual(store.get_topic_idea(existing.id).status, "suggested")
+            store.close()
 
     def test_plan_week_autopilot_uses_topic_idea_and_marks_it_used(self):
         with tempfile.TemporaryDirectory() as tmpdir:

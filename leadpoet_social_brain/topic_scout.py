@@ -44,6 +44,8 @@ TOPIC_EDITORIAL_THEME_LIMITS = {
 
 TRACEABLE_TOPIC_SOURCE_TYPES = {"trend", "performance", "product", "founder", "follow_up"}
 TOPIC_SCOUT_MAX_ATTEMPTS = 5
+DEFAULT_TOPIC_IDEA_LIMIT = 20
+MAX_TOPIC_IDEA_LIMIT = 20
 EDITORIAL_VALUE_MODE_NAMES = {name for name, _guidance in EDITORIAL_VALUE_MODES}
 
 
@@ -58,16 +60,17 @@ def refresh_topic_ideas(
     store: SQLiteStore,
     provider: DraftProvider,
     *,
-    limit: int = 10,
+    limit: int = DEFAULT_TOPIC_IDEA_LIMIT,
 ) -> TopicRefreshResult:
-    requested = max(3, min(int(limit), 20))
+    requested = max(3, min(int(limit), MAX_TOPIC_IDEA_LIMIT))
     accepted: list[TopicIdea] = []
     seen: set[str] = set()
     theme_counts: Counter[str] = Counter()
     source_counts: Counter[str] = Counter()
     value_mode_counts: Counter[str] = Counter()
     portfolio_lane_counts: Counter[str] = Counter()
-    required_value_mode_count = min(requested, max(2, math.ceil(requested * 0.6)))
+    required_value_mode_count = topic_value_mode_target(requested)
+    value_mode_limit = topic_value_mode_cap(requested)
     skipped_repeated_themes = 0
     skipped_unsupported_claims: list[str] = []
     skipped_untraceable_sources = 0
@@ -75,6 +78,8 @@ def refresh_topic_ideas(
     skipped_source_concentration = 0
     skipped_value_concentration = 0
     rejected_summaries: list[str] = []
+    response_parse_failures: list[str] = []
+    valid_response_count = 0
     routing = resolve_model_routing(store, provider)
     for attempt in range(TOPIC_SCOUT_MAX_ATTEMPTS):
         missing = requested - len(accepted)
@@ -91,7 +96,19 @@ def refresh_topic_ideas(
                 required_value_mode_count=required_value_mode_count,
                 rejected_summaries=rejected_summaries,
             )
-        candidate_count = min(20, missing + (2 if attempt == 0 else 4))
+        if response_parse_failures:
+            json_retry_constraint = (
+                "The previous response could not be parsed as JSON. Return one complete JSON object "
+                'with a "topics" array, use commas between every field and item, escape quotes inside '
+                "strings, and do not include markdown fences or commentary."
+            )
+            extra_constraints = "\n".join(
+                part for part in [extra_constraints, json_retry_constraint] if part
+            )
+        candidate_count = min(
+            20,
+            missing if response_parse_failures else missing + (2 if attempt == 0 else 4),
+        )
         prompt = build_topic_ideas_prompt(
             store,
             limit=candidate_count,
@@ -104,7 +121,12 @@ def refresh_topic_ideas(
             variants=1,
             model=routing.strategist,
         )[0]
-        parsed = parse_topic_ideas(raw, limit=candidate_count)
+        try:
+            parsed = parse_topic_ideas(raw, limit=candidate_count)
+        except (json.JSONDecodeError, ValueError) as exc:
+            response_parse_failures.append(compact(str(exc), 180))
+            continue
+        valid_response_count += 1
         if not parsed and attempt == 0:
             raise ValueError("Topic Scout did not return any usable topic ideas.")
         parsed.sort(
@@ -142,7 +164,7 @@ def refresh_topic_ideas(
             remaining_slots_after = requested - (len(accepted) + 1)
             distinct_modes_after = len(value_mode_counts) + (0 if value_mode_counts[value_mode] else 1)
             unique_modes_still_needed = max(0, required_value_mode_count - distinct_modes_after)
-            if value_mode_counts[value_mode] >= 2 or remaining_slots_after < unique_modes_still_needed:
+            if value_mode_counts[value_mode] >= value_mode_limit or remaining_slots_after < unique_modes_still_needed:
                 skipped_value_concentration += 1
                 rejected_summaries.append(f"reader value concentration ({value_mode}): {idea.title}")
                 continue
@@ -198,6 +220,10 @@ def refresh_topic_ideas(
             if len(accepted) >= requested:
                 break
 
+    if not accepted and response_parse_failures and not valid_response_count:
+        raise ValueError(
+            f"Topic Scout did not return valid topic JSON after {len(response_parse_failures)} attempts."
+        )
     if not accepted:
         raise ValueError("Topic Scout did not return any grounded, usable topic ideas.")
 
@@ -207,6 +233,10 @@ def refresh_topic_ideas(
 
     warnings: list[str] = []
     diagnostics: list[str] = []
+    if response_parse_failures:
+        diagnostics.append(
+            f"Recovered after {len(response_parse_failures)} malformed Topic Scout response(s)."
+        )
     if len(saved) < requested:
         warnings.append(
             f"Saved {len(saved)} grounded idea(s); left {requested - len(saved)} requested slot(s) open "
@@ -245,6 +275,15 @@ def refresh_topic_ideas(
             f"Topic Scout produced {len(value_mode_counts)} reader value mode(s); target was {required_value_mode_count}."
         )
     return TopicRefreshResult(ideas=saved, warnings=warnings, diagnostics=diagnostics)
+
+
+def topic_value_mode_target(requested: int) -> int:
+    return min(len(EDITORIAL_VALUE_MODES), requested, max(2, math.ceil(requested * 0.6)))
+
+
+def topic_value_mode_cap(requested: int) -> int:
+    available_modes = max(1, len(EDITORIAL_VALUE_MODES))
+    return max(2, math.ceil(requested / available_modes))
 
 
 def build_topic_ideas_prompt(
@@ -347,6 +386,8 @@ def build_topic_ideas_prompt(
         if extra_constraints.strip()
         else ""
     )
+    value_mode_target = topic_value_mode_target(portfolio_target)
+    value_mode_limit = topic_value_mode_cap(portfolio_target)
     return f"""Create {limit} candidate X post topics for this workspace. The system will select a final portfolio of {portfolio_target}.
 
 Goal: hand the writer a self-contained premise so the user does not have to invent the strategy or angle.
@@ -372,7 +413,7 @@ Success criteria:
 - No more than two ideas may use the broader signal-to-action thesis. Different signal examples do not make the underlying lesson new.
 - Across the final portfolio, no more than three ideas total may live in the combined signals, intent, buyer-timing, targeting-context, or context-before-copy family. Those are one expertise lane, even when the examples differ.
 - Use the supplied authored-post content lanes to broaden the portfolio into other areas where evidence exists: founder operations, deliverability, data infrastructure, market economics, human selling, AI systems, decentralized AI, and message craft. Do not force a lane when the evidence is absent.
-- Across a 10-idea set, use at least six different reader value modes from the supplied portfolio; scale that diversity proportionally for smaller sets.
+- Across the final portfolio, use at least {value_mode_target} different reader value modes from the supplied portfolio and no more than {value_mode_limit} ideas in one mode.
 - At most one third of the ideas should be trend reactions. Include a useful mix of founder POV, buyer/problem mechanics, product beliefs, follow-ups to strong authored posts, and evergreen market takes.
 - Prefer sharp, ownable ideas over safe content-calendar filler.
 {replacement_constraints}

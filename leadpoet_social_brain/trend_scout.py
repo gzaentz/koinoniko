@@ -62,6 +62,7 @@ SCRAPINGDOG_NEWS_QUERIES = (
     '(automation OR AI OR agents OR outbound)',
 )
 SCRAPINGDOG_NEWS_QUERIES_PER_WINDOW = 6
+DEFAULT_WEB_TRENDS_PER_WINDOW = 10
 TREND_RELEVANCE_KEEP_THRESHOLD = 5
 TREND_REQUIRED_RELEVANCE_TERMS = {
     "account signal",
@@ -329,7 +330,7 @@ def refresh_web_trends(
     store: SQLiteStore,
     *,
     fetch_articles: FetchArticles | None = None,
-    limit: int = 5,
+    limit: int = DEFAULT_WEB_TRENDS_PER_WINDOW,
     provider: DraftProvider | None = None,
     enrich: bool = True,
     enrich_limit: int | None = None,
@@ -512,7 +513,7 @@ def refresh_injected_web_trends(
     store: SQLiteStore,
     *,
     fetch_articles: FetchArticles,
-    limit: int = 5,
+    limit: int = DEFAULT_WEB_TRENDS_PER_WINDOW,
     provider: DraftProvider | None = None,
     enrich: bool = True,
     enrich_limit: int | None = None,
@@ -594,15 +595,33 @@ def refresh_web_trends_for_period(
         except Exception as exc:  # noqa: BLE001 - third-party trend source can fail independently.
             errors.append(f"{period} Scrapingdog Google Trends failed: {exc}")
 
-        if len(select_web_trend_articles(articles, limit=limit)) < limit:
+        if len(
+            select_web_trend_articles(
+                articles,
+                limit=limit,
+                exclude_source_urls=exclude_source_urls,
+            )
+        ) < limit:
             fetched_news = False
             news_errors: list[str] = []
             stopped_for_budget = False
             for news_tbs in scrapingdog_news_windows(period):
-                if len(select_web_trend_articles(articles, limit=limit)) >= limit:
+                if len(
+                    select_web_trend_articles(
+                        articles,
+                        limit=limit,
+                        exclude_source_urls=exclude_source_urls,
+                    )
+                ) >= limit:
                     break
                 for query in scrapingdog_news_queries(profile)[: max(0, max_news_queries_per_window)]:
-                    if len(select_web_trend_articles(articles, limit=limit)) >= limit:
+                    if len(
+                        select_web_trend_articles(
+                            articles,
+                            limit=limit,
+                            exclude_source_urls=exclude_source_urls,
+                        )
+                    ) >= limit:
                         break
                     call_timeout = trend_refresh_call_timeout(deadline, scrapingdog_timeout_seconds)
                     if call_timeout <= 0:
@@ -633,7 +652,11 @@ def refresh_web_trends_for_period(
                 errors.append(f"{period} Scrapingdog Google News failed: {news_errors[0]}")
 
     stats["candidates_found"] += len(articles)
-    selected = select_web_trend_articles(articles, limit=limit)
+    selected = select_web_trend_articles(
+        articles,
+        limit=limit,
+        exclude_source_urls=exclude_source_urls,
+    )
     return save_web_trend_articles(
         store,
         articles=selected,
@@ -783,14 +806,18 @@ def select_web_trend_articles(
     articles: list[dict[str, object]],
     *,
     limit: int,
+    exclude_source_urls: set[str] | None = None,
 ) -> list[dict[str, object]]:
     selected: list[dict[str, object]] = []
     seen: set[str] = set()
+    excluded = exclude_source_urls or set()
     for article in sorted(articles, key=web_trend_rank_key, reverse=True):
         if web_trend_relevance_score(article) < TREND_RELEVANCE_KEEP_THRESHOLD:
             continue
         title = clean_text(article.get("title"))
         url = clean_text(article.get("url") or article.get("link") or article.get("url_mobile"))
+        if canonical_source_url(url) in excluded:
+            continue
         dedupe_key = (url or title).lower()
         if not title or dedupe_key in seen:
             continue
@@ -1427,7 +1454,12 @@ def empty_refresh_stats() -> dict[str, int]:
     }
 
 
-def web_trend_groups(store: SQLiteStore, *, now: datetime | None = None, limit: int = 5) -> WebTrendGroups:
+def web_trend_groups(
+    store: SQLiteStore,
+    *,
+    now: datetime | None = None,
+    limit: int = DEFAULT_WEB_TRENDS_PER_WINDOW,
+) -> WebTrendGroups:
     current = now or datetime.now(timezone.utc)
     trends = store.list_trends(status="unused", limit=250)
     daily = select_trend_group(

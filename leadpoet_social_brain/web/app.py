@@ -106,8 +106,13 @@ from leadpoet_social_brain.storage.sqlite_store import (
     SQLiteStore,
     resolve_db_path,
 )
-from leadpoet_social_brain.trend_scout import refresh_web_trends, scrapingdog_configured, web_trend_groups
-from leadpoet_social_brain.topic_scout import refresh_topic_ideas
+from leadpoet_social_brain.trend_scout import (
+    DEFAULT_WEB_TRENDS_PER_WINDOW,
+    refresh_web_trends,
+    scrapingdog_configured,
+    web_trend_groups,
+)
+from leadpoet_social_brain.topic_scout import DEFAULT_TOPIC_IDEA_LIMIT, refresh_topic_ideas
 from leadpoet_social_brain.voice import (
     DEFAULT_AVOID_PHRASES,
     DEFAULT_VOICE_RULES,
@@ -1076,7 +1081,11 @@ def route_api(
         if autopilot:
             available = store.list_topic_ideas(status="suggested", limit=posts)
             if len(available) < posts or bool_from_payload(payload, "refresh_topics", True):
-                topic_result = refresh_topic_ideas(store, provider, limit=max(posts, int(payload.get("topic_limit") or 10)))
+                topic_result = refresh_topic_ideas(
+                    store,
+                    provider,
+                    limit=max(posts, int(payload.get("topic_limit") or DEFAULT_TOPIC_IDEA_LIMIT)),
+                )
                 available = topic_result.ideas
                 topic_warnings.extend(topic_result.warnings)
             topic_ideas = available[:posts]
@@ -1384,7 +1393,7 @@ def sync_x_daily_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[st
 def refresh_trends_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
     started_at = utc_now()
     try:
-        limit = int(payload.get("limit") or 5)
+        limit = int(payload.get("limit") or DEFAULT_WEB_TRENDS_PER_WINDOW)
         no_enrich = bool_from_payload(payload, "no_enrich", False)
         enrich_limit = int(payload.get("enrich_limit") or limit)
         scrapingdog_timeout_seconds = optional_int(payload.get("scrapingdog_timeout_seconds"))
@@ -1632,11 +1641,16 @@ def refresh_topics_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> 
         provider = load_configured_provider(store)
         if not provider:
             raise ValueError("No LLM provider configured. Set a provider before refreshing topics.")
-        result = refresh_topic_ideas(store, provider, limit=int(payload.get("limit") or 10))
+        result = refresh_topic_ideas(
+            store,
+            provider,
+            limit=int(payload.get("limit") or DEFAULT_TOPIC_IDEA_LIMIT),
+        )
         completed_at = utc_now()
         summary = {
             "stored": len(result.ideas),
             "warnings": result.warnings,
+            "diagnostics": result.diagnostics,
             "completed_at": completed_at,
         }
         metadata = store.save_sync_metadata(
@@ -1707,7 +1721,7 @@ def autopilot_weekly_task_payload(store: SQLiteStore, payload: dict[str, Any]) -
         topic_result = refresh_topic_ideas(
             store,
             provider,
-            limit=max(posts, int(payload.get("topic_limit") or 10)),
+            limit=max(posts, int(payload.get("topic_limit") or DEFAULT_TOPIC_IDEA_LIMIT)),
         )
         result = plan_week_x(
             store,
@@ -3069,7 +3083,7 @@ def dashboard_payload(store: SQLiteStore) -> dict[str, Any]:
     trends = [*trend_groups.daily, *trend_groups.weekly]
     patterns = pattern_groups(store)
     saved_patterns = store.list_viral_patterns(status="saved", limit=100)
-    topic_ideas = store.list_topic_ideas(status="suggested", limit=12)
+    topic_ideas = store.list_topic_ideas(status="suggested", limit=DEFAULT_TOPIC_IDEA_LIMIT)
     return {
         "status": status_payload(store),
         "queue_counts": counts,

@@ -1104,7 +1104,7 @@ function renderDashboardTopics() {
   }
   const ideas = state.dashboard.topic_ideas || [];
   list.innerHTML = ideas.length
-    ? ideas.slice(0, 6).map(topicIdeaCard).join("")
+    ? ideas.slice(0, 12).map(topicIdeaCard).join("")
     : `<p class="muted">No topic ideas yet. Refresh once and Koinoniko will turn your posts, context, and trends into angles.</p>`;
   list.querySelectorAll("[data-topic-action]").forEach((button) => {
     button.addEventListener("click", (event) => {
@@ -1135,7 +1135,7 @@ function topicIdeaCard(idea) {
 async function refreshTopics() {
   const payload = await api("/api/topics/refresh", {
     method: "POST",
-    body: JSON.stringify({ limit: 10 }),
+    body: JSON.stringify({ limit: 20 }),
   });
   if (state.dashboard) state.dashboard.topic_ideas = payload.items || [];
   renderDashboardTopics();
@@ -2298,7 +2298,7 @@ async function syncAllXData() {
 async function refreshTrendsFromAccount() {
   const payload = await api("/api/trends/refresh", {
     method: "POST",
-    body: JSON.stringify({ limit: 5 }),
+    body: JSON.stringify({ limit: 10 }),
   });
   const daily = payload.trend_groups?.daily?.length || 0;
   const weekly = payload.trend_groups?.weekly?.length || 0;
