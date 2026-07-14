@@ -71,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("--payload must be a JSON object.")
         payload.update(override)
 
+    print(f"Starting Koinoniko task: {args.task}", flush=True)
     try:
         result = post_task(base_url, args.task, args.secret, payload, timeout_seconds=args.timeout)
     except RuntimeError as exc:

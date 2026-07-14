@@ -10541,7 +10541,8 @@ class SocialBrainTest(unittest.TestCase):
             "leadpoet_social_brain.web.task_client.post_task",
             return_value={"ok": True, "errors": []},
         ) as post_task:
-            with redirect_stdout(io.StringIO()):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
                 exit_code = task_client_main(
                     [
                         "sync-x-posts",
@@ -10554,6 +10555,8 @@ class SocialBrainTest(unittest.TestCase):
                     ]
                 )
         self.assertEqual(exit_code, 0)
+        self.assertIn("Starting Koinoniko task: sync-x-posts", stdout.getvalue())
+        self.assertNotIn("task-secret", stdout.getvalue())
         post_task.assert_called_once_with(
             "https://example.com",
             "sync-x-posts",
