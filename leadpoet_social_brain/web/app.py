@@ -714,6 +714,8 @@ def route_api(
         return 200, refresh_topics_task_payload(store, payload)
     if method == "POST" and parts == ["tasks", "autopilot-weekly"]:
         return 200, autopilot_weekly_task_payload(store, payload)
+    if method == "POST" and parts == ["tasks", "autopilot-weekly-status"]:
+        return 200, autopilot_weekly_status_payload(store, payload)
     if method == "POST" and parts == ["tasks", "autopilot-lead-magnet"]:
         return 200, autopilot_lead_magnet_task_payload(store, payload)
     if not parts or parts[0] != "api":
@@ -1791,6 +1793,31 @@ def autopilot_weekly_task_payload(store: SQLiteStore, payload: dict[str, Any]) -
             )
         )
         raise
+
+
+def autopilot_weekly_status_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
+    week_start = str(payload.get("week_start") or next_monday())
+    start_date = date.fromisoformat(week_start)
+    items = [
+        item
+        for item in store.list_content_queue(platform="x", limit=500)
+        if item.scheduled_at
+        and start_date <= parse_dt(item.scheduled_at).astimezone(timezone.utc).date() < start_date + timedelta(days=7)
+        and item.status not in {"skipped", "failed"}
+    ]
+    return {
+        "week_start": week_start,
+        "queued": len(items),
+        "items": [
+            {
+                "id": item.id,
+                "status": item.status,
+                "scheduled_at": item.scheduled_at,
+            }
+            for item in items
+        ],
+        "sync": sync_metadata_payload(store.get_sync_metadata(AUTOPILOT_SYNC_KEY)),
+    }
 
 
 def autopilot_lead_magnet_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:

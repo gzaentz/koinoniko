@@ -12786,6 +12786,43 @@ class SocialBrainTest(unittest.TestCase):
                 {datetime.fromisoformat("2026-07-13").date()},
             )
 
+    def test_autopilot_weekly_status_reports_saved_failure_without_post_text(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            item = store.save_content_queue_item(
+                ContentQueueItem(
+                    text="Private review copy.",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-07-13T13:00:00+00:00",
+                    status="needs_review",
+                )
+            )
+            store.save_sync_metadata(
+                SyncMetadata(
+                    key="autopilot_weekly",
+                    status="failed",
+                    error_message="Exact-final evaluator rejected every slot.",
+                    summary={"queued": 0},
+                )
+            )
+            store.close()
+
+            status, payload = handle_api_request(
+                "POST",
+                "/tasks/autopilot-weekly-status",
+                json.dumps({"week_start": "2026-07-13"}),
+                db_path=db_path,
+            )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["queued"], 1)
+            self.assertEqual(payload["items"], [{"id": item.id, "status": "needs_review", "scheduled_at": item.scheduled_at}])
+            self.assertEqual(payload["sync"]["status"], "failed")
+            self.assertIn("rejected every slot", payload["sync"]["error_message"])
+            self.assertNotIn("Private review copy", json.dumps(payload))
+
     def test_writer_and_evaluator_prompts_prioritize_natural_selection(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
