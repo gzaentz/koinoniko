@@ -174,7 +174,11 @@ class OpenRouterProvider:
     def post_json_with_retry(self, payload: dict[str, Any]) -> dict[str, Any]:
         for attempt in range(self.max_retries + 1):
             try:
-                return self.post_json(payload)
+                response = self.post_json(payload)
+                response_error = openrouter_response_error(response)
+                if response_error:
+                    raise response_error
+                return response
             except Exception as exc:  # noqa: BLE001 - retry only explicitly classified transient failures.
                 if attempt >= self.max_retries or not openrouter_error_is_retryable(exc):
                     raise
@@ -223,6 +227,24 @@ def openrouter_error_is_retryable(exc: Exception) -> bool:
     if isinstance(exc, (urllib.error.URLError, TimeoutError)):
         return True
     return False
+
+
+def openrouter_response_error(response: dict[str, Any]) -> OpenRouterRequestError | None:
+    error = response.get("error")
+    if not isinstance(error, dict):
+        return None
+    raw_code = error.get("code")
+    try:
+        status_code = int(raw_code)
+    except (TypeError, ValueError):
+        status_code = None
+    message = str(error.get("message") or "Unknown provider error").strip()
+    status_label = f" ({status_code})" if status_code is not None else ""
+    return OpenRouterRequestError(
+        f"OpenRouter response error{status_label}: {message}",
+        status_code=status_code,
+        retryable=status_code in OPENROUTER_TRANSIENT_STATUS_CODES,
+    )
 
 
 def read_json_response_with_deadline(

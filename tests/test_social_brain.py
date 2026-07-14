@@ -1253,6 +1253,27 @@ class SocialBrainTest(unittest.TestCase):
         self.assertEqual(calls, [1, 2, 3])
         self.assertEqual(delays, [0.1, 0.2])
 
+        error_response_calls: list[int] = []
+
+        def error_response_request(_url, _payload, _headers):
+            error_response_calls.append(len(error_response_calls) + 1)
+            if len(error_response_calls) < 3:
+                return {"error": {"message": "Internal Server Error", "code": 500}}
+            return {"choices": [{"message": {"content": "Recovered response body."}}]}
+
+        error_response_provider = OpenRouterProvider(
+            api_key="test-key",
+            model="test/model",
+            max_retries=2,
+            retry_backoff_seconds=0,
+            request_json=error_response_request,
+        )
+        self.assertEqual(
+            error_response_provider.generate("Write.", variants=1),
+            ["Recovered response body."],
+        )
+        self.assertEqual(error_response_calls, [1, 2, 3])
+
         permanent_calls: list[int] = []
 
         def permanent_request(_url, _payload, _headers):
