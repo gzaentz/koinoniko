@@ -1092,7 +1092,14 @@ function renderDashboardTrends() {
   $("trendDailyButton").classList.toggle("active", state.selectedTrendWindow === "daily");
   $("trendWeeklyButton").classList.toggle("active", state.selectedTrendWindow === "weekly");
   const trends = groups[state.selectedTrendWindow] || [];
-  renderTrendList("trendList", trends, `No ${state.selectedTrendWindow} trends loaded yet.`);
+  renderTrendList("trendList", trends, dashboardNewsEmptyText());
+}
+
+function dashboardNewsEmptyText() {
+  const days = state.selectedTrendWindow === "daily" ? 2 : 8;
+  const sync = state.dashboard?.sync?.trends_sync || {};
+  const checked = sync.last_completed_at ? ` Last checked ${formatDateTime(sync.last_completed_at)}.` : "";
+  return `No qualifying news from the last ${days} days.${checked}`;
 }
 
 function renderDashboardTopics() {
@@ -1105,7 +1112,7 @@ function renderDashboardTopics() {
   const ideas = state.dashboard.topic_ideas || [];
   list.innerHTML = ideas.length
     ? ideas.slice(0, 12).map(topicIdeaCard).join("")
-    : `<p class="muted">No topic ideas yet. Refresh once and Koinoniko will turn your posts, context, and trends into angles.</p>`;
+    : `<p class="muted">No topic ideas yet. Refresh once and Koinoniko will turn your posts, context, and news into angles.</p>`;
   list.querySelectorAll("[data-topic-action]").forEach((button) => {
     button.addEventListener("click", (event) => {
       if (button.dataset.topicAction === "use") openTopicIdeaInPost(button.dataset.topicId, event);
@@ -1307,7 +1314,7 @@ window.openTrendDetails = (id) => {
   if (!trend) return;
   const sourceDetails = trendSourceDetails(trend);
 
-  $("trendModalTitle").textContent = trend.title || "Trend details";
+  $("trendModalTitle").textContent = trend.title || "News details";
   $("trendModalBody").innerHTML = `
     <div class="detail-grid">
       ${detail("Topic", topicLabel(trend.topic || "Unknown"))}
@@ -1446,7 +1453,7 @@ function renderCreatePostSourceSelectors() {
   const selectedTrendId = state.selectedTrendForCreate?.id || trendSelect.value || "";
   const trends = allCreatePostTrends();
   trendSelect.innerHTML = [
-    optionHtml("", trends.length ? "No trend" : "No loaded trends"),
+    optionHtml("", trends.length ? "No news" : "No loaded news"),
     ...trends.map((trend) => optionHtml(trend.id, trendDropdownLabel(trend))),
   ].join("");
   trendSelect.value = trends.some((trend) => trend.id === selectedTrendId) ? selectedTrendId : "";
@@ -1570,8 +1577,8 @@ function renderCreatePostPatternHint() {
   if (trend) {
     rows.push(`
       <div>
-        <strong>${escapeHtml(trend.title || "Selected trend")}</strong>
-        <span>${escapeHtml(trend.leadpoet_angle || trend.summary || "Current trend context")}</span>
+        <strong>${escapeHtml(trend.title || "Selected news")}</strong>
+        <span>${escapeHtml(trend.leadpoet_angle || trend.summary || "Current news context")}</span>
       </div>
       <button class="quiet-button" type="button" onclick="clearSelectedTrend(event)">Remove</button>
     `);
@@ -1947,7 +1954,7 @@ function renderQueueMoreDetailsModal() {
     <label>Reviewer notes<textarea id="queueMoreDetailsNotes" rows="5">${escapeHtml(currentReviewerNotes(item))}</textarea></label>
     <div class="detail-grid queue-more-detail-grid">
       ${detail("Quality", qualityLabel(item.quality_mode) || "Unknown")}
-      ${detail("Trend/source", trendSummary(item) || "None")}
+      ${detail("News/source", trendSummary(item) || "None")}
       ${detail("Why suggested", item.angle || item.reviewer_notes || "Suggested from Social Brain context.")}
     </div>
     <div class="modal-actions">
@@ -2302,7 +2309,7 @@ async function refreshTrendsFromAccount() {
   });
   const daily = payload.trend_groups?.daily?.length || 0;
   const weekly = payload.trend_groups?.weekly?.length || 0;
-  showMessage(`Trends refreshed. Daily ${daily}; weekly ${weekly}.`);
+  showMessage(`News refreshed. Daily ${daily}; weekly ${weekly}.`);
   await refreshAfterAccountAction();
 }
 
@@ -2706,7 +2713,7 @@ function renderLeadMagnetSuggestions() {
     list.innerHTML = [1, 2, 3]
       .map(() => '<article class="lead-magnet-suggestion-card skeleton-card" aria-hidden="true"><span class="skeleton-line short"></span><span class="skeleton-line long"></span><span class="skeleton-line medium"></span></article>')
       .join("");
-    status.textContent = "Ranking qualified sources against current trends...";
+    status.textContent = "Ranking qualified sources against current news...";
     createButton.disabled = true;
     return;
   }
@@ -2731,7 +2738,7 @@ function renderLeadMagnetSuggestions() {
           </span>
           <strong>${escapeHtml(cleanString(suggestion?.title) || "Untitled direction")}</strong>
           <p>${escapeHtml(cleanString(suggestion?.sales_outcome))}</p>
-          <span class="lead-magnet-suggestion-evidence">${escapeHtml(`${sourceCount} source${sourceCount === 1 ? "" : "s"} · ${trendCount} aligned trend${trendCount === 1 ? "" : "s"}`)}</span>
+          <span class="lead-magnet-suggestion-evidence">${escapeHtml(`${sourceCount} source${sourceCount === 1 ? "" : "s"} · ${trendCount} aligned news item${trendCount === 1 ? "" : "s"}`)}</span>
         </button>
       `;
     })
@@ -3593,7 +3600,7 @@ async function loadTrends() {
   state.savedTrends = payload.items || [];
   $("savedTrendList").innerHTML = state.savedTrends.length
     ? state.savedTrends.map(trendCard).join("")
-    : `<p class="muted">No saved trends yet. The scheduled trend refresh will add current items.</p>`;
+    : `<p class="muted">No saved news yet. The scheduled news refresh will add current items.</p>`;
 }
 
 function trendCard(item) {
@@ -3625,7 +3632,7 @@ window.markTrend = (event, id, status) => {
       method: "PATCH",
       body: JSON.stringify({ status }),
     });
-    showMessage(status === "used" ? "Trend marked used." : "Trend ignored.");
+    showMessage(status === "used" ? "News marked used." : "News ignored.");
     await loadTrends();
     await refresh();
   });
@@ -3651,7 +3658,7 @@ function renderAccount() {
   $("accountSyncGrid").innerHTML = [
     syncRow("Last X post sync", sync.x_posts_sync, "New posts imported from X"),
     syncRow("Last X metrics sync", sync.x_metrics_sync, "Fresh public metric snapshots"),
-    syncRow("Last trend refresh", sync.trends_sync, "Daily and weekly trend context"),
+    syncRow("Last news refresh", sync.trends_sync, "Daily and weekly news context"),
     syncRow("Last pattern refresh", sync.patterns_sync, "Reusable post mechanics from Pattern Scout"),
   ].join("");
   const models = settings.models || {};
@@ -3687,7 +3694,7 @@ function renderAccount() {
   });
   const scrapingdogStatus = connectionStatus(connections.scrapingdog);
   trendsButton.disabled = scrapingdogStatus !== "connected";
-  trendsButton.title = trendsButton.disabled ? "Connect ScrapingDog to refresh live trend context." : "Refresh live trend context.";
+  trendsButton.title = trendsButton.disabled ? "Connect ScrapingDog to refresh live news." : "Refresh live news.";
   patternsButton.disabled = scrapingdogStatus !== "connected" || !status.provider_configured;
   patternsButton.title = patternsButton.disabled ? "Connect ScrapingDog and the LLM provider to refresh patterns." : "Refresh Pattern Scout.";
   syncMenuButton.disabled = !xReadConfigured && trendsButton.disabled && patternsButton.disabled;
@@ -3786,7 +3793,7 @@ function fallbackConnections(status) {
     scrapingdog: {
       status: status.scrapingdog_configured ? "connected" : "not_connected",
       label: "ScrapingDog",
-      description: "Source used to refresh trends and Pattern Scout examples.",
+      description: "Source used to refresh news and Pattern Scout examples.",
     },
     daily_sync: {
       status: status.daily_sync_configured ? "connected" : "not_configured",
@@ -4022,7 +4029,7 @@ const ACCOUNT_DETAIL_CONTENT = {
   },
   sync: {
     title: "Sync",
-    subtitle: "Last successful runs for imports, metrics, trends, and patterns.",
+    subtitle: "Last successful runs for imports, metrics, news, and patterns.",
   },
   profile: {
     title: "Account",

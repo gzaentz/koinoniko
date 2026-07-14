@@ -338,9 +338,9 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
 
             self.assertEqual(groups.daily, [])
             self.assertEqual(groups.weekly, [])
-            self.assertEqual(len(news_calls), 4)
+            self.assertEqual(len(news_calls), 2)
             self.assertTrue(all(call[2] == 7 for call in news_calls))
-            self.assertEqual([call[0] for call in news_calls], ["qdr:d", "qdr:w", "qdr:w", "qdr:m"])
+            self.assertEqual([call[0] for call in news_calls], ["qdr:d", "qdr:w"])
             store.close()
 
     def test_scrapingdog_missing_key_reports_clear_warning(self):

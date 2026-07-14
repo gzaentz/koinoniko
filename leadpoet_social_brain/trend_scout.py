@@ -503,9 +503,9 @@ def scrapingdog_news_queries(profile: TrendScoutProfile) -> list[str]:
 
 def scrapingdog_news_windows(period: str) -> list[str]:
     if period == "daily":
-        return ["qdr:d", "qdr:w"]
+        return ["qdr:d"]
     if period == "weekly":
-        return ["qdr:w", "qdr:m"]
+        return ["qdr:w"]
     return ["qdr:w"]
 
 
@@ -1489,11 +1489,7 @@ def select_trend_group(
 ) -> list[TrendItem]:
     matching = [trend for trend in trends if trend.source_type == source_type]
     recent = [trend for trend in matching if trend_is_recent(trend, current, days=recent_days)]
-    if len(recent) >= limit:
-        return recent[:limit]
-    recent_ids = {trend.id for trend in recent}
-    fallback = [trend for trend in matching if trend.id not in recent_ids]
-    return [*recent, *fallback][:limit]
+    return recent[:limit]
 
 
 def web_trend_from_article(

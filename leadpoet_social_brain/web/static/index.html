@@ -97,9 +97,9 @@
           <section class="panel trend-panel">
             <div class="panel-header">
               <div>
-                <h2>Trends</h2>
+                <h2>News</h2>
               </div>
-              <div class="segmented-control" role="group" aria-label="Trend window">
+              <div class="segmented-control" role="group" aria-label="News window">
                 <button class="secondary active" id="trendDailyButton" type="button">Daily</button>
                 <button class="secondary" id="trendWeeklyButton" type="button">Weekly</button>
               </div>
@@ -428,7 +428,7 @@
                 <button id="accountSyncAllButton" type="button">Sync All</button>
                 <button class="secondary" id="accountSyncPostsButton" type="button">Sync Posts</button>
                 <button class="secondary" id="accountSyncMetricsButton" type="button">Sync Engagement</button>
-                <button class="secondary" id="accountRefreshTrendsButton" type="button">Sync Trends</button>
+                <button class="secondary" id="accountRefreshTrendsButton" type="button">Sync News</button>
                 <button class="secondary" id="accountRefreshPatternsButton" type="button">Sync Patterns</button>
               </div>
             </div>
@@ -562,8 +562,8 @@
       <div class="modal-card wide">
         <div class="modal-header">
           <div>
-            <span class="eyebrow">Trend</span>
-            <h2 id="trendModalTitle">Trend details</h2>
+            <span class="eyebrow">News</span>
+            <h2 id="trendModalTitle">News details</h2>
           </div>
           <button class="icon-button" data-close-modal="trendModal" aria-label="Close">x</button>
         </div>
@@ -683,7 +683,7 @@
         </div>
         <div class="option-row">
           <label class="inline-check"><input id="planAutopilot" type="checkbox" checked> Autopilot: choose topics and angles</label>
-          <label class="inline-check"><input id="planUseTrends" type="checkbox" checked> Use trends</label>
+          <label class="inline-check"><input id="planUseTrends" type="checkbox" checked> Use news</label>
           <label class="inline-check"><input id="planUsePatterns" type="checkbox" checked> Use patterns</label>
           <label class="inline-check"><input id="planAllowEvergreen" type="checkbox" checked> Allow evergreen</label>
         </div>
@@ -702,13 +702,13 @@
         <div class="modal-header">
           <div>
             <span class="eyebrow">Context</span>
-            <h2>Trends</h2>
+            <h2>News</h2>
           </div>
           <button class="icon-button" data-close-modal="trendsModal" aria-label="Close">x</button>
         </div>
         <section class="subsection">
           <div class="panel-header">
-            <h3>Saved Trends</h3>
+            <h3>Saved News</h3>
             <button class="quiet-button" id="loadTrendsButton">Refresh</button>
           </div>
           <div id="savedTrendList" class="stack"></div>
@@ -841,7 +841,7 @@
       <div class="assistant-header">
         <div>
           <h2>Ask Koinoniko</h2>
-          <p>Ask about posts, trends, Voice, and what is working.</p>
+          <p>Ask about posts, news, Voice, and what is working.</p>
         </div>
         <div class="assistant-header-actions">
           <button class="assistant-expand-button" id="assistantExpandButton" type="button" aria-label="Expand Ask Koinoniko" title="Expand Ask Koinoniko" aria-controls="assistantDrawer" aria-expanded="false">
@@ -871,6 +871,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260714-double-scout-1"></script>
+    <script src="/static/app.js?v=20260714-news-1"></script>
   </body>
 </html>

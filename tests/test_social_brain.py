@@ -926,7 +926,10 @@ class SocialBrainTest(unittest.TestCase):
         self.assertNotIn('id="refreshTrendsButton"', index_html)
         self.assertNotIn("Performance Signals", index_html)
         self.assertNotIn("What is working", index_html)
-        self.assertIn("Sync Trends", index_html)
+        self.assertIn("Sync News", index_html)
+        self.assertIn("<h2>News</h2>", index_html)
+        self.assertIn('aria-label="News window"', index_html)
+        self.assertIn("No qualifying news from the last", app_js)
         self.assertNotIn('id="syncPostsButton"', index_html)
         self.assertNotIn('id="syncMetricsButton"', index_html)
         self.assertNotIn('id="dashboardSyncLine"', index_html)
@@ -8784,7 +8787,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertNotIn("Leadpoet", refreshed.daily[0].leadpoet_angle)
             store.close()
 
-    def test_web_trend_groups_backfill_older_unused_daily_trends(self):
+    def test_web_trend_groups_keep_daily_news_within_the_freshness_window(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
             now = datetime(2026, 6, 26, 12, 30, tzinfo=timezone.utc)
@@ -8829,8 +8832,8 @@ class SocialBrainTest(unittest.TestCase):
 
             grouped = web_trend_groups(store, now=now)
 
-            self.assertEqual([trend.id for trend in grouped.daily], [recent.id, *[trend.id for trend in older]])
-            self.assertEqual(len(grouped.daily), 10)
+            self.assertEqual([trend.id for trend in grouped.daily], [recent.id])
+            self.assertTrue(all(trend.id not in {item.id for item in older} for trend in grouped.daily))
             self.assertTrue(all(trend.source_type == "web_daily" for trend in grouped.daily))
             store.close()
 
