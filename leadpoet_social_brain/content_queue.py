@@ -73,6 +73,7 @@ def plan_week_x(
     topic_ideas: list[TopicIdea] | None = None,
     extra_instruction: str | None = None,
     continue_on_generation_error: bool = False,
+    occupied_schedule_dates: set[date] | None = None,
 ) -> PlanWeekResult:
     _ = variants_per_slot
     if posts <= 0:
@@ -86,7 +87,12 @@ def plan_week_x(
         if not selected_topic_ideas:
             raise ValueError("No grounded topic ideas are available for Autopilot planning.")
         posts = len(selected_topic_ideas)
-    scheduled_times = schedule_slots(start_date, posts=posts, cadence=cadence)
+    scheduled_times = schedule_slots(
+        start_date,
+        posts=posts,
+        cadence=cadence,
+        occupied_dates=occupied_schedule_dates,
+    )
     trends = recent_unused_trends(store, window_days=trend_window_days) if use_trends else []
     warnings: list[str] = []
     if use_trends and not trends and not allow_evergreen:
@@ -629,8 +635,15 @@ def expand_topic_mix(topic_mix: str | None, posts: int) -> list[str]:
     return topics[:posts]
 
 
-def schedule_slots(start_date: date, *, posts: int, cadence: str) -> list[datetime]:
+def schedule_slots(
+    start_date: date,
+    *,
+    posts: int,
+    cadence: str,
+    occupied_dates: set[date] | None = None,
+) -> list[datetime]:
     slots: list[datetime] = []
+    occupied_dates = occupied_dates or set()
     day_offset = 0
     while len(slots) < posts:
         slot_date = start_date + timedelta(days=day_offset)
@@ -639,6 +652,8 @@ def schedule_slots(start_date: date, *, posts: int, cadence: str) -> list[dateti
             continue
         if cadence not in {"daily_mornings", "weekday_mornings"}:
             raise ValueError("Unsupported --cadence. Use daily_mornings or weekday_mornings.")
+        if slot_date in occupied_dates:
+            continue
         slots.append(datetime.combine(slot_date, time(10, 0), LOCAL_TZ))
     return slots
 

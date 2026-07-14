@@ -1690,6 +1690,7 @@ def autopilot_weekly_task_payload(store: SQLiteStore, payload: dict[str, Any]) -
         week_start = str(payload.get("week_start") or next_monday())
         start_date = date.fromisoformat(week_start)
         posts = max(1, int(payload.get("posts") or 5))
+        cadence = str(payload.get("cadence") or "weekday_mornings")
         existing = [
             item
             for item in store.list_content_queue(platform="x", limit=500)
@@ -1697,12 +1698,14 @@ def autopilot_weekly_task_payload(store: SQLiteStore, payload: dict[str, Any]) -
             and start_date <= parse_dt(item.scheduled_at).astimezone(timezone.utc).date() < start_date + timedelta(days=7)
             and item.status not in {"skipped", "failed"}
         ]
-        if existing:
+        if len(existing) >= posts:
             completed_at = utc_now()
             summary = {
                 "skipped": True,
-                "reason": f"{len(existing)} queue item(s) already exist for this week.",
+                "reason": f"The target is already met with {len(existing)} queue item(s) for this week.",
                 "queued": 0,
+                "existing": len(existing),
+                "target": posts,
                 "completed_at": completed_at,
             }
             metadata = store.save_sync_metadata(
@@ -1716,23 +1719,29 @@ def autopilot_weekly_task_payload(store: SQLiteStore, payload: dict[str, Any]) -
             )
             return {**summary, "items": [], "sync": sync_metadata_payload(metadata)}
 
+        remaining_posts = posts - len(existing)
+        occupied_schedule_dates = {
+            parse_dt(item.scheduled_at).date()
+            for item in existing
+            if item.scheduled_at
+        }
         provider = load_configured_provider(store)
         if not provider:
             raise ValueError(MISSING_PROVIDER_MESSAGE)
         topic_result = refresh_topic_ideas(
             store,
             provider,
-            limit=max(posts, int(payload.get("topic_limit") or DEFAULT_TOPIC_IDEA_LIMIT)),
+            limit=max(remaining_posts, int(payload.get("topic_limit") or DEFAULT_TOPIC_IDEA_LIMIT)),
         )
         result = plan_week_x(
             store,
             SocialBrainGenerator(store, provider=provider),
             week_start=week_start,
-            posts=posts,
+            posts=remaining_posts,
             use_trends=bool_from_payload(payload, "use_trends", True),
             trend_window_days=int(payload.get("trend_window_days") or 14),
             topic_mix=clean_optional(payload.get("topic_mix")),
-            cadence=str(payload.get("cadence") or "weekday_mornings"),
+            cadence=cadence,
             default_post_type=str(payload.get("default_post_type") or "founder_insight"),
             variants_per_slot=1,
             allow_evergreen=True,
@@ -1741,12 +1750,15 @@ def autopilot_weekly_task_payload(store: SQLiteStore, payload: dict[str, Any]) -
             topic_ideas=topic_result.ideas,
             extra_instruction=clean_optional(payload.get("instruction")),
             continue_on_generation_error=True,
+            occupied_schedule_dates=occupied_schedule_dates,
         )
         completed_at = utc_now()
         warnings = [*topic_result.warnings, *result.warnings]
         summary = {
             "skipped": False,
             "queued": len(result.queued),
+            "existing": len(existing),
+            "target": posts,
             "topics_generated": len(topic_result.ideas),
             "warnings": warnings,
             "completed_at": completed_at,

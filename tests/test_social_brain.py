@@ -23,7 +23,7 @@ from leadpoet_social_brain.assistant_context import (
     build_assistant_prompt,
 )
 from leadpoet_social_brain.categorization import XPostLLMCategorizer, parse_x_category_response
-from leadpoet_social_brain.content_queue import create_post_x, plan_week_x, post_queue_item_x
+from leadpoet_social_brain.content_queue import PlanWeekResult, create_post_x, plan_week_x, post_queue_item_x
 from leadpoet_social_brain.cli import (
     build_naturalness_audit,
     build_naturalness_plan_audit,
@@ -115,6 +115,7 @@ from leadpoet_social_brain.storage.sqlite_store import (
 )
 from leadpoet_social_brain.trend_scout import WebTrendGroups, build_trend_scout_profile, refresh_web_trends, web_trend_groups
 from leadpoet_social_brain.topic_scout import (
+    TopicRefreshResult,
     build_topic_ideas_prompt,
     parse_topic_ideas,
     refresh_topic_ideas,
@@ -7449,6 +7450,37 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(store.get_topic_idea(ideas[1].id).status, "used")
             store.close()
 
+    def test_autopilot_plan_uses_next_open_schedule_date(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            idea = store.save_topic_idea(
+                TopicIdea(
+                    title="Grounded open-slot topic",
+                    topic="sales AI",
+                    angle="Offer a grounded diagnostic.",
+                    why_now="It is useful now.",
+                )
+            )
+
+            result = plan_week_x(
+                store,
+                SocialBrainGenerator(store, provider=FakeProvider()),
+                week_start="2026-07-20",
+                posts=1,
+                use_trends=False,
+                trend_window_days=14,
+                topic_mix=None,
+                cadence="weekday_mornings",
+                default_post_type="founder_insight",
+                variants_per_slot=1,
+                allow_evergreen=True,
+                topic_ideas=[idea],
+                occupied_schedule_dates={datetime.fromisoformat("2026-07-20").date()},
+            )
+
+            self.assertEqual(result.queued[0].scheduled_at[:10], "2026-07-21")
+            store.close()
+
     def test_plan_week_x_requires_evergreen_opt_in_when_trends_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
@@ -12692,14 +12724,64 @@ class SocialBrainTest(unittest.TestCase):
             status, payload = handle_api_request(
                 "POST",
                 "/tasks/autopilot-weekly",
-                json.dumps({"week_start": "2026-07-13", "posts": 5}),
+                json.dumps({"week_start": "2026-07-13", "posts": 1}),
                 db_path=db_path,
             )
 
             self.assertEqual(status, 200)
             self.assertTrue(payload["skipped"])
             self.assertEqual(payload["queued"], 0)
-            self.assertIn("already exist", payload["reason"])
+            self.assertIn("target is already met", payload["reason"])
+
+    def test_autopilot_weekly_task_fills_open_slots_without_duplicate_dates(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            store.save_content_queue_item(
+                ContentQueueItem(
+                    text="Already planned.",
+                    topic="sales LLMs",
+                    post_type="founder_insight",
+                    scheduled_at="2026-07-13T13:00:00+00:00",
+                    status="needs_review",
+                )
+            )
+            idea = store.save_topic_idea(
+                TopicIdea(
+                    title="A grounded follow-up",
+                    topic="operations",
+                    angle="Offer a grounded follow-up.",
+                    why_now="It is useful now.",
+                )
+            )
+            store.close()
+
+            with patch(
+                "leadpoet_social_brain.web.app.load_configured_provider",
+                return_value=FakeProvider(),
+            ), patch(
+                "leadpoet_social_brain.web.app.refresh_topic_ideas",
+                return_value=TopicRefreshResult(ideas=[idea], warnings=[], diagnostics=[]),
+            ), patch(
+                "leadpoet_social_brain.web.app.plan_week_x",
+                return_value=PlanWeekResult(queued=[], warnings=[]),
+            ) as planner:
+                status, payload = handle_api_request(
+                    "POST",
+                    "/tasks/autopilot-weekly",
+                    json.dumps({"week_start": "2026-07-13", "posts": 5}),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 200)
+            self.assertFalse(payload["skipped"])
+            self.assertEqual(payload["existing"], 1)
+            self.assertEqual(payload["target"], 5)
+            self.assertEqual(planner.call_args.kwargs["posts"], 4)
+            self.assertEqual(
+                planner.call_args.kwargs["occupied_schedule_dates"],
+                {datetime.fromisoformat("2026-07-13").date()},
+            )
 
     def test_writer_and_evaluator_prompts_prioritize_natural_selection(self):
         with tempfile.TemporaryDirectory() as tmpdir:
