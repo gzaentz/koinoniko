@@ -21,7 +21,12 @@ from leadpoet_social_brain.generation import (
     prompt_untrusted_text,
 )
 from leadpoet_social_brain.platforms.x import get_x_adapter
-from leadpoet_social_brain.providers import DraftProvider, generate_with_provider, resolve_model_routing
+from leadpoet_social_brain.providers import (
+    DraftProvider,
+    env_model_value,
+    generate_with_provider,
+    resolve_model_routing,
+)
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
 
 
@@ -81,6 +86,7 @@ def refresh_topic_ideas(
     response_parse_failures: list[str] = []
     valid_response_count = 0
     routing = resolve_model_routing(store, provider)
+    strategist_fallback_model = env_model_value("strategist")
     for attempt in range(TOPIC_SCOUT_MAX_ATTEMPTS):
         missing = requested - len(accepted)
         if missing <= 0:
@@ -119,7 +125,13 @@ def refresh_topic_ideas(
             provider,
             prompt,
             variants=1,
-            model=routing.strategist,
+            model=(
+                strategist_fallback_model
+                if response_parse_failures
+                and strategist_fallback_model
+                and strategist_fallback_model != routing.strategist
+                else routing.strategist
+            ),
         )[0]
         try:
             parsed = parse_topic_ideas(raw, limit=candidate_count)

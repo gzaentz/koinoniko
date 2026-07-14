@@ -12530,6 +12530,19 @@ class SocialBrainTest(unittest.TestCase):
             store.close()
 
     def test_topic_scout_retries_malformed_json_response(self):
+        class ModelAwareSequentialProvider:
+            def __init__(self, texts):
+                self.texts = list(texts)
+                self.prompts = []
+                self.models = []
+
+            def generate(self, prompt, *, variants, model=None):
+                self.prompts.append(prompt)
+                self.models.append(model)
+                selected = self.texts[:variants]
+                self.texts = self.texts[variants:]
+                return selected
+
         valid_rows = [
             {
                 "title": "A provenance handoff checklist",
@@ -12567,17 +12580,24 @@ class SocialBrainTest(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self.make_store(tmpdir)
-            provider = SequentialProvider(
+            store.save_app_setting("model.strategist", "account/strategist")
+            provider = ModelAwareSequentialProvider(
                 [
                     '{"topics":[{"title":"Broken response" "topic":"GTM"}]}',
                     json.dumps({"topics": valid_rows}),
                 ]
             )
 
-            result = refresh_topic_ideas(store, provider, limit=3)
+            with patch.dict(
+                os.environ,
+                {"SOCIAL_BRAIN_STRATEGIST_MODEL": "fallback/strategist"},
+                clear=False,
+            ):
+                result = refresh_topic_ideas(store, provider, limit=3)
 
             self.assertEqual(len(result.ideas), 3)
             self.assertEqual(len(provider.prompts), 2)
+            self.assertEqual(provider.models, ["account/strategist", "fallback/strategist"])
             self.assertIn("previous response could not be parsed as JSON", provider.prompts[1])
             self.assertTrue(any("Recovered after 1 malformed" in item for item in result.diagnostics))
             store.close()
