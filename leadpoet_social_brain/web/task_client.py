@@ -22,7 +22,7 @@ TASK_DEFAULTS: dict[str, dict[str, Any]] = {
         "limit": 10,
         "no_enrich": True,
         "scrapingdog_timeout_seconds": 12,
-        "max_news_queries_per_window": 2,
+        "max_news_queries_per_window": 6,
         "deadline_seconds": 85,
     },
     "refresh-patterns": {"limit": 5, "window": "weekly"},

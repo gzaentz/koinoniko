@@ -33,19 +33,23 @@ SOURCE_EXCERPT_CHARS = 700
 WEB_DAILY_SOURCE_TYPE = "web_daily"
 WEB_WEEKLY_SOURCE_TYPE = "web_weekly"
 SCRAPINGDOG_NEWS_QUERY = (
-    '("sales AI" OR "AI SDR" OR "AI sales agent" OR "sales automation") '
-    '("buyer intent" OR "intent data" OR "account signals" OR "buyer timing" OR CRM OR RevOps OR pipeline)'
+    '("sales AI" OR "AI SDR" OR "AI sales agent" OR "sales automation" OR '
+    '"revenue operations" OR RevOps OR "B2B sales")'
 )
 SCRAPINGDOG_NEWS_QUERIES = (
     SCRAPINGDOG_NEWS_QUERY,
-    '("lead generation" OR "lead gen" OR prospecting OR outbound) '
-    '("AI" OR agent OR automation) ("buyer intent" OR "account signals" OR "data enrichment" OR "account context")',
-    '(GTM OR "go-to-market" OR RevOps OR CRM) ("AI agent" OR "AI agents" OR automation) '
-    '(pipeline OR outbound OR "sales workflow")',
-    '("intent data" OR "buyer signals" OR "account intelligence") '
-    '(sales OR outbound OR "lead generation" OR GTM)',
     '(Salesforce OR HubSpot OR Apollo OR ZoomInfo OR Clay OR Outreach OR Salesloft) '
     '(AI OR agent OR signals OR intent) (sales OR outbound OR pipeline OR CRM)',
+    '(site:techcrunch.com OR site:venturebeat.com OR site:news.crunchbase.com OR site:martech.org) '
+    '("sales AI" OR RevOps OR CRM OR GTM OR outbound)',
+    '(site:salesforce.com/news OR site:hubspot.com/company-news OR site:outreach.io/resources/blog '
+    'OR site:salesloft.com/resources/blog) (AI OR agent OR CRM OR sales OR outbound)',
+    '("intent data" OR "buyer signals" OR "account intelligence" OR "data enrichment") '
+    '(sales OR outbound OR "lead generation" OR GTM)',
+    '(GTM OR "go-to-market" OR RevOps OR CRM) ("AI agent" OR "AI agents" OR automation) '
+    '(pipeline OR outbound OR "sales workflow")',
+    '("lead generation" OR "lead gen" OR prospecting OR outbound) '
+    '("AI" OR agent OR automation) ("buyer intent" OR "account signals" OR "data enrichment" OR "account context")',
     '("B2B sales" OR "B2B marketing" OR "revenue teams") '
     '("AI agents" OR "AI automation" OR "buyer intent" OR "account signals")',
     '("AI-native CRM" OR "agentic CRM" OR "GTM AI") '
@@ -62,7 +66,11 @@ SCRAPINGDOG_NEWS_QUERIES = (
     '(automation OR AI OR agents OR outbound)',
 )
 SCRAPINGDOG_NEWS_QUERIES_PER_WINDOW = 6
+SCRAPINGDOG_MIN_NEWS_QUERY_LANES = 4
 DEFAULT_WEB_TRENDS_PER_WINDOW = 10
+WEB_DAILY_FRESHNESS_DAYS = 2
+WEB_WEEKLY_FRESHNESS_DAYS = 8
+NEWS_MIN_DISTINCT_PUBLISHERS = 5
 TREND_RELEVANCE_KEEP_THRESHOLD = 5
 TREND_REQUIRED_RELEVANCE_TERMS = {
     "account signal",
@@ -360,6 +368,19 @@ def refresh_web_trends(
     if not api_key:
         errors.append(MISSING_SCRAPINGDOG_TRENDS_MESSAGE)
         return WebTrendGroups(daily=[], weekly=[], errors=errors, sources=sources, **stats)
+    current = datetime.now(timezone.utc)
+    news_articles = fetch_scrapingdog_news_pool(
+        api_key=api_key,
+        profile=profile,
+        limit=limit,
+        errors=errors,
+        sources=sources,
+        timeout_seconds=scrapingdog_timeout_seconds,
+        max_queries=max_news_queries_per_window,
+        deadline=deadline,
+        current=current,
+    )
+    stats["candidates_found"] += len(news_articles)
     daily = refresh_web_trends_for_period(
         store,
         period="daily",
@@ -376,8 +397,10 @@ def refresh_web_trends(
         fetch_source_page=fetch_source_page,
         profile=profile,
         scrapingdog_timeout_seconds=scrapingdog_timeout_seconds,
-        max_news_queries_per_window=max_news_queries_per_window,
         deadline=deadline,
+        news_articles=news_articles,
+        current=current,
+        freshness_days=WEB_DAILY_FRESHNESS_DAYS,
     )
     daily_urls = {canonical_source_url(trend.source_url) for trend in daily if canonical_source_url(trend.source_url)}
     weekly = refresh_web_trends_for_period(
@@ -397,8 +420,10 @@ def refresh_web_trends(
         profile=profile,
         exclude_source_urls=daily_urls,
         scrapingdog_timeout_seconds=scrapingdog_timeout_seconds,
-        max_news_queries_per_window=max_news_queries_per_window,
         deadline=deadline,
+        news_articles=news_articles,
+        current=current,
+        freshness_days=WEB_WEEKLY_FRESHNESS_DAYS,
     )
     return WebTrendGroups(daily=daily, weekly=weekly, errors=errors, sources=unique_texts(sources), **stats)
 
@@ -509,6 +534,85 @@ def scrapingdog_news_windows(period: str) -> list[str]:
     return ["qdr:w"]
 
 
+def fetch_scrapingdog_news_pool(
+    *,
+    api_key: str,
+    profile: TrendScoutProfile,
+    limit: int,
+    errors: list[str],
+    sources: list[str],
+    timeout_seconds: int,
+    max_queries: int,
+    deadline: float | None,
+    current: datetime,
+) -> list[dict[str, object]]:
+    articles: list[dict[str, object]] = []
+    news_errors: list[str] = []
+    fetched_news = False
+    stopped_for_budget = False
+    queries = scrapingdog_news_queries(profile)[: max(0, max_queries)]
+    minimum_query_lanes = min(len(queries), SCRAPINGDOG_MIN_NEWS_QUERY_LANES)
+    for index, query in enumerate(queries):
+        if index >= minimum_query_lanes and news_pool_has_coverage(articles, limit=limit, current=current):
+            break
+        call_timeout = trend_refresh_call_timeout(deadline, timeout_seconds)
+        if call_timeout <= 0:
+            stopped_for_budget = True
+            break
+        try:
+            results = fetch_scrapingdog_google_news(
+                api_key=api_key,
+                tbs=scrapingdog_news_windows("weekly")[0],
+                limit=25,
+                query=query,
+                timeout_seconds=call_timeout,
+            )
+            articles.extend(scrapingdog_news_articles(results))
+            fetched_news = True
+        except Exception as exc:  # noqa: BLE001 - one search lane should not block the rest.
+            news_errors.append(str(exc))
+    if fetched_news:
+        sources.append("Scrapingdog Google News")
+    if stopped_for_budget:
+        errors.append("Scrapingdog Google News stopped because refresh time budget was exhausted.")
+    elif news_errors:
+        errors.append(f"Scrapingdog Google News failed for one or more query lanes: {news_errors[0]}")
+    return articles
+
+
+def news_pool_has_coverage(
+    articles: list[dict[str, object]],
+    *,
+    limit: int,
+    current: datetime,
+) -> bool:
+    if limit <= 0:
+        return True
+    weekly_articles = [
+        article
+        for article in articles
+        if article_is_recent(article, current=current, days=WEB_WEEKLY_FRESHNESS_DAYS)
+    ]
+    daily_articles = [
+        article
+        for article in weekly_articles
+        if article_is_recent(article, current=current, days=WEB_DAILY_FRESHNESS_DAYS)
+    ]
+    daily = select_web_trend_articles(daily_articles, limit=limit)
+    weekly = select_web_trend_articles(weekly_articles, limit=limit * 2)
+    distinct_publishers = {
+        article_source_key(article)
+        for article in weekly
+        if article_source_key(article) != "unknown"
+    }
+    publisher_target = min(NEWS_MIN_DISTINCT_PUBLISHERS, limit)
+    return (
+        len(daily) >= limit
+        and len(weekly) >= limit * 2
+        and len(distinct_publishers) >= publisher_target
+    )
+
+
 def refresh_injected_web_trends(
     store: SQLiteStore,
     *,
@@ -569,19 +673,26 @@ def refresh_web_trends_for_period(
     profile: TrendScoutProfile | None = None,
     exclude_source_urls: set[str] | None = None,
     scrapingdog_timeout_seconds: int = SCRAPINGDOG_TIMEOUT_SECONDS,
-    max_news_queries_per_window: int = SCRAPINGDOG_NEWS_QUERIES_PER_WINDOW,
     deadline: float | None = None,
+    news_articles: list[dict[str, object]] | None = None,
+    current: datetime | None = None,
+    freshness_days: int = WEB_WEEKLY_FRESHNESS_DAYS,
 ) -> list[TrendItem]:
     profile = profile or build_trend_scout_profile(store)
-    articles: list[dict[str, object]] = []
+    current = current or datetime.now(timezone.utc)
+    articles = [
+        article
+        for article in news_articles or []
+        if article_is_recent(article, current=current, days=freshness_days)
+    ]
+    trend_articles: list[dict[str, object]] = []
     if scrapingdog_api_key:
         call_timeout = trend_refresh_call_timeout(deadline, scrapingdog_timeout_seconds)
         if call_timeout <= 0:
             errors.append(f"{period} Scrapingdog Google Trends skipped because refresh time budget was exhausted.")
-            return []
-        try:
-            articles.extend(
-                scrapingdog_trending_articles(
+        else:
+            try:
+                trend_articles = scrapingdog_trending_articles(
                     fetch_scrapingdog_trending_now(
                         api_key=scrapingdog_api_key,
                         hours=scrapingdog_hours,
@@ -590,68 +701,12 @@ def refresh_web_trends_for_period(
                     ),
                     hours=scrapingdog_hours,
                 )
-            )
-            sources.append("Scrapingdog Google Trends")
-        except Exception as exc:  # noqa: BLE001 - third-party trend source can fail independently.
-            errors.append(f"{period} Scrapingdog Google Trends failed: {exc}")
+                sources.append("Scrapingdog Google Trends")
+            except Exception as exc:  # noqa: BLE001 - third-party trend source can fail independently.
+                errors.append(f"{period} Scrapingdog Google Trends failed: {exc}")
 
-        if len(
-            select_web_trend_articles(
-                articles,
-                limit=limit,
-                exclude_source_urls=exclude_source_urls,
-            )
-        ) < limit:
-            fetched_news = False
-            news_errors: list[str] = []
-            stopped_for_budget = False
-            for news_tbs in scrapingdog_news_windows(period):
-                if len(
-                    select_web_trend_articles(
-                        articles,
-                        limit=limit,
-                        exclude_source_urls=exclude_source_urls,
-                    )
-                ) >= limit:
-                    break
-                for query in scrapingdog_news_queries(profile)[: max(0, max_news_queries_per_window)]:
-                    if len(
-                        select_web_trend_articles(
-                            articles,
-                            limit=limit,
-                            exclude_source_urls=exclude_source_urls,
-                        )
-                    ) >= limit:
-                        break
-                    call_timeout = trend_refresh_call_timeout(deadline, scrapingdog_timeout_seconds)
-                    if call_timeout <= 0:
-                        stopped_for_budget = True
-                        break
-                    try:
-                        articles.extend(
-                            scrapingdog_news_articles(
-                                fetch_scrapingdog_google_news(
-                                    api_key=scrapingdog_api_key,
-                                    tbs=news_tbs,
-                                    limit=25,
-                                    query=query,
-                                    timeout_seconds=call_timeout,
-                                )
-                            )
-                        )
-                        fetched_news = True
-                    except Exception as exc:  # noqa: BLE001 - third-party trend source can fail independently.
-                        news_errors.append(str(exc))
-                if stopped_for_budget:
-                    break
-            if fetched_news:
-                sources.append("Scrapingdog Google News")
-            if stopped_for_budget:
-                errors.append(f"{period} Scrapingdog Google News stopped because refresh time budget was exhausted.")
-            elif news_errors:
-                errors.append(f"{period} Scrapingdog Google News failed: {news_errors[0]}")
-
-    stats["candidates_found"] += len(articles)
+    articles.extend(trend_articles)
+    stats["candidates_found"] += len(trend_articles)
     selected = select_web_trend_articles(
         articles,
         limit=limit,
@@ -808,7 +863,9 @@ def select_web_trend_articles(
     limit: int,
     exclude_source_urls: set[str] | None = None,
 ) -> list[dict[str, object]]:
-    selected: list[dict[str, object]] = []
+    if limit <= 0:
+        return []
+    ranked: list[dict[str, object]] = []
     seen: set[str] = set()
     excluded = exclude_source_urls or set()
     for article in sorted(articles, key=web_trend_rank_key, reverse=True):
@@ -822,15 +879,80 @@ def select_web_trend_articles(
         if not title or dedupe_key in seen:
             continue
         seen.add(dedupe_key)
-        selected.append(article)
+        ranked.append(article)
+
+    # Give each publisher one slot before filling the remaining slots by rank.
+    # This prevents one syndicated outlet from crowding out independent coverage.
+    selected: list[dict[str, object]] = []
+    remaining: list[dict[str, object]] = []
+    seen_sources: set[str] = set()
+    for article in ranked:
+        source_key = article_source_key(article)
+        if source_key not in seen_sources:
+            seen_sources.add(source_key)
+            selected.append(article)
+        else:
+            remaining.append(article)
         if len(selected) >= limit:
             break
+    if len(selected) < limit:
+        selected.extend(remaining[: limit - len(selected)])
     return selected
 
 
-def web_trend_rank_key(article: dict[str, object]) -> tuple[int, int, int]:
+def article_source_key(article: dict[str, object]) -> str:
+    raw_source = (
+        article.get("sourceCommonName")
+        or article.get("source")
+        or article.get("domain")
+        or article.get("sourceCountry")
+    )
+    if isinstance(raw_source, dict):
+        raw_source = raw_source.get("name") or raw_source.get("title")
+    source = clean_text(raw_source).lower()
+    if source:
+        return re.sub(r"\s+", " ", source)
+    url = clean_text(article.get("url") or article.get("link") or article.get("url_mobile"))
+    hostname = (urlparse(url).hostname or "").lower()
+    return hostname.removeprefix("www.") or "unknown"
+
+
+def article_published_at(article: dict[str, object]) -> datetime | None:
+    raw_value = (
+        article.get("seendate")
+        or article.get("date")
+        or article.get("published_at")
+        or article.get("lastUpdated")
+        or article.get("start_timestamp")
+        or article.get("start_date")
+    )
+    if raw_value is None or clean_text(raw_value) == "":
+        return None
+    if isinstance(raw_value, (int, float)):
+        timestamp = float(raw_value) / 1000 if float(raw_value) > 10_000_000_000 else float(raw_value)
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    clean_value = clean_text(raw_value)
+    if len(clean_value) >= 14 and clean_value[:14].isdigit():
+        return datetime.strptime(clean_value[:14], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+    return parse_trend_date(clean_value)
+
+
+def article_is_recent(article: dict[str, object], *, current: datetime, days: int) -> bool:
+    published_at = article_published_at(article)
+    if published_at is None:
+        return False
+    return current - timedelta(days=days) <= published_at <= current + timedelta(hours=1)
+
+
+def article_freshness_rank(article: dict[str, object]) -> int:
+    published_at = article_published_at(article)
+    return int(published_at.timestamp()) if published_at else 0
+
+
+def web_trend_rank_key(article: dict[str, object]) -> tuple[int, int, int, int]:
     return (
         web_trend_relevance_score(article),
+        article_freshness_rank(article),
         numeric_value(article.get("search_volume")),
         numeric_value(article.get("increase_percentage")),
     )
@@ -1466,14 +1588,14 @@ def web_trend_groups(
         trends,
         source_type=WEB_DAILY_SOURCE_TYPE,
         current=current,
-        recent_days=2,
+        recent_days=WEB_DAILY_FRESHNESS_DAYS,
         limit=limit,
     )
     weekly = select_trend_group(
         trends,
         source_type=WEB_WEEKLY_SOURCE_TYPE,
         current=current,
-        recent_days=8,
+        recent_days=WEB_WEEKLY_FRESHNESS_DAYS,
         limit=limit,
     )
     return WebTrendGroups(daily=daily, weekly=weekly)

@@ -10532,7 +10532,7 @@ class SocialBrainTest(unittest.TestCase):
                 "limit": 10,
                 "no_enrich": True,
                 "scrapingdog_timeout_seconds": 12,
-                "max_news_queries_per_window": 2,
+                "max_news_queries_per_window": 6,
                 "deadline_seconds": 85,
             },
         )
@@ -10613,7 +10613,7 @@ class SocialBrainTest(unittest.TestCase):
                 "limit": 3,
                 "no_enrich": True,
                 "scrapingdog_timeout_seconds": 12,
-                "max_news_queries_per_window": 2,
+                "max_news_queries_per_window": 6,
                 "deadline_seconds": 85,
             },
             timeout_seconds=180,

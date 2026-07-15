@@ -19,6 +19,7 @@ from leadpoet_social_brain.trend_scout import (
     normalize_article_date,
     positioned_leadpoet_angle,
     refresh_web_trends,
+    scrapingdog_news_queries,
     select_web_trend_articles,
     web_trend_relevance_score,
 )
@@ -59,6 +60,36 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
         age = datetime.now(timezone.utc) - parsed
 
         self.assertLess(abs(age - timedelta(hours=18)), timedelta(minutes=1))
+
+    def test_news_query_portfolio_checks_independent_publishers_and_official_newsrooms(self):
+        queries = scrapingdog_news_queries(TrendScoutProfile())[:6]
+
+        self.assertIn("B2B sales", queries[0])
+        self.assertTrue(any("site:techcrunch.com" in query for query in queries))
+        self.assertTrue(any("site:venturebeat.com" in query for query in queries))
+        self.assertTrue(any("site:salesforce.com/news" in query for query in queries))
+        self.assertTrue(any("site:hubspot.com/company-news" in query for query in queries))
+
+    def test_web_trend_selection_represents_distinct_publishers_before_repeat_coverage(self):
+        articles = [
+            {
+                "title": f"Sales AI workflow update {index}",
+                "summary": "Sales automation changes outbound pipeline work.",
+                "sourceCommonName": source,
+                "url": f"https://example.com/{source.lower()}/{index}",
+                "date": f"2026-07-14T{12 - index:02d}:00:00+00:00",
+            }
+            for index, source in enumerate(
+                ["Publisher A", "Publisher A", "Publisher A", "Publisher B", "Publisher C"]
+            )
+        ]
+
+        selected = select_web_trend_articles(articles, limit=3)
+
+        self.assertEqual(
+            {article["sourceCommonName"] for article in selected},
+            {"Publisher A", "Publisher B", "Publisher C"},
+        )
 
     def test_positioned_angle_rewrites_other_tool_leverage_framing(self):
         trend = TrendItem(
@@ -258,6 +289,7 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
                         "link": f"https://example.com/{slug}/{query_slug}/{index}",
                         "source": "Example News",
                         "snippet": "Lead generation and sales automation teams are changing pipeline work.",
+                        "lastUpdated": f"{index + 1} hours ago",
                     }
                     for index in range(5)
                 ]
@@ -279,6 +311,51 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
             self.assertIn("Scrapingdog Google Trends", groups.sources)
             self.assertIn("Scrapingdog Google News", groups.sources)
             self.assertFalse(any("Celebrity gossip" in trend.title for trend in groups.daily))
+            store.close()
+
+    def test_scrapingdog_shared_news_pool_splits_daily_and_weekly_by_article_age(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+
+            def fake_trending_now(**kwargs):
+                return [{"title": "Celebrity gossip", "search_volume": 900000}]
+
+            def fake_google_news(**kwargs):
+                return [
+                    {
+                        "title": "Fresh sales AI workflow launch",
+                        "url": "https://fresh.example.com/sales-ai",
+                        "source": "Fresh Publisher",
+                        "snippet": "Sales automation changes outbound pipeline work.",
+                        "lastUpdated": "2 hours ago",
+                    },
+                    {
+                        "title": "Earlier RevOps CRM automation update",
+                        "url": "https://weekly.example.com/revops-crm",
+                        "source": "Weekly Publisher",
+                        "snippet": "RevOps teams changed a CRM sales workflow.",
+                        "lastUpdated": "3 days ago",
+                    },
+                ]
+
+            with patch.dict(os.environ, {"SCRAPINGDOG_API_KEY": "dog-key"}, clear=False):
+                with patch(
+                    "leadpoet_social_brain.trend_scout.fetch_scrapingdog_trending_now",
+                    side_effect=fake_trending_now,
+                ):
+                    with patch(
+                        "leadpoet_social_brain.trend_scout.fetch_scrapingdog_google_news",
+                        side_effect=fake_google_news,
+                    ):
+                        groups = refresh_web_trends(
+                            store,
+                            limit=1,
+                            enrich=False,
+                            max_news_queries_per_window=1,
+                        )
+
+            self.assertEqual([trend.source_author for trend in groups.daily], ["Fresh Publisher"])
+            self.assertEqual([trend.source_author for trend in groups.weekly], ["Weekly Publisher"])
             store.close()
 
     def test_scrapingdog_refresh_bounds_news_queries_for_hosted_tasks(self):
@@ -338,9 +415,9 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
 
             self.assertEqual(groups.daily, [])
             self.assertEqual(groups.weekly, [])
-            self.assertEqual(len(news_calls), 2)
+            self.assertEqual(len(news_calls), 1)
             self.assertTrue(all(call[2] == 7 for call in news_calls))
-            self.assertEqual([call[0] for call in news_calls], ["qdr:d", "qdr:w"])
+            self.assertEqual([call[0] for call in news_calls], ["qdr:w"])
             store.close()
 
     def test_scrapingdog_missing_key_reports_clear_warning(self):

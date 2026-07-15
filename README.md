@@ -998,6 +998,12 @@ python3 -m leadpoet_social_brain.cli publish-due-x
 
 Trend Scout stores timely context for generation and planning.
 
+Automated refreshes search a broad market lane, named GTM vendors, independent technology and
+marketing publishers, and official company newsrooms. One seven-day candidate pool is shared by
+the daily and weekly views, then locally filtered to two and eight days respectively. Selection
+gives distinct publishers the first available slots before filling the rest by relevance and
+freshness, while every saved item retains its original publisher and source URL.
+
 The Dashboard trend cards are intentionally compact:
 
 - topic/source metadata
