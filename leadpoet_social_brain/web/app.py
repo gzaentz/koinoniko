@@ -148,6 +148,8 @@ TOPICS_SYNC_KEY = "topics_sync"
 AUTOPILOT_SYNC_KEY = "autopilot_weekly"
 LEAD_MAGNET_RESEARCH_SYNC_KEY = "lead_magnet_research_sync"
 LEAD_MAGNET_AUTOPILOT_SYNC_KEY = "lead_magnet_autopilot"
+TOPIC_REFRESH_PROVIDER_TIMEOUT_SECONDS = 45.0
+TOPIC_REFRESH_PROVIDER_MAX_TOKENS = 2400
 VOICE_CONTEXT_NAME = "learned_from_high_performers"
 FACT_CONTEXT_FIELDS = [
     {
@@ -1641,7 +1643,7 @@ def refresh_pattern_windows_task_payload(store: SQLiteStore, payload: dict[str, 
 def refresh_topics_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:
     started_at = utc_now()
     try:
-        provider = load_configured_provider(store)
+        provider = configure_topic_refresh_provider(load_configured_provider(store))
         if not provider:
             raise ValueError("No LLM provider configured. Set a provider before refreshing topics.")
         result = refresh_topic_ideas(
@@ -1684,6 +1686,25 @@ def refresh_topics_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> 
             )
         )
         raise
+
+
+def configure_topic_refresh_provider(provider: Any) -> Any:
+    """Bound synchronous topic scouting so primary plus fallback fit one web request."""
+
+    request_timeout = getattr(provider, "request_timeout_seconds", None)
+    if isinstance(request_timeout, (int, float)):
+        provider.request_timeout_seconds = min(
+            float(request_timeout),
+            TOPIC_REFRESH_PROVIDER_TIMEOUT_SECONDS,
+        )
+    max_tokens = getattr(provider, "max_tokens", None)
+    if isinstance(max_tokens, int):
+        provider.max_tokens = min(max_tokens, TOPIC_REFRESH_PROVIDER_MAX_TOKENS)
+    if hasattr(provider, "reasoning_max_tokens"):
+        provider.reasoning_max_tokens = None
+    if hasattr(provider, "max_retries"):
+        provider.max_retries = 0
+    return provider
 
 
 def autopilot_weekly_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> dict[str, Any]:

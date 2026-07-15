@@ -85,6 +85,7 @@ def refresh_topic_ideas(
     skipped_value_concentration = 0
     rejected_summaries: list[str] = []
     response_parse_failures: list[str] = []
+    provider_failures: list[str] = []
     valid_response_count = 0
     routing = resolve_model_routing(store, provider)
     strategist_fallback_model = env_model_value("strategist")
@@ -112,9 +113,10 @@ def refresh_topic_ideas(
             extra_constraints = "\n".join(
                 part for part in [extra_constraints, json_retry_constraint] if part
             )
+        prior_response_failed = bool(response_parse_failures or provider_failures)
         candidate_count = min(
             20,
-            missing if response_parse_failures else missing + (2 if attempt == 0 else 4),
+            missing if prior_response_failed else missing + (2 if attempt == 0 else 4),
         )
         prompt = build_topic_ideas_prompt(
             store,
@@ -122,23 +124,29 @@ def refresh_topic_ideas(
             portfolio_target=requested,
             extra_constraints=extra_constraints,
         )
-        raw = generate_with_provider(
-            provider,
-            prompt,
-            variants=1,
-            model=(
-                strategist_fallback_model
-                if response_parse_failures
-                and strategist_fallback_model
-                and strategist_fallback_model != routing.strategist
-                else routing.strategist
-            ),
-        )[0]
+        try:
+            raw = generate_with_provider(
+                provider,
+                prompt,
+                variants=1,
+                model=(
+                    strategist_fallback_model
+                    if prior_response_failed
+                    and strategist_fallback_model
+                    and strategist_fallback_model != routing.strategist
+                    else routing.strategist
+                ),
+            )[0]
+        except RuntimeError as exc:
+            provider_failures.append(compact(str(exc), 180))
+            if len(response_parse_failures) + len(provider_failures) >= TOPIC_SCOUT_MAX_PARSE_FAILURES:
+                break
+            continue
         try:
             parsed = parse_topic_ideas(raw, limit=candidate_count)
         except (json.JSONDecodeError, ValueError) as exc:
             response_parse_failures.append(compact(str(exc), 180))
-            if len(response_parse_failures) >= TOPIC_SCOUT_MAX_PARSE_FAILURES:
+            if len(response_parse_failures) + len(provider_failures) >= TOPIC_SCOUT_MAX_PARSE_FAILURES:
                 break
             continue
         valid_response_count += 1
@@ -235,19 +243,24 @@ def refresh_topic_ideas(
             if len(accepted) >= requested:
                 break
 
-    if not accepted and response_parse_failures and not valid_response_count:
+    response_failures = [*provider_failures, *response_parse_failures]
+    if not accepted and response_failures and not valid_response_count:
         existing = store.list_topic_ideas(status="suggested", limit=requested)
         if existing:
             return TopicRefreshResult(
                 ideas=existing,
                 warnings=[
-                    "Topic Scout returned malformed JSON; kept "
+                    "Topic Scout could not return usable output; kept "
                     f"{len(existing)} existing suggested topic idea(s) available."
                 ],
                 diagnostics=[
                     "Stopped after "
-                    f"{len(response_parse_failures)} malformed response(s) and preserved the existing backlog."
+                    f"{len(response_failures)} failed response(s) and preserved the existing backlog."
                 ],
+            )
+        if provider_failures:
+            raise ValueError(
+                f"Topic Scout provider failed after {len(response_failures)} attempts: {provider_failures[-1]}"
             )
         raise ValueError(
             f"Topic Scout did not return valid topic JSON after {len(response_parse_failures)} attempts."
@@ -261,6 +274,10 @@ def refresh_topic_ideas(
 
     warnings: list[str] = []
     diagnostics: list[str] = []
+    if provider_failures:
+        diagnostics.append(
+            f"Recovered after {len(provider_failures)} Topic Scout provider failure(s)."
+        )
     if response_parse_failures:
         diagnostics.append(
             f"Recovered after {len(response_parse_failures)} malformed Topic Scout response(s)."

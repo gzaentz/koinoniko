@@ -27,7 +27,7 @@ TASK_DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "refresh-patterns": {"limit": 5, "window": "weekly"},
     "refresh-patterns-weekly": {"limit": 5, "windows": ["weekly", "monthly"]},
-    "refresh-topics": {"limit": 10},
+    "refresh-topics": {"limit": 5},
     "autopilot-weekly": {
         "posts": 5,
         "topic_limit": 20,
@@ -133,6 +133,13 @@ def post_task(
         raise RuntimeError(task_request_failure_message(task, body_text, status_code=exc.code)) from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(task_request_failure_message(task, str(exc.reason))) from exc
+    except TimeoutError as exc:
+        raise RuntimeError(
+            task_request_failure_message(
+                task,
+                f"request exceeded the {timeout_seconds}-second client timeout",
+            )
+        ) from exc
 
 
 def task_request_failure_message(task: str, detail: str, *, status_code: int | None = None) -> str:

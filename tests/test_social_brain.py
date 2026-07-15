@@ -10536,7 +10536,7 @@ class SocialBrainTest(unittest.TestCase):
                 "deadline_seconds": 85,
             },
         )
-        self.assertEqual(TASK_DEFAULTS["refresh-topics"], {"limit": 10})
+        self.assertEqual(TASK_DEFAULTS["refresh-topics"], {"limit": 5})
         self.assertEqual(TASK_DEFAULTS["autopilot-weekly"]["topic_limit"], 20)
         self.assertEqual(build_cli_parser().parse_args(["refresh-trends"]).limit, 10)
         self.assertEqual(TASK_DEFAULTS["refresh-patterns"], {"limit": 5, "window": "weekly"})
@@ -10648,6 +10648,55 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn("Task sync-x-daily request failed (524): error code: 524", message)
         self.assertIn("timed out before the app returned a response", message)
         self.assertIn("split the cron job into smaller tasks", message)
+
+        with patch(
+            "leadpoet_social_brain.web.task_client.urllib.request.urlopen",
+            side_effect=TimeoutError("timed out"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "180-second client timeout"):
+                task_client.post_task(
+                    "https://example.com",
+                    "refresh-topics",
+                    "task-secret",
+                    {"limit": 5},
+                )
+
+    def test_refresh_topics_task_bounds_openrouter_latency(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            SQLiteStore(db_path).close()
+            provider = OpenRouterProvider(
+                api_key="test-key",
+                model="test/model",
+                max_tokens=4000,
+                reasoning_max_tokens=1024,
+                max_retries=2,
+                request_timeout_seconds=90,
+                request_json=lambda *_args: {},
+            )
+            result = TopicRefreshResult(ideas=[], warnings=[], diagnostics=[])
+
+            with patch(
+                "leadpoet_social_brain.web.app.load_configured_provider",
+                return_value=provider,
+            ), patch(
+                "leadpoet_social_brain.web.app.refresh_topic_ideas",
+                return_value=result,
+            ) as refresh:
+                status, payload = handle_api_request(
+                    "POST",
+                    "/tasks/refresh-topics",
+                    json.dumps({"limit": 5}),
+                    db_path=db_path,
+                )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["stored"], 0)
+            self.assertEqual(refresh.call_args.kwargs["limit"], 5)
+            self.assertEqual(provider.request_timeout_seconds, 45)
+            self.assertEqual(provider.max_tokens, 2400)
+            self.assertIsNone(provider.reasoning_max_tokens)
+            self.assertEqual(provider.max_retries, 0)
 
     def test_railway_entrypoint_routes_cron_services_to_tasks(self):
         from leadpoet_social_brain.web.railway_entrypoint import task_from_environment
@@ -12624,7 +12673,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(result.ideas, [existing])
             self.assertEqual(len(provider.prompts), 2)
             self.assertIn("kept 1 existing suggested topic idea", result.warnings[0])
-            self.assertIn("Stopped after 2 malformed response", result.diagnostics[0])
+            self.assertIn("Stopped after 2 failed response", result.diagnostics[0])
             self.assertEqual(store.get_topic_idea(existing.id).status, "suggested")
             store.close()
 
@@ -12640,6 +12689,35 @@ class SocialBrainTest(unittest.TestCase):
                 refresh_topic_ideas(store, provider, limit=3)
 
             self.assertEqual(len(provider.prompts), 2)
+            store.close()
+
+    def test_topic_scout_preserves_backlog_after_provider_timeouts(self):
+        class TimeoutProvider:
+            def __init__(self):
+                self.calls = 0
+
+            def generate(self, prompt, *, variants, model=None):
+                self.calls += 1
+                raise RuntimeError("provider timed out")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            existing = store.save_topic_idea(
+                TopicIdea(
+                    title="Keep this grounded topic",
+                    topic="operations",
+                    angle="Offer a checklist for reviewing a handoff.",
+                    why_now="Use it as a practical audit prompt.",
+                )
+            )
+            provider = TimeoutProvider()
+
+            result = refresh_topic_ideas(store, provider, limit=3)
+
+            self.assertEqual(result.ideas, [existing])
+            self.assertEqual(provider.calls, 2)
+            self.assertIn("could not return usable output", result.warnings[0])
+            self.assertEqual(store.get_topic_idea(existing.id).status, "suggested")
             store.close()
 
     def test_plan_week_autopilot_uses_topic_idea_and_marks_it_used(self):
