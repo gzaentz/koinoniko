@@ -10536,7 +10536,7 @@ class SocialBrainTest(unittest.TestCase):
                 "deadline_seconds": 85,
             },
         )
-        self.assertEqual(TASK_DEFAULTS["refresh-topics"], {"limit": 20})
+        self.assertEqual(TASK_DEFAULTS["refresh-topics"], {"limit": 10})
         self.assertEqual(TASK_DEFAULTS["autopilot-weekly"]["topic_limit"], 20)
         self.assertEqual(build_cli_parser().parse_args(["refresh-trends"]).limit, 10)
         self.assertEqual(TASK_DEFAULTS["refresh-patterns"], {"limit": 5, "window": "weekly"})
@@ -12619,14 +12619,27 @@ class SocialBrainTest(unittest.TestCase):
             )
             provider = SequentialProvider(['{"topics":[' for _ in range(5)])
 
+            result = refresh_topic_ideas(store, provider, limit=3)
+
+            self.assertEqual(result.ideas, [existing])
+            self.assertEqual(len(provider.prompts), 2)
+            self.assertIn("kept 1 existing suggested topic idea", result.warnings[0])
+            self.assertIn("Stopped after 2 malformed response", result.diagnostics[0])
+            self.assertEqual(store.get_topic_idea(existing.id).status, "suggested")
+            store.close()
+
+    def test_topic_scout_bounds_malformed_json_retries_without_a_backlog(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            provider = SequentialProvider(['{"topics":[' for _ in range(5)])
+
             with self.assertRaisesRegex(
                 ValueError,
-                "Topic Scout did not return valid topic JSON after 5 attempts",
+                "Topic Scout did not return valid topic JSON after 2 attempts",
             ):
                 refresh_topic_ideas(store, provider, limit=3)
 
-            self.assertEqual(len(provider.prompts), 5)
-            self.assertEqual(store.get_topic_idea(existing.id).status, "suggested")
+            self.assertEqual(len(provider.prompts), 2)
             store.close()
 
     def test_plan_week_autopilot_uses_topic_idea_and_marks_it_used(self):

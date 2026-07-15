@@ -49,6 +49,7 @@ TOPIC_EDITORIAL_THEME_LIMITS = {
 
 TRACEABLE_TOPIC_SOURCE_TYPES = {"trend", "performance", "product", "founder", "follow_up"}
 TOPIC_SCOUT_MAX_ATTEMPTS = 5
+TOPIC_SCOUT_MAX_PARSE_FAILURES = 2
 DEFAULT_TOPIC_IDEA_LIMIT = 20
 MAX_TOPIC_IDEA_LIMIT = 20
 EDITORIAL_VALUE_MODE_NAMES = {name for name, _guidance in EDITORIAL_VALUE_MODES}
@@ -137,6 +138,8 @@ def refresh_topic_ideas(
             parsed = parse_topic_ideas(raw, limit=candidate_count)
         except (json.JSONDecodeError, ValueError) as exc:
             response_parse_failures.append(compact(str(exc), 180))
+            if len(response_parse_failures) >= TOPIC_SCOUT_MAX_PARSE_FAILURES:
+                break
             continue
         valid_response_count += 1
         if not parsed and attempt == 0:
@@ -233,6 +236,19 @@ def refresh_topic_ideas(
                 break
 
     if not accepted and response_parse_failures and not valid_response_count:
+        existing = store.list_topic_ideas(status="suggested", limit=requested)
+        if existing:
+            return TopicRefreshResult(
+                ideas=existing,
+                warnings=[
+                    "Topic Scout returned malformed JSON; kept "
+                    f"{len(existing)} existing suggested topic idea(s) available."
+                ],
+                diagnostics=[
+                    "Stopped after "
+                    f"{len(response_parse_failures)} malformed response(s) and preserved the existing backlog."
+                ],
+            )
         raise ValueError(
             f"Topic Scout did not return valid topic JSON after {len(response_parse_failures)} attempts."
         )
