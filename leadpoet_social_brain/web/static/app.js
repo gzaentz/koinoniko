@@ -2284,7 +2284,7 @@ async function syncMetrics() {
 
 async function syncAllXData() {
   const autoCategorize = Boolean(state.status?.provider_configured);
-  const payload = await api("/api/account/sync-x-all", {
+  await api("/api/account/sync-x-all", {
     method: "POST",
     body: JSON.stringify({
       username: accountSyncUsername(),
@@ -2296,9 +2296,6 @@ async function syncAllXData() {
       since_days: 30,
     }),
   });
-  const posts = payload.posts || {};
-  const metrics = payload.metrics || {};
-  showMessage(`X data synced. Imported ${posts.imported || 0}; recategorized ${posts.recategorized || 0}; metrics updated ${metrics.updated || 0}.`);
   await refreshAfterAccountAction();
 }
 

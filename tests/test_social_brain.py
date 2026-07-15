@@ -938,6 +938,7 @@ class SocialBrainTest(unittest.TestCase):
         self.assertIn('id="accountSyncPostsButton"', index_html)
         self.assertIn('id="accountSyncMetricsButton"', index_html)
         self.assertIn('id="accountSyncAllButton"', index_html)
+        self.assertNotIn("X data synced. Imported", app_js)
         self.assertIn('id="accountRefreshTrendsButton"', index_html)
         self.assertIn('id="accountSyncGrid"', index_html)
         self.assertIn('id="accountDetailDrawer"', index_html)
