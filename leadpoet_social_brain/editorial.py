@@ -32,7 +32,7 @@ EDITORIAL_VALUE_MODES = [
     ),
     (
         "buyer question",
-        "Give the reader a sharp question to ask and explain what a strong answer should contain.",
+        "Use one concrete question only when it exposes a hidden tradeoff, then name the deciding detail in plain prose. Avoid generic 'strong answer should' rubrics.",
     ),
     (
         "useful distinction",

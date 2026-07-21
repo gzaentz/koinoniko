@@ -457,7 +457,9 @@ Success criteria:
 - No more than two ideas may rely on the same broader buyer-timing/context thesis. Once covered, move to a different expertise area, tradeoff, operating lesson, technical mechanism, buyer question, or source-backed observation.
 - No more than two ideas may use the broader signal-to-action thesis. Different signal examples do not make the underlying lesson new.
 - Across the final portfolio, no more than three ideas total may live in the combined signals, intent, buyer-timing, targeting-context, or context-before-copy family. Those are one expertise lane, even when the examples differ.
-- Use the supplied authored-post content lanes to broaden the portfolio into other areas where evidence exists: founder operations, deliverability, data infrastructure, market economics, human selling, AI systems, decentralized AI, and message craft. Do not force a lane when the evidence is absent.
+- At least half of the portfolio must teach general outbound or sales craft directly: messaging, list building, prospect research, qualification, deliverability, sequencing, follow-up, discovery, objection handling, offers, or pipeline discipline. These should be useful operator tips, not disguised intent-data posts.
+- Vendor procurement and tool-evaluation questions are one format, not the default. Do not use that format for more than one idea in any five-topic slice, and never repeat the "strong answer should cover..." construction.
+- Use the supplied authored-post content lanes to broaden the portfolio into other areas where evidence exists: founder operations, deliverability, prospecting, sequencing and follow-up, sales conversations, message craft, data infrastructure, market economics, human selling, AI systems, and decentralized AI. Do not force a lane when the evidence is absent.
 - Across the final portfolio, use at least {value_mode_target} different reader value modes from the supplied portfolio and no more than {value_mode_limit} ideas in one mode.
 - At most one third of the ideas should be trend reactions. Include a useful mix of founder POV, buyer/problem mechanics, product beliefs, follow-ups to strong authored posts, and evergreen market takes.
 - Prefer sharp, ownable ideas over safe content-calendar filler.
@@ -646,15 +648,6 @@ def substantive_topic_source_post(text: str) -> bool:
 def topic_portfolio_lane(idea: TopicIdea) -> str:
     text = f"{idea.topic} {idea.title} {idea.angle}"
     specific_lane = topic_content_lane(text, topic=idea.topic)
-    if specific_lane in {
-        "decentralized-ai",
-        "deliverability",
-        "founder-operations",
-        "data-infrastructure",
-        "market-economics",
-        "human-selling",
-    }:
-        return specific_lane
     themes = set(editorial_theme_fingerprints(text))
     if themes & {
         "copy-is-downstream-of-judgment",
@@ -664,7 +657,122 @@ def topic_portfolio_lane(idea: TopicIdea) -> str:
         "signal-to-action",
     } or re.search(r"\b(?:buying signals?|intent data|in[- ]market|buyer timing|why now|context before)\b", text, flags=re.I):
         return "signals-and-timing"
+    if specific_lane in {
+        "decentralized-ai",
+        "deliverability",
+        "founder-operations",
+        "data-infrastructure",
+        "market-economics",
+        "human-selling",
+    }:
+        return specific_lane
     return specific_lane
+
+
+def topic_outbound_authority_lane(idea: TopicIdea) -> str | None:
+    """Classify practical outbound expertise without collapsing it into intent data."""
+
+    value = f"{idea.topic} {idea.title} {idea.angle}".casefold()
+    if topic_portfolio_lane(idea) == "signals-and-timing":
+        return None
+    patterns = [
+        ("deliverability", r"\bdeliverability\b|\bbounce|\bspf\b|\bdkim\b|\bdmarc\b|\bsender reputation\b|\bwarm[- ]?up\b|\bmailboxes?\b"),
+        ("message-craft", r"\bpersonalization\b|\brelevance\b|\bmessages?\b|\bcopy\b|\bemail drafts?\b|\bfirst touch\b|\bcall to action\b|\bcta\b"),
+        ("sequencing-and-follow-up", r"\bsequences?\b|\bfollow[- ]?ups?\b|\bcadence\b|\bmultitouch\b|\brepl(?:y|ies)\b|\bno response\b"),
+        ("prospecting-and-qualification", r"\bprospecting\b|\blead lists?\b|\blist building\b|\baccount research\b|\bicp\b|\bqualif(?:y|ied|ication)\b|\bcontact selection\b"),
+        ("sales-conversations", r"\bdiscovery\b|\bobjections?\b|\bdemos?\b|\bsales calls?\b|\bmeetings?\b|\bhuman selling\b|\benterprise sales\b"),
+        ("offers-and-positioning", r"\boffers?\b|\bvalue propositions?\b|\bpitches?\b|\bpositioning\b|\bproblem statement\b"),
+        ("pipeline-operations", r"\bpipeline\b|\bhandoffs?\b|\bforecast\b|\bstage definitions?\b|\bcrm hygiene\b|\bdeal reviews?\b"),
+    ]
+    return next((lane for lane, pattern in patterns if re.search(pattern, value)), None)
+
+
+def topic_is_vendor_evaluation(idea: TopicIdea) -> bool:
+    value = f"{idea.topic} {idea.title} {idea.angle}".casefold()
+    return bool(
+        (idea.reader_value_mode or "") == "buyer question"
+        or re.search(
+            r"\b(?:ask|evaluate|compare|scrutini[sz]e)\b[^.!?]{0,80}\b(?:vendor|provider|tool|platform|pitch|demo)\b|"
+            r"\b(?:vendor|provider)\b[^.!?]{0,80}\b(?:question|claim|answer|stopping rule)\b",
+            value,
+        )
+    )
+
+
+def prioritize_topic_ideas_for_schedule(
+    ideas: list[TopicIdea],
+    *,
+    slots: int,
+    existing_ideas: list[TopicIdea] | None = None,
+) -> list[TopicIdea]:
+    """Front-load a topic pool into a varied weekly editorial portfolio.
+
+    Topic Scout keeps a larger backlog for retries and the dashboard. Autopilot
+    usually schedules only five of those ideas, so the first few must be diverse
+    on their own instead of relying on diversity across the entire backlog.
+    """
+
+    pending = list(ideas)
+    existing = list(existing_ideas or [])
+    ordered: list[TopicIdea] = []
+    mode_counts = Counter(idea.reader_value_mode or "mechanism explainer" for idea in existing)
+    lane_counts = Counter(topic_schedule_lane(idea) for idea in existing)
+    source_counts = Counter(idea.source_type for idea in existing)
+    authority_count = sum(bool(topic_outbound_authority_lane(idea)) for idea in existing)
+    signal_count = sum(topic_portfolio_lane(idea) == "signals-and-timing" for idea in existing)
+    vendor_count = sum(topic_is_vendor_evaluation(idea) for idea in existing)
+    total_week_size = len(existing) + max(0, int(slots))
+    authority_target = min(total_week_size, math.ceil(total_week_size * 0.6))
+
+    while pending:
+        scheduled_so_far = min(len(ordered), max(0, int(slots)))
+        remaining_schedule_slots = max(0, int(slots) - scheduled_so_far)
+        authority_still_needed = max(0, authority_target - authority_count)
+        authority_required_now = (
+            remaining_schedule_slots > 0
+            and remaining_schedule_slots <= authority_still_needed
+        )
+
+        def score(index_and_idea: tuple[int, TopicIdea]) -> tuple[object, ...]:
+            index, idea = index_and_idea
+            mode = idea.reader_value_mode or "mechanism explainer"
+            lane = topic_schedule_lane(idea)
+            is_authority = bool(topic_outbound_authority_lane(idea))
+            is_signal = topic_portfolio_lane(idea) == "signals-and-timing"
+            is_vendor = topic_is_vendor_evaluation(idea)
+            return (
+                int(authority_required_now and not is_authority),
+                int(is_signal and signal_count >= 1),
+                int(is_vendor and vendor_count >= 1),
+                mode_counts[mode],
+                lane_counts[lane],
+                int(not is_authority and authority_count < authority_target),
+                source_counts[idea.source_type],
+                -idea.priority,
+                index,
+            )
+
+        selected_index, selected = min(enumerate(pending), key=score)
+        pending.pop(selected_index)
+        ordered.append(selected)
+        mode_counts[selected.reader_value_mode or "mechanism explainer"] += 1
+        lane_counts[topic_schedule_lane(selected)] += 1
+        source_counts[selected.source_type] += 1
+        authority_count += int(bool(topic_outbound_authority_lane(selected)))
+        signal_count += int(topic_portfolio_lane(selected) == "signals-and-timing")
+        vendor_count += int(topic_is_vendor_evaluation(selected))
+    return ordered
+
+
+def topic_schedule_lane(idea: TopicIdea) -> str:
+    if topic_portfolio_lane(idea) == "signals-and-timing":
+        return "signals-and-timing"
+    authority_lane = topic_outbound_authority_lane(idea)
+    if authority_lane:
+        return authority_lane
+    if topic_is_vendor_evaluation(idea):
+        return "vendor-evaluation"
+    return topic_portfolio_lane(idea)
 
 
 def topic_content_lane(text: str, *, topic: str = "") -> str:

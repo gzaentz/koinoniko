@@ -30,6 +30,7 @@ from leadpoet_social_brain.platforms.x import get_x_adapter
 from leadpoet_social_brain.platforms.x_api import XPostedTweet, XWriteClient
 from leadpoet_social_brain.providers import DraftProvider
 from leadpoet_social_brain.storage.sqlite_store import SQLiteStore
+from leadpoet_social_brain.topic_scout import prioritize_topic_ideas_for_schedule
 
 
 LOCAL_TZ = ZoneInfo("America/New_York")
@@ -75,6 +76,7 @@ def plan_week_x(
     continue_on_generation_error: bool = False,
     occupied_schedule_dates: set[date] | None = None,
     generation_attempt_limit: int | None = None,
+    existing_topic_ideas: list[TopicIdea] | None = None,
 ) -> PlanWeekResult:
     _ = variants_per_slot
     if posts <= 0:
@@ -86,9 +88,14 @@ def plan_week_x(
     candidate_limit = posts
     if continue_on_generation_error and generation_attempt_limit is not None:
         candidate_limit = max(posts, int(generation_attempt_limit))
-    selected_topic_ideas = [
+    available_topic_ideas = [
         idea for idea in (topic_ideas or []) if idea.status == "suggested"
-    ][:candidate_limit]
+    ]
+    selected_topic_ideas = prioritize_topic_ideas_for_schedule(
+        available_topic_ideas,
+        slots=posts,
+        existing_ideas=existing_topic_ideas,
+    )[:candidate_limit]
     if topic_ideas is not None:
         if not selected_topic_ideas:
             raise ValueError("No grounded topic ideas are available for Autopilot planning.")
@@ -101,14 +108,14 @@ def plan_week_x(
     )
     trends = recent_unused_trends(store, window_days=trend_window_days) if use_trends else []
     warnings: list[str] = []
-    if use_trends and not trends and not allow_evergreen:
+    if use_trends and topic_ideas is None and not trends and not allow_evergreen:
         raise ValueError("No recent unused trends available. Add trends or pass --allow-evergreen.")
-    if use_trends and len(trends) < posts and not allow_evergreen:
+    if use_trends and topic_ideas is None and len(trends) < posts and not allow_evergreen:
         raise ValueError(
             f"Only {len(trends)} recent unused trend(s) available for {posts} post(s). "
             "Add trends, lower --posts, or pass --allow-evergreen."
         )
-    if use_trends and not trends:
+    if use_trends and topic_ideas is None and not trends:
         warnings.append("No recent unused trends found. Planning evergreen authority posts.")
     if topic_ideas is not None and posts < requested_posts:
         warnings.append(
@@ -139,11 +146,13 @@ def plan_week_x(
             if (trend := store.get_trend_item(ref)) is not None and trend.id not in used_trends
         ]
         trend = referenced_trends[0] if referenced_trends else (
-            pick_trend_for_topic(trends, topic=topic, used_trend_ids=used_trends) if use_trends else None
+            None
+            if topic_idea
+            else (pick_trend_for_topic(trends, topic=topic, used_trend_ids=used_trends) if use_trends else None)
         )
         if trend:
             used_trends.add(trend.id)
-        elif use_trends:
+        elif use_trends and not topic_idea:
             warnings.append(f"No unused trend left for slot {index + 1}; planned evergreen post.")
         angle = (
             prompt_untrusted_text(topic_idea.angle, max_chars=500)
@@ -164,6 +173,8 @@ def plan_week_x(
             use_patterns=use_patterns,
             prompt_profile="natural",
             editorial_value_mode=topic_idea.reader_value_mode if topic_idea else None,
+            source_evidence=list(topic_idea.evidence_basis) if topic_idea else [],
+            source_refs=list(topic_idea.source_refs) if topic_idea else [],
         )
         try:
             drafts = generator.generate(
@@ -249,7 +260,7 @@ def create_post_x(
         )
     if missing_trend_count:
         warnings.append("Some selected trends were not found and were skipped.")
-    if not selected_trends and use_trends:
+    if not selected_trends and use_trends and not topic_idea:
         selected_trends = store.relevant_trends(topic=topic, angle=instruction, limit=3)
     if use_trends and not selected_trends:
         warnings.append("No relevant unused trends found. Created an evergreen post instead.")
@@ -267,6 +278,8 @@ def create_post_x(
         pattern_ids=pattern_ids or [],
         prompt_profile="natural",
         editorial_value_mode=topic_idea.reader_value_mode if topic_idea else None,
+        source_evidence=list(topic_idea.evidence_basis) if topic_idea else [],
+        source_refs=list(topic_idea.source_refs) if topic_idea else [],
     )
     draft = generator.generate(request, variants=1)[0]
     warnings.extend(f"Quality warning: {warning}" for warning in draft_quality_warnings(draft))
@@ -390,6 +403,8 @@ def revise_queued_post(
         pattern_ids=list(source_request.pattern_ids) if source_request else [],
         prompt_profile="natural",
         editorial_value_mode=source_request.editorial_value_mode if source_request else None,
+        source_evidence=list(source_request.source_evidence) if source_request else [],
+        source_refs=list(source_request.source_refs) if source_request else [],
         revision_source_text=item.text,
         revision_instruction=instruction.strip(),
         revision_source_queue_id=item.id,

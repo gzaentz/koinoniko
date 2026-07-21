@@ -400,6 +400,11 @@ class DraftRequest:
     pattern_ids: list[str] = field(default_factory=list)
     prompt_profile: str | None = None
     editorial_value_mode: str | None = None
+    # Topic Scout evidence is kept separate from the automated angle. The angle
+    # remains non-factual editorial direction, while these already-validated
+    # source fragments form a narrow closed evidence set with inspectable refs.
+    source_evidence: list[str] = field(default_factory=list)
+    source_refs: list[str] = field(default_factory=list)
     # Revision material is intentionally separate from ``extra_context``.  The
     # existing queued prose is useful as an editing target, but it is not factual
     # evidence and must never authorize an unsupported claim merely because the
