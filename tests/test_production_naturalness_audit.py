@@ -163,6 +163,10 @@ class ValidNaturalProvider:
         self.prompts.append(prompt)
         if "Write 3 X draft options for this workspace" in prompt:
             return self.options[:variants]
+        if "final line edit" in prompt:
+            # Grounding-preserving polish pass. The selected copy is already
+            # tight, so the line editor returns it unchanged.
+            return [self.options[0]]
         if "Choose the best X post for this workspace" in prompt:
             return [
                 json.dumps(
@@ -447,7 +451,9 @@ class ProductionNaturalnessAuditTests(unittest.TestCase):
             self.assertEqual(payload["post_count"], 1)
             self.assertEqual(payload["pipeline_receipt_pass_count"], 1)
             self.assertEqual(payload["pipeline_receipt_failure_count"], 0)
-            self.assertEqual(len(provider.prompts), 2)
+            # writer options -> typed evaluator -> grounding-preserving polish.
+            self.assertEqual(len(provider.prompts), 3)
+            self.assertTrue(any("final line edit" in prompt for prompt in provider.prompts))
             self.assertFalse(any("Do not write the post yet" in prompt for prompt in provider.prompts))
             self.assertFalse(any("Batch variation slot" in prompt for prompt in provider.prompts))
             store.close()

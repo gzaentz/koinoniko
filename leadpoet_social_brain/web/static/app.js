@@ -3665,6 +3665,7 @@ function renderAccount() {
   setModelInput("accountStrategistModel", models.strategist, effectiveModels.strategist || defaultModel);
   setModelInput("accountNaturalWriterModel", models.natural_writer, effectiveModels.natural_writer || defaultModel);
   setModelInput("accountEvaluatorModel", models.evaluator, effectiveModels.evaluator || defaultModel);
+  setModelInput("accountPolishModel", models.polish, effectiveModels.polish || models.natural_writer || defaultModel);
   $("accountModelSummary").textContent = modelRoutingSummary(models, effectiveModels, defaultModel);
   $("accountSyncSummary").textContent = syncSummary(sync, syncStatus, stats);
   const security = account.security || {};
@@ -3868,6 +3869,7 @@ async function saveAccount() {
         strategist: modelValueForSave("accountStrategistModel"),
         natural_writer: modelValueForSave("accountNaturalWriterModel"),
         evaluator: modelValueForSave("accountEvaluatorModel"),
+        polish: modelValueForSave("accountPolishModel"),
       },
     }),
   });

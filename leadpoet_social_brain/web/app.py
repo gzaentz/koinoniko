@@ -1743,6 +1743,12 @@ def autopilot_weekly_task_payload(store: SQLiteStore, payload: dict[str, Any]) -
             return {**summary, "items": [], "sync": sync_metadata_payload(metadata)}
 
         remaining_posts = posts - len(existing)
+        existing_topic_ideas = [
+            idea
+            for item in existing
+            if item.topic_idea_id
+            if (idea := store.get_topic_idea(item.topic_idea_id)) is not None
+        ]
         occupied_schedule_dates = {
             parse_dt(item.scheduled_at).date()
             for item in existing
@@ -1775,6 +1781,7 @@ def autopilot_weekly_task_payload(store: SQLiteStore, payload: dict[str, Any]) -
             continue_on_generation_error=True,
             occupied_schedule_dates=occupied_schedule_dates,
             generation_attempt_limit=remaining_posts + 2,
+            existing_topic_ideas=existing_topic_ideas,
         )
         completed_at = utc_now()
         warnings = [*topic_result.warnings, *result.warnings]
@@ -3428,7 +3435,7 @@ def save_account_model_settings(store: SQLiteStore, payload: dict[str, Any]) -> 
 
 def account_model_settings(store: SQLiteStore | None) -> dict[str, str]:
     if not store:
-        return {"default": "", "strategist": "", "natural_writer": "", "evaluator": ""}
+        return {"default": "", "strategist": "", "natural_writer": "", "evaluator": "", "polish": ""}
     return {
         "default": (
             clean_optional(store.get_app_setting(MODEL_SETTING_KEYS["default"]))
@@ -3438,6 +3445,7 @@ def account_model_settings(store: SQLiteStore | None) -> dict[str, str]:
         "strategist": clean_optional(store.get_app_setting(MODEL_SETTING_KEYS["strategist"])) or "",
         "natural_writer": clean_optional(store.get_app_setting(MODEL_SETTING_KEYS["natural_writer"])) or "",
         "evaluator": clean_optional(store.get_app_setting(MODEL_SETTING_KEYS["evaluator"])) or "",
+        "polish": clean_optional(store.get_app_setting(MODEL_SETTING_KEYS["polish"])) or "",
     }
 
 
@@ -3452,6 +3460,7 @@ def model_env_defaults() -> dict[str, str]:
         "strategist": clean_optional(os.getenv(MODEL_ENV_KEYS["strategist"])) or "",
         "natural_writer": clean_optional(os.getenv(MODEL_ENV_KEYS["natural_writer"])) or "",
         "evaluator": clean_optional(os.getenv(MODEL_ENV_KEYS["evaluator"])) or "",
+        "polish": clean_optional(os.getenv(MODEL_ENV_KEYS["polish"])) or "",
     }
 
 

@@ -302,6 +302,7 @@ SOCIAL_BRAIN_DEFAULT_MODEL="..."
 SOCIAL_BRAIN_STRATEGIST_MODEL="..."
 SOCIAL_BRAIN_NATURAL_WRITER_MODEL="..."
 SOCIAL_BRAIN_EVALUATOR_MODEL="..."
+SOCIAL_BRAIN_POLISH_MODEL="..."  # final line edit; falls back to the natural writer model
 OPENROUTER_MODEL="..."  # legacy default-model fallback
 ```
 
@@ -355,9 +356,11 @@ Then open `Account -> Model Routing` and set:
 - Natural writer model
 - Evaluator model
 
-Normal Create Post, CLI generation, and Autopilot planning use a two-call natural pipeline: natural writer -> evaluator. The writer gets the complete original brief, authored examples, learned Voice profile, editable Voice rules, platform/post-type contract, saved facts, selected sources, performance hints, and evidence limits without the legacy structure/rhythm/product-placement matrices. The evaluator receives the same voice calibration plus the closed saved-fact/source evidence and active Review Filters, ranks every option, and preserves a passing winner verbatim. Strategist routing remains available for Topic Scout and the legacy structural audit selected with `audit-naturalness-x --legacy-structure`.
+Normal Create Post, CLI generation, and Autopilot planning use a natural pipeline: natural writer -> evaluator -> grounding-preserving polish. The writer gets the complete original brief, authored examples, learned Voice profile, editable Voice rules, platform/post-type contract, saved facts, selected sources, performance hints, and evidence limits without the legacy structure/rhythm/product-placement matrices. The evaluator receives the same voice calibration plus the closed saved-fact/source evidence and active Review Filters, ranks every option, and preserves a passing winner verbatim. Strategist routing remains available for Topic Scout and the legacy structural audit selected with `audit-naturalness-x --legacy-structure`.
 
 The normal path validates the evaluator's JSON contract and retries it once when required ranking, logic audit, claim audit, warning fields, or structured quality audit are missing or malformed. Before evaluation, the writer must return exactly three materially distinct options; exact, formatting-only, near-copy, and repeated semantic-thesis sets get one bounded writer retry and then fail closed. The quality audit must identify an exact reader payoff, run a company-swap test against an exact mechanism fragment, and compare the final against supplied examples/recent wording for originality. After selection, shortening, and any source/clarity repair, a final deterministic gate independently rechecks avoid phrases, artificial voice patterns, negated or unsupported first-person setups, invented quotes and product capabilities, unsupported numbers and number-meaning changes, causal-claim laundering, logical clarity, control-string output, and generic AI/sales slogans. It uses a clean writer alternative first, performs one bounded repair only when necessary, and refuses to save or queue copy when the evaluator or final gate leaves an unresolved defect.
+
+After the gate passes, a final polish pass re-voices the approved post for natural rhythm, the same edit a founder makes by hand when pasting an approved draft into a strong model. It is a style edit, never a rewrite: the closed factual set is unchanged, and the polished text is adopted only when it introduces no new number and independently clears the same deterministic quality gate. If the polished copy then fails the exact-final audit, the pre-polish text is restored and audited instead, so the polish can improve a post but can never cause a generation to fail. Every draft records a `natural_polish` receipt showing whether the edit was applied, skipped, rejected, or reverted.
 
 The evaluator receipt is bound to the exact final UTF-8 bytes. Its initial audit is reused only when the evaluator actually reviewed those same bytes and its logic, claim coverage, reader payoff, and mechanism fragments all quote that final text. Any local selection, shortening, repair, or stale/mismatched audit triggers a separate audit-only evaluator call with a SHA-256 contract; a bad hash, missing bridge, omitted high-risk claim, stale quote, or unresolved warning fails closed before save. Production audit receipts independently recheck those bindings instead of trusting a `passed` flag alone.
 
@@ -373,7 +376,7 @@ Approval belongs to the exact reviewed copy. Editing text, topic, post type, or 
 
 For standard-length posts, the natural writer produces both compact and intentionally multiline options. A rotating layout preference and recent-output saturation check keep the selected posts from collapsing into the same single-paragraph shape, while line breaks still need to mark a real turn, list, question, or consequence.
 
-Role models are optional. If a role is blank, it falls back to the default model. If no Account model is saved, env fallbacks such as `SOCIAL_BRAIN_DEFAULT_MODEL` or legacy `OPENROUTER_MODEL` are used.
+Role models are optional. If a role is blank, it falls back to the default model, except the polish role, which falls back to the natural writer model. If no Account model is saved, env fallbacks such as `SOCIAL_BRAIN_DEFAULT_MODEL` or legacy `OPENROUTER_MODEL` are used. Pointing the polish role at the strongest available model is the cheapest way to raise final copy quality, because it only re-voices already-approved text.
 
 Example OpenRouter model IDs:
 

@@ -7,18 +7,20 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
-MODEL_ROLES = ("default", "strategist", "natural_writer", "evaluator")
+MODEL_ROLES = ("default", "strategist", "natural_writer", "evaluator", "polish")
 MODEL_SETTING_KEYS = {
     "default": "model.default",
     "strategist": "model.strategist",
     "natural_writer": "model.natural_writer",
     "evaluator": "model.evaluator",
+    "polish": "model.polish",
 }
 MODEL_ENV_KEYS = {
     "default": "SOCIAL_BRAIN_DEFAULT_MODEL",
     "strategist": "SOCIAL_BRAIN_STRATEGIST_MODEL",
     "natural_writer": "SOCIAL_BRAIN_NATURAL_WRITER_MODEL",
     "evaluator": "SOCIAL_BRAIN_EVALUATOR_MODEL",
+    "polish": "SOCIAL_BRAIN_POLISH_MODEL",
 }
 LEGACY_MODEL_SETTING = "llm_model"
 LEGACY_MODEL_ENV = "SOCIAL_BRAIN_MODEL"
@@ -40,6 +42,10 @@ class ModelRouting:
     strategist: str | None = None
     natural_writer: str | None = None
     evaluator: str | None = None
+    # The polish role re-voices the already-grounded final post for natural
+    # rhythm without changing its claims. It defaults to the natural writer
+    # model, but can be pointed at the founder's strongest model.
+    polish: str | None = None
 
     def for_role(self, role: str) -> str | None:
         if role == "default":
@@ -53,6 +59,7 @@ class ModelRouting:
             "strategist": self.strategist,
             "natural_writer": self.natural_writer,
             "evaluator": self.evaluator,
+            "polish": self.polish,
         }
 
 
@@ -119,11 +126,13 @@ def resolve_model_routing(store=None, provider: DraftProvider | None = None) -> 
     strategist = resolve_model_value(store, "strategist") or default
     natural_writer = resolve_model_value(store, "natural_writer") or default
     evaluator = resolve_model_value(store, "evaluator") or default
+    polish = resolve_model_value(store, "polish") or natural_writer
     return ModelRouting(
         default=default,
         strategist=strategist,
         natural_writer=natural_writer,
         evaluator=evaluator,
+        polish=polish,
     )
 
 

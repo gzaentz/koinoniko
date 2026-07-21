@@ -318,5 +318,8 @@ def avoid_phrases_prompt_section(phrases: list[str]) -> str:
         f"{lines}\n\n"
         "Instruction:\n"
         "Do not use these phrases or close variants. If the idea is useful, "
-        "rewrite it in plain saved-voice language."
+        "rewrite it in plain saved-voice language. This holds even when the brief, "
+        "angle, source, or existing draft uses the phrase itself: keep the meaning "
+        "and paraphrase the wording. Echoing an avoided phrase back from the request "
+        "is still a defect."
     )

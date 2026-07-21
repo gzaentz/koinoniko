@@ -73,6 +73,10 @@ from leadpoet_social_brain.generation import (
     selected_product_mention_syntax_targets,
     selected_product_name_usage_targets,
     selected_structure_shapes,
+    batch_recent_output_summary,
+    recent_output_repetition_violations,
+    recent_output_row,
+    recent_output_rhetorical_shapes,
     trend_specific_generation_angle,
     trend_angle_for_generation,
     unsupported_source_language,
@@ -119,6 +123,9 @@ from leadpoet_social_brain.topic_scout import (
     build_topic_ideas_prompt,
     parse_topic_ideas,
     refresh_topic_ideas,
+    prioritize_topic_ideas_for_schedule,
+    topic_is_vendor_evaluation,
+    topic_outbound_authority_lane,
     topic_portfolio_lane,
 )
 from leadpoet_social_brain.voice import (
@@ -154,6 +161,21 @@ from leadpoet_social_brain.web.app import (
 )
 from leadpoet_social_brain.web import task_client
 from leadpoet_social_brain.web.task_client import TASK_DEFAULTS, main as task_client_main
+
+
+def polished_post_from_prompt(prompt: str) -> str:
+    """Return the exact post embedded in a natural polish prompt.
+
+    Mocks echo this back so the grounding-preserving polish pass sees the copy
+    unchanged: a faithful no-op line edit that adds one provider call without a
+    re-audit."""
+
+    match = re.search(
+        r"<(?P<tag>approved_post_to_polish_[a-f0-9]{24})>\n(.*?)\n</(?P=tag)>",
+        prompt,
+        flags=re.S,
+    )
+    return match.group(2) if match else ""
 
 
 def exact_final_audit_json_for_prompt(prompt: str) -> str:
@@ -245,6 +267,8 @@ class RoleAwareProvider:
         self.calls.append({"prompt": prompt, "variants": variants, "model": model})
         if "Audit this exact final X post" in prompt:
             return [exact_final_audit_json_for_prompt(prompt)]
+        if "final line edit" in prompt:
+            return [polished_post_from_prompt(prompt)]
         if "Provider smoke test" in prompt:
             return ["OK"]
         if "Do not write the post yet" in prompt:
@@ -2164,6 +2188,51 @@ class SocialBrainTest(unittest.TestCase):
 
         self.assertIn("rewrite awkward source coverage setup", violations)
 
+    def test_natural_voice_rejects_planning_labels_generic_sources_and_strong_answer_rubrics(self):
+        request = DraftRequest(platform="x", topic="outbound", post_type="founder_insight")
+
+        violations = natural_voice_violations(
+            "Heuristic: inspect freshness.\nA source describes a vendor claim. A strong answer should cover freshness.",
+            request,
+        )
+
+        self.assertIn("remove internal editorial-planning label", violations)
+        self.assertIn(
+            "replace generic source-attribution opening with the named source or the useful point",
+            violations,
+        )
+        self.assertIn(
+            "replace stock 'strong answer' rubric with concrete prose",
+            violations,
+        )
+
+    def test_recent_output_detects_repeated_buyer_question_answer_rubric(self):
+        first = (
+            "What happens when the provider finds two values?\n\n"
+            "A strong answer should cover freshness and conflict handling."
+        )
+        second = (
+            "Which action can run without approval?\n\n"
+            "If the answer is a list of stop rules, the boundary is clear."
+        )
+        row = recent_output_row(first, source="queue")
+
+        self.assertEqual(
+            recent_output_rhetorical_shapes(first),
+            ["buyer-question-answer-rubric"],
+        )
+        violations = recent_output_repetition_violations(
+            second,
+            [row],
+            batch_recent_output_summary([first]),
+            request=DraftRequest(platform="x", topic="sales AI", post_type="founder_insight"),
+        )
+
+        self.assertIn(
+            "change repeated recent rhetorical shape: buyer-question-answer-rubric",
+            violations,
+        )
+
     def test_clean_generated_text_adds_missing_space_after_sentence_punctuation(self):
         self.assertEqual(
             clean_generated_text("When is the account ready?The handoff comes next.", max_chars=280),
@@ -2769,6 +2838,8 @@ class SocialBrainTest(unittest.TestCase):
                 self.prompts.append(prompt)
                 if "Audit this exact final X post" in prompt:
                     return [exact_final_audit_json_for_prompt(prompt)]
+                if "final line edit" in prompt:
+                    return [polished_post_from_prompt(prompt)]
                 if "Write 3 X draft options" in prompt:
                     return [
                         repeated_option,
@@ -2819,7 +2890,7 @@ class SocialBrainTest(unittest.TestCase):
             )[0]
 
             self.assertEqual(draft.text, fresh_option)
-            self.assertEqual(len(provider.prompts), 3)
+            self.assertEqual(len(provider.prompts), 4)
             self.assertTrue(all("Recent editorial theme counts:" in prompt for prompt in provider.prompts[:2]))
             self.assertEqual(
                 draft.context_snapshot["recent_output_editorial_theme_counts"]["copy-is-downstream-of-judgment"],
@@ -2840,6 +2911,8 @@ class SocialBrainTest(unittest.TestCase):
             def generate(self, prompt: str, *, variants: int) -> list[str]:
                 if "Audit this exact final X post" in prompt:
                     return [exact_final_audit_json_for_prompt(prompt)]
+                if "final line edit" in prompt:
+                    return [polished_post_from_prompt(prompt)]
                 if "Write 3 X draft options" in prompt:
                     return [first, second, third][:variants]
                 return [
@@ -2900,6 +2973,8 @@ class SocialBrainTest(unittest.TestCase):
                 self.prompts.append(prompt)
                 if "Audit this exact final X post" in prompt:
                     return [exact_final_audit_json_for_prompt(prompt)]
+                if "final line edit" in prompt:
+                    return [polished_post_from_prompt(prompt)]
                 if "Write 3 X draft options" in prompt:
                     return [compact, multiline, alternate][:variants]
                 return [
@@ -2976,6 +3051,8 @@ class SocialBrainTest(unittest.TestCase):
                 self.prompts.append(prompt)
                 if "Audit this exact final X post" in prompt:
                     return [exact_final_audit_json_for_prompt(prompt)]
+                if "final line edit" in prompt:
+                    return [polished_post_from_prompt(prompt)]
                 if "Write 3 X draft options" in prompt:
                     return [confusing, coherent, vague][:variants]
                 return [
@@ -3028,6 +3105,8 @@ class SocialBrainTest(unittest.TestCase):
             def generate(self, prompt: str, *, variants: int) -> list[str]:
                 if "Audit this exact final X post" in prompt:
                     return [exact_final_audit_json_for_prompt(prompt)]
+                if "final line edit" in prompt:
+                    return [polished_post_from_prompt(prompt)]
                 if "Write 3 X draft options" in prompt:
                     return [unsupported, grounded, "Public triggers create crowded outreach. Add one account-specific detail."][:variants]
                 return [
@@ -3082,6 +3161,10 @@ class SocialBrainTest(unittest.TestCase):
             "The source says ZoomInfo brings data and agents to teams on Snowflake. "
             "That suggests buyers should ask how the integration accesses their data."
         )
+        natural_repair = (
+            "ZoomInfo brings data and agents to revenue teams running on Snowflake. "
+            "Buyers should still ask how the integration accesses their data."
+        )
 
         class SourceRepairProvider:
             def __init__(self):
@@ -3090,11 +3173,15 @@ class SocialBrainTest(unittest.TestCase):
             def generate(self, prompt: str, *, variants: int) -> list[str]:
                 if "Audit this exact final X post" in prompt:
                     return [exact_final_audit_json_for_prompt(prompt)]
+                if "final line edit" in prompt:
+                    return [polished_post_from_prompt(prompt)]
                 if "Write 3 X draft options" in prompt:
                     return distinct_bad_writer_options(bad, variants)
                 if "Rewrite this X post so every factual and causal statement" in prompt:
                     self.repair_prompts.append(prompt)
                     return [repaired]
+                if "Repair this X post once so it is safe to place in the review queue" in prompt:
+                    return [natural_repair]
                 return [
                     json.dumps(
                         {
@@ -3147,7 +3234,7 @@ class SocialBrainTest(unittest.TestCase):
                 save=False,
             )[0]
 
-            self.assertEqual(draft.text, repaired)
+            self.assertEqual(draft.text, natural_repair)
             self.assertEqual(len(provider.repair_prompts), 1)
             self.assertTrue(draft.context_snapshot["evaluation"]["grounding_repair"]["source_only"])
             self.assertEqual(draft.context_snapshot["evaluation"]["warnings"], [])
@@ -8157,10 +8244,11 @@ class SocialBrainTest(unittest.TestCase):
 
             self.assertEqual(status, 200)
             self.assertEqual(len(payload["versions"]), 1)
-            self.assertEqual(len(provider.prompts), 3)
+            self.assertEqual(len(provider.prompts), 4)
             self.assertIn("Write 3 X draft options for this workspace", provider.prompts[0])
             self.assertIn("Choose the best X post for this workspace", provider.prompts[1])
-            self.assertIn("Audit this exact final X post", provider.prompts[2])
+            self.assertIn("final line edit", provider.prompts[2])
+            self.assertIn("Audit this exact final X post", provider.prompts[3])
             self.assertTrue(all("Original queued post." in prompt for prompt in provider.prompts[:2]))
             self.assertTrue(all("Revision instruction:" in prompt for prompt in provider.prompts[:2]))
             self.assertTrue(all("Avoid Phrases:" in prompt for prompt in provider.prompts[:2]))
@@ -8211,6 +8299,8 @@ class SocialBrainTest(unittest.TestCase):
                     self.prompts.append(prompt)
                     if "Audit this exact final X post" in prompt:
                         return [exact_final_audit_json_for_prompt(prompt)]
+                    if "final line edit" in prompt:
+                        return [polished_post_from_prompt(prompt)]
                     if "Write 3 X draft options for this workspace" in prompt:
                         return [
                             overlong,
@@ -8389,7 +8479,8 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(len(revisions["versions"]), 1)
             self.assertEqual(
                 [call["model"] for call in provider.calls],
-                ["openrouter/writer", "openrouter/evaluator", "openrouter/evaluator"],
+                # writer -> evaluator -> polish (defaults to the writer model) -> exact-final audit
+                ["openrouter/writer", "openrouter/evaluator", "openrouter/writer", "openrouter/evaluator"],
             )
             store = SQLiteStore(db_path)
             unchanged = store.get_content_queue_item(item.id)
@@ -12301,6 +12392,109 @@ class SocialBrainTest(unittest.TestCase):
             {"signals-and-timing"},
         )
 
+    def test_weekly_topic_priority_front_loads_outbound_authority_and_distinct_formats(self):
+        ideas = [
+            TopicIdea(
+                title="Ask an intent vendor about freshness",
+                topic="intent data",
+                angle="Give buyers a vendor question about why-now signal freshness.",
+                why_now="Useful now.",
+                reader_value_mode="buyer question",
+                priority=99,
+            ),
+            TopicIdea(
+                title="Ask a data vendor about conflicts",
+                topic="data infrastructure",
+                angle="Ask the provider which answer wins when fields conflict.",
+                why_now="Useful now.",
+                reader_value_mode="buyer question",
+                priority=98,
+            ),
+            TopicIdea(
+                title="Remove research that does not change the ask",
+                topic="message craft",
+                angle="Give readers a practical playbook for cutting personalized details from an outbound message.",
+                why_now="Useful now.",
+                reader_value_mode="practical playbook",
+                priority=92,
+            ),
+            TopicIdea(
+                title="Find the deliverability failure before adding domains",
+                topic="deliverability",
+                angle="Diagnose SPF, DKIM, bounce, mailbox, and message problems separately.",
+                why_now="Useful now.",
+                reader_value_mode="diagnostic",
+                priority=91,
+            ),
+            TopicIdea(
+                title="A follow-up should add a reason",
+                topic="outbound",
+                angle="Explain how a follow-up changes the reason to reply instead of repeating the first email.",
+                why_now="Useful now.",
+                reader_value_mode="mechanism explainer",
+                priority=90,
+            ),
+            TopicIdea(
+                title="Discovery before demo",
+                topic="sales conversations",
+                angle="Give reps a decision framework for when discovery has earned a product demo.",
+                why_now="Useful now.",
+                reader_value_mode="decision framework",
+                priority=89,
+            ),
+        ]
+
+        selected = prioritize_topic_ideas_for_schedule(ideas, slots=5)[:5]
+
+        self.assertGreaterEqual(sum(bool(topic_outbound_authority_lane(idea)) for idea in selected), 3)
+        self.assertLessEqual(sum(topic_portfolio_lane(idea) == "signals-and-timing" for idea in selected), 1)
+        self.assertLessEqual(sum(topic_is_vendor_evaluation(idea) for idea in selected), 1)
+        self.assertEqual(len({idea.reader_value_mode for idea in selected}), 5)
+
+    def test_weekly_topic_priority_remembers_existing_weekly_format_and_lane(self):
+        existing = TopicIdea(
+            title="Existing intent question",
+            topic="intent data",
+            angle="Ask an intent vendor how a why-now signal is refreshed.",
+            why_now="Useful now.",
+            reader_value_mode="buyer question",
+            status="used",
+        )
+        candidates = [
+            TopicIdea(
+                title="Another vendor question",
+                topic="intent data",
+                angle="Ask a provider what a strong answer about intent freshness contains.",
+                why_now="Useful now.",
+                reader_value_mode="buyer question",
+                priority=99,
+            ),
+            TopicIdea(
+                title="Follow-up reason",
+                topic="outbound",
+                angle="Explain how a follow-up adds a new reason to reply.",
+                why_now="Useful now.",
+                reader_value_mode="mechanism explainer",
+                priority=90,
+            ),
+            TopicIdea(
+                title="Message edit",
+                topic="message craft",
+                angle="Give a practical playbook for removing research that does not change the ask.",
+                why_now="Useful now.",
+                reader_value_mode="practical playbook",
+                priority=89,
+            ),
+        ]
+
+        selected = prioritize_topic_ideas_for_schedule(
+            candidates,
+            slots=2,
+            existing_ideas=[existing],
+        )[:2]
+
+        self.assertNotIn("Another vendor question", {idea.title for idea in selected})
+
     def test_topic_scout_rejects_invented_quantified_claims(self):
         rows = [
             {
@@ -12898,6 +13092,7 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(payload["target"], 5)
             self.assertEqual(planner.call_args.kwargs["posts"], 4)
             self.assertEqual(planner.call_args.kwargs["generation_attempt_limit"], 6)
+            self.assertEqual(planner.call_args.kwargs["existing_topic_ideas"], [])
             self.assertEqual(
                 planner.call_args.kwargs["occupied_schedule_dates"],
                 {datetime.fromisoformat("2026-07-13").date()},
@@ -12977,14 +13172,15 @@ class SocialBrainTest(unittest.TestCase):
             )
             saved = store.get_generated_draft(result.item.draft_id)
 
-            self.assertEqual(len(provider.calls), 3)
+            self.assertEqual(len(provider.calls), 4)
             self.assertIn("Goal: produce a post this founder would actually publish", provider.calls[0]["prompt"])
             self.assertNotIn("Produce the structured Post Intent", provider.calls[0]["prompt"])
             self.assertNotIn("Draft Option Variation Map", provider.calls[0]["prompt"])
             self.assertIn("Judge the options on:", provider.calls[1]["prompt"])
             self.assertIn("Closed factual evidence:", provider.calls[1]["prompt"])
             self.assertIn("claim_audit", provider.calls[1]["prompt"])
-            self.assertIn("Audit this exact final X post", provider.calls[2]["prompt"])
+            self.assertIn("final line edit", provider.calls[2]["prompt"])
+            self.assertIn("Audit this exact final X post", provider.calls[3]["prompt"])
             self.assertEqual(saved.request.prompt_profile, "natural")
             self.assertIsNone(saved.context_snapshot["models_used"]["strategist"])
             store.close()
@@ -13031,7 +13227,7 @@ class SocialBrainTest(unittest.TestCase):
                 save=False,
             )[0]
 
-            self.assertEqual(len(provider.calls), 3)
+            self.assertEqual(len(provider.calls), 4)
             writer_prompt = str(provider.calls[0]["prompt"])
             evaluator_prompt = str(provider.calls[1]["prompt"])
             for prompt in [writer_prompt, evaluator_prompt]:
@@ -13058,6 +13254,8 @@ class SocialBrainTest(unittest.TestCase):
                 self.prompts.append(prompt)
                 if "Audit this exact final X post" in prompt:
                     return [exact_final_audit_json_for_prompt(prompt)]
+                if "final line edit" in prompt:
+                    return [polished_post_from_prompt(prompt)]
                 if "Write 3 X draft options" in prompt:
                     return [
                         "A forecast should move when the evidence moves.",
@@ -13082,9 +13280,10 @@ class SocialBrainTest(unittest.TestCase):
                 save=False,
             )[0]
 
-            self.assertEqual(len(provider.prompts), 4)
+            self.assertEqual(len(provider.prompts), 5)
             self.assertIn("previous review response could not be trusted", provider.prompts[2])
-            self.assertIn("Audit this exact final X post", provider.prompts[3])
+            self.assertIn("final line edit", provider.prompts[3])
+            self.assertIn("Audit this exact final X post", provider.prompts[4])
             self.assertEqual(draft.context_snapshot["evaluation"]["contract"]["attempts"], 2)
             self.assertIn("response is not a JSON object", draft.context_snapshot["evaluation"]["contract"]["initial_violations"])
             store.close()
@@ -13119,6 +13318,8 @@ class SocialBrainTest(unittest.TestCase):
             def generate(self, prompt: str, *, variants: int) -> list[str]:
                 if "Audit this exact final X post" in prompt:
                     return [exact_final_audit_json_for_prompt(prompt)]
+                if "final line edit" in prompt:
+                    return [polished_post_from_prompt(prompt)]
                 if "Write 3 X draft options" in prompt:
                     return [
                         original,
@@ -13156,6 +13357,8 @@ class SocialBrainTest(unittest.TestCase):
                 self.prompts.append(prompt)
                 if "Audit this exact final X post" in prompt:
                     return [exact_final_audit_json_for_prompt(prompt)]
+                if "final line edit" in prompt:
+                    return [polished_post_from_prompt(prompt)]
                 if "Write 3 X draft options" in prompt:
                     return [bad, clean, "The future of outbound is a seamless new era."][:variants]
                 return [evaluation_json(bad)]
@@ -13175,7 +13378,7 @@ class SocialBrainTest(unittest.TestCase):
             )[0]
 
             self.assertEqual(draft.text, clean)
-            self.assertEqual(len(provider.prompts), 3)
+            self.assertEqual(len(provider.prompts), 4)
             gate = draft.context_snapshot["evaluation"]["natural_quality_gate"]
             self.assertEqual(gate["resolution"], "clean_writer_alternative")
             self.assertEqual(gate["selected_draft"], 2)
@@ -13193,6 +13396,8 @@ class SocialBrainTest(unittest.TestCase):
                 self.prompts.append(prompt)
                 if "Audit this exact final X post" in prompt:
                     return [exact_final_audit_json_for_prompt(prompt)]
+                if "final line edit" in prompt:
+                    return [polished_post_from_prompt(prompt)]
                 if "Write 3 X draft options" in prompt:
                     return distinct_bad_writer_options(bad, variants)
                 if "Repair this X post once" in prompt:
@@ -13214,7 +13419,7 @@ class SocialBrainTest(unittest.TestCase):
             )[0]
 
             self.assertEqual(draft.text, repaired)
-            self.assertEqual(len(provider.prompts), 4)
+            self.assertEqual(len(provider.prompts), 5)
             self.assertIn("Detected hard defects", provider.prompts[2])
             self.assertEqual(
                 draft.context_snapshot["evaluation"]["natural_quality_gate"]["resolution"],
@@ -13239,6 +13444,8 @@ class SocialBrainTest(unittest.TestCase):
                 self.prompts.append(prompt)
                 if "Audit this exact final X post" in prompt:
                     return [exact_final_audit_json_for_prompt(prompt)]
+                if "final line edit" in prompt:
+                    return [polished_post_from_prompt(prompt)]
                 if "Write 3 X draft options" in prompt:
                     return distinct_bad_writer_options(bad, variants)
                 if "Repair this X post once" in prompt:
@@ -13265,7 +13472,8 @@ class SocialBrainTest(unittest.TestCase):
             gate = draft.context_snapshot["evaluation"]["natural_quality_gate"]
             self.assertEqual(gate["resolution"], "bounded_repair")
             self.assertEqual(gate["repair_attempts"], 2)
-            self.assertIn("avoid 'not just X, but Y' framing", provider.prompts[-2])
+            repair_prompts = [p for p in provider.prompts if "Repair this X post once" in p]
+            self.assertIn("avoid 'not just X, but Y' framing", repair_prompts[1])
             store.close()
 
     def test_natural_quality_gate_fails_closed_when_repair_still_violates_rules(self):
