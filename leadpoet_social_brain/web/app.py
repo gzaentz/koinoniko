@@ -1083,16 +1083,20 @@ def route_api(
         topic_ideas: list[TopicIdea] | None = None
         topic_warnings: list[str] = []
         if autopilot:
-            available = store.list_topic_ideas(status="suggested", limit=posts)
+            topic_limit = max(posts, int(payload.get("topic_limit") or DEFAULT_TOPIC_IDEA_LIMIT))
+            available = store.list_topic_ideas(status="suggested", limit=topic_limit)
             if len(available) < posts or bool_from_payload(payload, "refresh_topics", True):
                 topic_result = refresh_topic_ideas(
                     store,
                     provider,
-                    limit=max(posts, int(payload.get("topic_limit") or DEFAULT_TOPIC_IDEA_LIMIT)),
+                    limit=topic_limit,
                 )
                 available = topic_result.ideas
                 topic_warnings.extend(topic_result.warnings)
-            topic_ideas = available[:posts]
+            # Keep the complete grounded candidate pool. plan_week_x owns the
+            # lane/payoff/mechanic portfolio selection; truncating here would
+            # reduce it to choosing among only the highest-priority ideas.
+            topic_ideas = available
         result = plan_week_x(
             store,
             generator,

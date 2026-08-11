@@ -47,6 +47,21 @@ TOPIC_EDITORIAL_THEME_LIMITS = {
     "signal-to-action": 2,
 }
 
+TOPIC_MECHANIC_CLUSTER_NAMES = {
+    "provider-waterfalls",
+    "workflow-auditing",
+    "data-provenance",
+    "deliverability",
+    "message-craft",
+    "sequencing-and-follow-up",
+    "prospecting-and-qualification",
+    "sales-conversations",
+    "offers-and-positioning",
+    "pipeline-operations",
+    "signal-prioritization",
+    "ai-automation",
+}
+
 TRACEABLE_TOPIC_SOURCE_TYPES = {"trend", "performance", "product", "founder", "follow_up"}
 TOPIC_SCOUT_MAX_ATTEMPTS = 5
 TOPIC_SCOUT_MAX_PARSE_FAILURES = 2
@@ -75,14 +90,18 @@ def refresh_topic_ideas(
     source_counts: Counter[str] = Counter()
     value_mode_counts: Counter[str] = Counter()
     portfolio_lane_counts: Counter[str] = Counter()
+    mechanic_counts: Counter[str] = Counter()
     required_value_mode_count = topic_value_mode_target(requested)
     value_mode_limit = topic_value_mode_cap(requested)
+    mechanic_limit = topic_mechanic_cluster_cap(requested)
     skipped_repeated_themes = 0
     skipped_unsupported_claims: list[str] = []
     skipped_untraceable_sources = 0
     skipped_unsupported_evidence: list[str] = []
     skipped_source_concentration = 0
     skipped_value_concentration = 0
+    skipped_mechanic_concentration = 0
+    skipped_inactionable = 0
     rejected_summaries: list[str] = []
     response_parse_failures: list[str] = []
     provider_failures: list[str] = []
@@ -101,6 +120,7 @@ def refresh_topic_ideas(
                 source_counts=source_counts,
                 value_mode_counts=value_mode_counts,
                 portfolio_lane_counts=portfolio_lane_counts,
+                mechanic_counts=mechanic_counts,
                 required_value_mode_count=required_value_mode_count,
                 rejected_summaries=rejected_summaries,
             )
@@ -166,6 +186,7 @@ def refresh_topic_ideas(
                 continue
             idea_themes = editorial_theme_fingerprints(f"{idea.title} {idea.angle}")
             portfolio_lane = topic_portfolio_lane(idea)
+            mechanic_cluster = topic_mechanic_cluster(idea)
             if portfolio_lane == "signals-and-timing" and portfolio_lane_counts[portfolio_lane] >= 3:
                 skipped_repeated_themes += 1
                 rejected_summaries.append(f"saturated signals/timing portfolio lane: {idea.title}")
@@ -234,12 +255,30 @@ def refresh_topic_ideas(
                     f"uncited evergreen factual claim ({', '.join(labels)}): {idea.title}"
                 )
                 continue
+            actionability_violations = topic_actionability_violations(idea)
+            if actionability_violations:
+                skipped_inactionable += 1
+                rejected_summaries.append(
+                    "generic process advice "
+                    f"({', '.join(actionability_violations)}): {idea.title}"
+                )
+                continue
+            if (
+                mechanic_cluster != "other"
+                and mechanic_counts[mechanic_cluster] >= mechanic_limit
+            ):
+                skipped_mechanic_concentration += 1
+                rejected_summaries.append(
+                    f"repeated operating mechanic ({mechanic_cluster}): {idea.title}"
+                )
+                continue
             seen.add(key)
             accepted.append(idea)
             theme_counts.update(idea_themes)
             source_counts[idea.source_type] += 1
             value_mode_counts[value_mode] += 1
             portfolio_lane_counts[portfolio_lane] += 1
+            mechanic_counts[mechanic_cluster] += 1
             if len(accepted) >= requested:
                 break
 
@@ -315,6 +354,14 @@ def refresh_topic_ideas(
         diagnostics.append(
             f"Skipped {skipped_value_concentration} topic idea(s) to preserve reader-value diversity."
         )
+    if skipped_mechanic_concentration:
+        diagnostics.append(
+            f"Skipped {skipped_mechanic_concentration} topic idea(s) that repeated an already-covered operating mechanic."
+        )
+    if skipped_inactionable:
+        diagnostics.append(
+            f"Skipped {skipped_inactionable} generic audit, checklist, framework, or workflow idea(s) without an executable decision."
+        )
     if len(value_mode_counts) < required_value_mode_count:
         warnings.append(
             f"Topic Scout produced {len(value_mode_counts)} reader value mode(s); target was {required_value_mode_count}."
@@ -331,6 +378,12 @@ def topic_value_mode_cap(requested: int) -> int:
     return max(2, math.ceil(requested / available_modes))
 
 
+def topic_mechanic_cluster_cap(requested: int) -> int:
+    """Keep a large idea backlog broad enough for a smaller weekly selection."""
+
+    return max(2, math.ceil(max(1, requested) / 10))
+
+
 def build_topic_ideas_prompt(
     store: SQLiteStore,
     *,
@@ -339,6 +392,7 @@ def build_topic_ideas_prompt(
     extra_constraints: str = "",
 ) -> str:
     portfolio_target = max(1, int(portfolio_target or limit))
+    mechanic_limit = topic_mechanic_cluster_cap(portfolio_target)
     facts = [
         {
             "kind": section.kind,
@@ -451,6 +505,10 @@ Success criteria:
 - Evergreen ideas without refs must be explicitly framed as a heuristic, proposed test, checklist, question, or way to think. Do not present uncited outcomes, economics, prevalence, root causes, infrastructure requirements, or performance thresholds as facts.
 - Avoid repeating recent queued posts or recent topic ideas.
 - Build an editorial portfolio, not a list of paraphrases. Vary the underlying thesis and the reader value mode, not only the hook or format.
+- Reader-value modes are formats, not subject diversity. A diagnostic, playbook, and decision framework about the same audit, workflow, or provider waterfall are still one repeated operating mechanic.
+- No more than {mechanic_limit} ideas may use the same concrete operating mechanic. Move between message craft, follow-up, deliverability, qualification, discovery, objections, offers, pipeline operations, data provenance, AI systems, and other supported expertise lanes.
+- Do not return generic advice such as "audit the workflow", "review the process", or "use a checklist". When an idea uses audit/checklist/framework/workflow language, its angle must name the concrete object to inspect, an operator action beyond merely reviewing it, and the condition or finding that changes the next decision.
+- Prefer executable tips with a trigger, action, and decision consequence. Do not invent a numeric threshold to make a tip feel specific.
 - Treat facts and positioning as a factual boundary and idea library. They do not need to appear in every idea, and they must not pull every idea back to the same product wedge.
 - At least half of the ideas should be useful without naming the product: practical guidance, mechanisms, diagnostics, decision criteria, evidence interpretation, or market education.
 - No more than one idea may use the "copy/messages are easy; upstream targeting/context is hard" thesis. Do not recreate it with synonyms such as wrong step, downstream copy, or the real work happens before the email.
@@ -486,7 +544,9 @@ def build_topic_replacement_constraints(
     portfolio_lane_counts: Counter[str],
     required_value_mode_count: int,
     rejected_summaries: list[str],
+    mechanic_counts: Counter[str] | None = None,
 ) -> str:
+    mechanic_counts = mechanic_counts or Counter()
     accepted_titles = [topic_prompt_data(idea.title, 180) for idea in accepted]
     saturated_themes = [
         theme
@@ -505,6 +565,7 @@ def build_topic_replacement_constraints(
         f"Current reader value modes: {json.dumps(dict(value_mode_counts))}. Reach at least {required_value_mode_count} distinct modes.",
         f"Current source type counts: {json.dumps(dict(source_counts))}. Do not return more trend reactions once that lane is full.",
         f"Current broad portfolio lane counts: {json.dumps(dict(portfolio_lane_counts))}. The signals-and-timing lane has a hard cap of 3.",
+        f"Current operating mechanic counts: {json.dumps(dict(mechanic_counts))}. Do not disguise a repeated mechanic with a new reader-value format.",
     ]
     if saturated_themes:
         lines.append(f"Do not use these saturated editorial themes: {json.dumps(saturated_themes)}.")
@@ -645,6 +706,130 @@ def substantive_topic_source_post(text: str) -> bool:
     return len(words) >= 18
 
 
+def topic_mechanic_cluster(idea: TopicIdea) -> str:
+    """Classify the operating mechanism independently of topic and payoff format."""
+
+    # Topic labels are intentionally excluded: broad labels such as "sales AI"
+    # describe an editorial category, not the mechanism the post teaches.
+    value = f"{idea.title} {idea.angle}".casefold()
+    patterns = [
+        (
+            "provider-waterfalls",
+            r"\bwaterfalls?\b|\bprovider (?:chains?|cascades?|fallbacks?)\b|"
+            r"\b(?:cascade|fall back) (?:across|between|through|to) (?:data )?providers?\b",
+        ),
+        (
+            "workflow-auditing",
+            r"\baudits?\b|\bauditing\b|\baudit trail\b|\breview queues?\b|"
+            r"\bquality checks?\b|\bworkflow governance\b|"
+            r"\b(?:review|inspect|trace|check|govern)[^.!?]{0,60}\bworkflows?\b|"
+            r"\bworkflows?\b[^.!?]{0,60}\b(?:review|inspect|trace|check|govern)",
+        ),
+        (
+            "data-provenance",
+            r"\bprovenance\b|\bsource lineage\b|\bfield lineage\b|\bsource attribution\b|"
+            r"\bwhich (?:provider|source) returned\b|\bconflicting (?:fields?|records?|values?)\b",
+        ),
+        (
+            "deliverability",
+            r"\bdeliverability\b|\bbounces?\b|\bspf\b|\bdkim\b|\bdmarc\b|"
+            r"\bsender reputation\b|\binbox placement\b|\bmailboxes?\b|\bdomains?\b",
+        ),
+        (
+            "sequencing-and-follow-up",
+            r"\bfollow[- ]?ups?\b|\bcadence\b|\bmultitouch\b|\bno response\b|"
+            r"\bsequence (?:step|timing|order)\b",
+        ),
+        (
+            "sales-conversations",
+            r"\bdiscovery\b|\bobjections?\b|\bdemos?\b|\bsales calls?\b|"
+            r"\bmeetings?\b|\bcall notes?\b",
+        ),
+        (
+            "offers-and-positioning",
+            r"\boffers?\b|\bvalue propositions?\b|\bpitches?\b|\bpositioning\b|"
+            r"\bproblem statement\b",
+        ),
+        (
+            "prospecting-and-qualification",
+            r"\bprospecting\b|\blead lists?\b|\blist building\b|\baccount research\b|"
+            r"\bicp\b|\bqualif(?:y|ied|ication)\b|\bcontact selection\b|\bdisqualif",
+        ),
+        (
+            "pipeline-operations",
+            r"\bpipeline\b|\bforecast\b|\bstage definitions?\b|\bdeal reviews?\b|"
+            r"\bhandoffs?\b|\bcrm hygiene\b",
+        ),
+        (
+            "message-craft",
+            r"\bpersonalization\b|\brelevance\b|\bmessages?\b|\bcopy\b|\bemails?\b|"
+            r"\bfirst touch\b|\bcall to action\b|\bcta\b",
+        ),
+        (
+            "signal-prioritization",
+            r"\bbuying signals?\b|\bbuyer signals?\b|\bintent data\b|\bin[- ]market\b|"
+            r"\bwhy now\b|\baccount prioritization\b",
+        ),
+        (
+            "ai-automation",
+            r"\bai agents?\b|\bsales ai\b|\bai sdrs?\b|\bautomation\b|\bllms?\b|\bmodel routing\b",
+        ),
+    ]
+    cluster = next((name for name, pattern in patterns if re.search(pattern, value)), "other")
+    return cluster if cluster in TOPIC_MECHANIC_CLUSTER_NAMES else "other"
+
+
+def topic_actionability_violations(idea: TopicIdea) -> list[str]:
+    """Reject meta-process advice that never reaches an operator decision."""
+
+    value = f"{idea.title} {idea.angle}".casefold()
+    if not re.search(
+        r"\baudits?\b|\bauditing\b|\bchecklists?\b|\bframeworks?\b|\bworkflows?\b|"
+        r"\breview (?:queues?|process(?:es)?|workflows?)\b|\bquality checks?\b|\bgovernance\b",
+        value,
+    ):
+        return []
+
+    has_operator_action = bool(
+        re.search(
+            r"\b(?:add|ask|assign|calculate|choose|compare|define|discard|document|keep|map|"
+            r"merge|pause|prioriti[sz]e|record|remove|retain|rewrite|route|save|separate|"
+            r"send|split|stop|tag|verify)\w*\b",
+            value,
+        )
+    )
+    concrete_object_patterns = (
+        r"\b(?:accounts?|buyers?|contacts?|leads?|prospects?)\b",
+        r"\b(?:messages?|emails?|first touch|call to action|cta)\b",
+        r"\b(?:follow[- ]?ups?|sequences?|cadence)\b",
+        r"\b(?:fields?|records?|rows?|values?|titles?|domains?)\b",
+        r"\b(?:providers?|sources?|timestamps?|observation dates?|provenance)\b",
+        r"\b(?:mailboxes?|bounces?|spf|dkim|dmarc|sender reputation)\b",
+        r"\b(?:calls?|demos?|objections?|discovery|meetings?)\b",
+        r"\b(?:stages?|handoffs?|forecast|pipeline|crm)\b",
+        r"\b(?:offers?|pitches?|pricing|budget)\b",
+    )
+    concrete_object_count = sum(
+        1 for pattern in concrete_object_patterns if re.search(pattern, value)
+    )
+    has_decision_consequence = bool(
+        re.search(
+            r"\b(?:if|when|before|after|until|unless|then|instead of|rather than)\b|"
+            r"\b(?:change|decide|choose|discard|keep|pause|prioriti[sz]e|remove|route|stop)\w*\b",
+            value,
+        )
+    )
+
+    violations: list[str] = []
+    if not has_operator_action:
+        violations.append("missing operator action")
+    if concrete_object_count < 2:
+        violations.append("missing concrete inspection objects")
+    if not has_decision_consequence:
+        violations.append("missing decision consequence")
+    return violations
+
+
 def topic_portfolio_lane(idea: TopicIdea) -> str:
     text = f"{idea.topic} {idea.title} {idea.angle}"
     specific_lane = topic_content_lane(text, topic=idea.topic)
@@ -717,6 +902,7 @@ def prioritize_topic_ideas_for_schedule(
     ordered: list[TopicIdea] = []
     mode_counts = Counter(idea.reader_value_mode or "mechanism explainer" for idea in existing)
     lane_counts = Counter(topic_schedule_lane(idea) for idea in existing)
+    mechanic_counts = Counter(topic_mechanic_cluster(idea) for idea in existing)
     source_counts = Counter(idea.source_type for idea in existing)
     authority_count = sum(bool(topic_outbound_authority_lane(idea)) for idea in existing)
     signal_count = sum(topic_portfolio_lane(idea) == "signals-and-timing" for idea in existing)
@@ -740,7 +926,9 @@ def prioritize_topic_ideas_for_schedule(
             is_authority = bool(topic_outbound_authority_lane(idea))
             is_signal = topic_portfolio_lane(idea) == "signals-and-timing"
             is_vendor = topic_is_vendor_evaluation(idea)
+            mechanic = topic_mechanic_cluster(idea)
             return (
+                int(mechanic != "other" and mechanic_counts[mechanic] >= 1),
                 int(authority_required_now and not is_authority),
                 int(is_signal and signal_count >= 1),
                 int(is_vendor and vendor_count >= 1),
@@ -757,6 +945,7 @@ def prioritize_topic_ideas_for_schedule(
         ordered.append(selected)
         mode_counts[selected.reader_value_mode or "mechanism explainer"] += 1
         lane_counts[topic_schedule_lane(selected)] += 1
+        mechanic_counts[topic_mechanic_cluster(selected)] += 1
         source_counts[selected.source_type] += 1
         authority_count += int(bool(topic_outbound_authority_lane(selected)))
         signal_count += int(topic_portfolio_lane(selected) == "signals-and-timing")
@@ -784,6 +973,11 @@ def topic_content_lane(text: str, *, topic: str = "") -> str:
         ("data-infrastructure", r"\bcrm\b|\bdata provenance\b|\benrichment\b|\bdatabase\b|\bdata quality\b|\brecords?\b|\bfields?\b|\bhandoff\b"),
         ("market-economics", r"\bpricing\b|\bcosts?\b|\bbudget\b|\broi\b|\bcontracts?\b|\brevenue\b|\bvaluation\b|\bmarket risk\b"),
         ("human-selling", r"\bin[- ]person\b|\bdinner\b|\brelationship\b|\benterprise sales\b|\bhuman reps?\b|\bearned the meeting\b"),
+        ("sequencing-and-follow-up", r"\bfollow[- ]?ups?\b|\bcadence\b|\bmultitouch\b|\bno response\b"),
+        ("prospecting-and-qualification", r"\bprospecting\b|\blead lists?\b|\blist building\b|\baccount research\b|\bicp\b|\bqualif(?:y|ied|ication)\b|\bcontact selection\b"),
+        ("sales-conversations", r"\bdiscovery\b|\bobjections?\b|\bdemos?\b|\bsales calls?\b|\bmeetings?\b"),
+        ("offers-and-positioning", r"\boffers?\b|\bvalue propositions?\b|\bpitches?\b|\bpositioning\b|\bproblem statement\b"),
+        ("pipeline-operations", r"\bpipeline\b|\bforecast\b|\bstage definitions?\b|\bdeal reviews?\b|\bhandoffs?\b|\bcrm hygiene\b"),
         ("message-craft", r"\bmessages?\b|\brepl(?:y|ies)\b|\bsequences?\b|\bcopy\b|\bemails?\b|\bfirst touch\b"),
         ("ai-systems", r"\bai agents?\b|\barchitecture\b|\bcontext layer\b|\bllms?\b|\bmodel\b|\bautomation\b"),
         ("signals-and-timing", r"\bsignals?\b|\bintent\b|\btiming\b|\bin[- ]market\b|\bwhy now\b|\btargeting\b"),
