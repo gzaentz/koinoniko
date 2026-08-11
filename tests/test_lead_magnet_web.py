@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -57,13 +58,13 @@ class FakeProvider:
         return [json.dumps(artifact_payload())]
 
 
-def candidate() -> dict[str, object]:
+def candidate(*, published_at: str | None = None) -> dict[str, object]:
     return {
         "title": "Free sales prospecting prompt library",
         "source_url": "https://example.com/sales-prompts?utm_source=test",
         "platform": "linkedin",
         "author": "Example Author",
-        "published_at": "2026-07-03T12:00:00+00:00",
+        "published_at": published_at or (datetime.now(timezone.utc) - timedelta(days=3)).isoformat(),
         "source_text": "Free sales prospecting prompt library and Notion template for outbound teams.",
         "likes": 800,
         "replies": 120,
@@ -216,7 +217,7 @@ class LeadMagnetWebTest(unittest.TestCase):
     def test_autopilot_is_idempotent_for_fourteen_day_period(self):
         payload = {
             "now": "2026-07-06T12:00:00+00:00",
-            "candidates": [candidate()],
+            "candidates": [candidate(published_at="2026-07-03T12:00:00+00:00")],
             "window_days": 30,
         }
         with patch("leadpoet_social_brain.web.app.load_configured_provider", return_value=FakeProvider()):

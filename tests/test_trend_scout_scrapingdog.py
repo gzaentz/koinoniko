@@ -65,6 +65,8 @@ class ScrapingdogTrendScoutTest(unittest.TestCase):
         queries = scrapingdog_news_queries(TrendScoutProfile())[:6]
 
         self.assertIn("B2B sales", queries[0])
+        self.assertTrue(any("deliverability" in query and "follow-up" in query for query in queries))
+        self.assertTrue(any("discovery" in query and "objection handling" in query for query in queries))
         self.assertTrue(any("site:techcrunch.com" in query for query in queries))
         self.assertTrue(any("site:venturebeat.com" in query for query in queries))
         self.assertTrue(any("site:salesforce.com/news" in query for query in queries))

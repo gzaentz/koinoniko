@@ -944,7 +944,13 @@ The web planner defaults to `Autopilot: choose topics and angles`. With Autopilo
 Topic Scout builds an editorial portfolio rather than a list of paraphrases: at least half of
 the ideas must be useful without a product mention, reader-payoff modes are mixed across the
 set, the combined signals/timing/context family has a portfolio-wide cap, and repeated core
-theses are capped before suggestions are saved. It samples substantive authored posts across
+theses are capped before suggestions are saved. Reader-payoff format and operating mechanic are
+tracked separately, so changing an audit into a diagnostic or a provider waterfall into a
+playbook does not make it a new subject. Generic audit, checklist, framework, and workflow ideas
+are rejected unless they name concrete inspection objects, an operator action, and the finding
+that changes the next decision. The weekly selector receives the complete grounded idea pool and
+front-loads distinct subject lanes and mechanics instead of choosing only from the top few
+priority scores. It samples substantive authored posts across
 multiple expertise lanes instead of relying only on the top-performing examples. Source-backed
 ideas retain exact evidence receipts and an observed-versus-interpretation boundary; rejected
 candidates trigger replacement passes rather than silently shrinking the requested topic set.

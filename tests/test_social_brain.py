@@ -124,9 +124,12 @@ from leadpoet_social_brain.topic_scout import (
     parse_topic_ideas,
     refresh_topic_ideas,
     prioritize_topic_ideas_for_schedule,
+    topic_actionability_violations,
     topic_is_vendor_evaluation,
+    topic_mechanic_cluster,
     topic_outbound_authority_lane,
     topic_portfolio_lane,
+    topic_schedule_lane,
 )
 from leadpoet_social_brain.voice import (
     DEFAULT_AVOID_PHRASES,
@@ -10438,12 +10441,13 @@ class SocialBrainTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "brain.sqlite3"
             SQLiteStore(db_path).close()
+            fresh_published_at = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
             fake_client = FakeXApiClient(
                 [
                     {
                         "id": "daily1",
                         "text": "Daily sync should pick up direct X posts.",
-                        "created_at": "2026-06-25T12:00:00.000Z",
+                        "created_at": fresh_published_at,
                         "public_metrics": {"like_count": 7, "reply_count": 1, "impression_count": 500},
                     }
                 ],
@@ -12365,6 +12369,116 @@ class SocialBrainTest(unittest.TestCase):
             self.assertIn("no more than three ideas total", provider.prompts[0])
             store.close()
 
+    def test_topic_scout_replaces_generic_and_repeated_process_mechanics(self):
+        first_pass = [
+            {
+                "title": "Audit the enrichment workflow",
+                "topic": "RevOps",
+                "angle": "Give readers a checklist for reviewing the workflow.",
+                "why_now": "Use this as an operator exercise.",
+                "reader_value_mode": "practical playbook",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 99,
+            },
+            {
+                "title": "Audit conflicting CRM fields",
+                "topic": "RevOps",
+                "angle": (
+                    "Audit the workflow by comparing provider field values before CRM import; "
+                    "when values conflict, record each source and route the record for review."
+                ),
+                "why_now": "Use this as a concrete operator exercise.",
+                "reader_value_mode": "decision framework",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 95,
+            },
+            {
+                "title": "Audit the prospect-research workflow",
+                "topic": "prospecting",
+                "angle": (
+                    "Audit the workflow by comparing account fields before outreach; "
+                    "when a source is stale, record the provider and remove the contact from the sequence."
+                ),
+                "why_now": "Use this as a concrete operator exercise.",
+                "reader_value_mode": "diagnostic",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 94,
+            },
+            {
+                "title": "Remove research that does not change the ask",
+                "topic": "message craft",
+                "angle": "Before sending, remove any personalized detail that does not change the ask, then rewrite the first line around the buyer problem.",
+                "why_now": "Use this as a concrete message-editing exercise.",
+                "reader_value_mode": "practical playbook",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 90,
+            },
+            {
+                "title": "Audit the handoff review workflow",
+                "topic": "sales operations",
+                "angle": (
+                    "Audit the workflow by comparing CRM stage fields before a handoff; "
+                    "when the values disagree, record the source and route the record to its owner."
+                ),
+                "why_now": "Use this as a concrete operator exercise.",
+                "reader_value_mode": "build note",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 89,
+            },
+        ]
+        replacement = [
+            {
+                "title": "Separate authentication from message failure",
+                "topic": "deliverability",
+                "angle": "Separate SPF, DKIM, bounce, mailbox, and message checks before deciding whether to pause a domain or rewrite the email.",
+                "why_now": "Use this as a bounded diagnostic.",
+                "reader_value_mode": "useful distinction",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 88,
+            },
+            {
+                "title": "Discovery earns the demo",
+                "topic": "sales conversations",
+                "angle": "Before showing the product, ask which buyer problem and decision process the discovery call established, then choose whether a demo is useful.",
+                "why_now": "Use this as a bounded sales-call decision.",
+                "reader_value_mode": "buyer question",
+                "source_type": "evergreen",
+                "source_refs": [],
+                "post_type": "founder_insight",
+                "priority": 86,
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self.make_store(tmpdir)
+            provider = SequentialProvider(
+                [json.dumps({"topics": first_pass}), json.dumps({"topics": replacement})]
+            )
+
+            result = refresh_topic_ideas(store, provider, limit=4)
+
+            self.assertEqual(len(result.ideas), 4)
+            self.assertNotIn("Audit the enrichment workflow", {idea.title for idea in result.ideas})
+            self.assertEqual(
+                sum(topic_mechanic_cluster(idea) == "workflow-auditing" for idea in result.ideas),
+                2,
+            )
+            self.assertTrue(any("without an executable decision" in item for item in result.diagnostics))
+            self.assertTrue(any("repeated an already-covered operating mechanic" in item for item in result.diagnostics))
+            self.assertIn("Current operating mechanic counts", provider.prompts[1])
+            store.close()
+
     def test_topic_portfolio_lane_collapses_signal_timing_context_variants(self):
         variants = [
             TopicIdea(
@@ -12391,6 +12505,72 @@ class SocialBrainTest(unittest.TestCase):
             {topic_portfolio_lane(idea) for idea in variants},
             {"signals-and-timing"},
         )
+
+    def test_topic_mechanics_are_distinct_from_reader_value_format(self):
+        waterfall_ideas = [
+            TopicIdea(
+                title="A provider waterfall stopping rule",
+                topic="data enrichment",
+                angle="Compare values across the provider waterfall before choosing which source to retain.",
+                why_now="Useful now.",
+                reader_value_mode="decision framework",
+            ),
+            TopicIdea(
+                title="Diagnose a cascading provider chain",
+                topic="RevOps",
+                angle="Trace a provider chain to find where a fallback returned a conflicting title.",
+                why_now="Useful now.",
+                reader_value_mode="diagnostic",
+            ),
+        ]
+        audit_ideas = [
+            TopicIdea(
+                title="Audit a research workflow",
+                topic="prospecting",
+                angle="Review a workflow before assigning research to a rep.",
+                why_now="Useful now.",
+                reader_value_mode="practical playbook",
+            ),
+            TopicIdea(
+                title="A quality-check framework",
+                topic="operations",
+                angle="Put a quality check into the review queue.",
+                why_now="Useful now.",
+                reader_value_mode="decision framework",
+            ),
+        ]
+
+        self.assertEqual(
+            {topic_mechanic_cluster(idea) for idea in waterfall_ideas},
+            {"provider-waterfalls"},
+        )
+        self.assertEqual(
+            {topic_mechanic_cluster(idea) for idea in audit_ideas},
+            {"workflow-auditing"},
+        )
+
+    def test_generic_process_advice_requires_an_executable_decision(self):
+        generic = TopicIdea(
+            title="Audit the enrichment workflow",
+            topic="RevOps",
+            angle="Give readers a checklist for reviewing the workflow.",
+            why_now="Useful now.",
+            reader_value_mode="practical playbook",
+        )
+        concrete = TopicIdea(
+            title="Audit conflicting CRM fields",
+            topic="RevOps",
+            angle=(
+                "Audit the workflow by comparing provider field values before CRM import; "
+                "when values conflict, record each source and route the record for review."
+            ),
+            why_now="Useful now.",
+            reader_value_mode="practical playbook",
+        )
+
+        self.assertIn("missing operator action", topic_actionability_violations(generic))
+        self.assertIn("missing decision consequence", topic_actionability_violations(generic))
+        self.assertEqual(topic_actionability_violations(concrete), [])
 
     def test_weekly_topic_priority_front_loads_outbound_authority_and_distinct_formats(self):
         ideas = [
@@ -12450,6 +12630,72 @@ class SocialBrainTest(unittest.TestCase):
         self.assertLessEqual(sum(topic_portfolio_lane(idea) == "signals-and-timing" for idea in selected), 1)
         self.assertLessEqual(sum(topic_is_vendor_evaluation(idea) for idea in selected), 1)
         self.assertEqual(len({idea.reader_value_mode for idea in selected}), 5)
+
+    def test_weekly_topic_priority_avoids_repeated_operating_mechanics(self):
+        ideas = [
+            TopicIdea(
+                title="Provider waterfall diagnostic",
+                topic="data enrichment",
+                angle="Trace a provider waterfall to a conflicting title.",
+                why_now="Useful now.",
+                reader_value_mode="diagnostic",
+                priority=100,
+            ),
+            TopicIdea(
+                title="Provider waterfall decision rule",
+                topic="RevOps",
+                angle="Compare provider waterfall values before retaining a source.",
+                why_now="Useful now.",
+                reader_value_mode="decision framework",
+                priority=99,
+            ),
+            TopicIdea(
+                title="Remove irrelevant personalization",
+                topic="message craft",
+                angle="Remove a personalized detail when it does not change the ask in the first email.",
+                why_now="Useful now.",
+                reader_value_mode="practical playbook",
+                priority=90,
+            ),
+            TopicIdea(
+                title="Add a reason in the follow-up",
+                topic="sequencing",
+                angle="Use a follow-up to add a new reason to reply instead of repeating the first sequence step.",
+                why_now="Useful now.",
+                reader_value_mode="mechanism explainer",
+                priority=89,
+            ),
+            TopicIdea(
+                title="Separate authentication from list quality",
+                topic="deliverability",
+                angle="Diagnose SPF, DKIM, bounce, mailbox, and message failures separately.",
+                why_now="Useful now.",
+                reader_value_mode="useful distinction",
+                priority=88,
+            ),
+            TopicIdea(
+                title="Discovery earns the demo",
+                topic="sales conversations",
+                angle="Choose whether to demo after discovery names the buyer problem and decision process.",
+                why_now="Useful now.",
+                reader_value_mode="buyer question",
+                priority=87,
+            ),
+            TopicIdea(
+                title="Disqualify before list expansion",
+                topic="qualification",
+                angle="Record one disqualifier before adding another prospect to the lead list.",
+                why_now="Useful now.",
+                reader_value_mode="build note",
+                priority=86,
+            ),
+        ]
+
+        selected = prioritize_topic_ideas_for_schedule(ideas, slots=5)[:5]
+        mechanics = [topic_mechanic_cluster(idea) for idea in selected]
+
+        self.assertLessEqual(mechanics.count("provider-waterfalls"), 1)
+        self.assertGreaterEqual(len({topic_schedule_lane(idea) for idea in selected}), 4)
 
     def test_weekly_topic_priority_remembers_existing_weekly_format_and_lane(self):
         existing = TopicIdea(
@@ -12728,14 +12974,14 @@ class SocialBrainTest(unittest.TestCase):
             "discovery calls",
             "workflow boundaries",
             "source provenance",
-            "review queues",
+            "reply handling",
             "customer interviews",
             "support triage",
             "roadmap tradeoffs",
             "onboarding friction",
             "model routing",
             "founder delegation",
-            "quality checks",
+            "offer framing",
             "market narratives",
             "technical debt",
             "team rituals",
@@ -12755,7 +13001,11 @@ class SocialBrainTest(unittest.TestCase):
             {
                 "title": f"A review prompt for {subject}",
                 "topic": subject,
-                "angle": f"Propose a {value_modes[index % len(value_modes)]} for examining {subject} without asserting an outcome.",
+                "angle": (
+                    f"Propose a {value_modes[index % len(value_modes)]} for {subject}: "
+                    "before acting, compare CRM field values, record the provider sources, "
+                    "and name which next decision changes."
+                ),
                 "why_now": "Use this as a proposed editorial exercise.",
                 "reader_value_mode": value_modes[index % len(value_modes)],
                 "source_type": "evergreen",
@@ -12794,7 +13044,10 @@ class SocialBrainTest(unittest.TestCase):
             {
                 "title": "A provenance handoff checklist",
                 "topic": "RevOps",
-                "angle": "Offer a checklist for inspecting how a field keeps its source across a handoff.",
+                "angle": (
+                    "Before a CRM handoff, compare field values and record each provider source; "
+                    "when sources conflict, route the record for review."
+                ),
                 "why_now": "Use it as a practical audit prompt.",
                 "reader_value_mode": "practical playbook",
                 "source_type": "evergreen",
@@ -12816,7 +13069,10 @@ class SocialBrainTest(unittest.TestCase):
             {
                 "title": "A proposed review-cost ledger",
                 "topic": "sales operations",
-                "angle": "Propose a decision framework for listing the review work attached to each option.",
+                "angle": (
+                    "Before choosing a vendor, compare pricing, record which emails need human review, "
+                    "and choose only after the budget includes that work."
+                ),
                 "why_now": "Use it as a bounded comparison method.",
                 "reader_value_mode": "decision framework",
                 "source_type": "evergreen",
@@ -13018,6 +13274,52 @@ class SocialBrainTest(unittest.TestCase):
             self.assertEqual(dashboard["topic_ideas"][0]["title"], idea.title)
             self.assertIn("<h2>Topics</h2>", index_html)
             self.assertIn("planAutopilot", index_html)
+
+    def test_interactive_autopilot_passes_full_topic_pool_to_weekly_selector(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "brain.sqlite3"
+            store = SQLiteStore(db_path)
+            ideas = [
+                store.save_topic_idea(
+                    TopicIdea(
+                        title=f"Grounded candidate {index}",
+                        topic=f"lane {index}",
+                        angle=f"Give the operator a distinct decision for lane {index}.",
+                        why_now="Useful now.",
+                        priority=100 - index,
+                    )
+                )
+                for index in range(7)
+            ]
+            store.close()
+
+            with patch(
+                "leadpoet_social_brain.web.app.load_configured_provider",
+                return_value=FakeProvider(),
+            ):
+                with patch(
+                    "leadpoet_social_brain.web.app.plan_week_x",
+                    return_value=PlanWeekResult(queued=[], warnings=[]),
+                ) as plan:
+                    status, payload = handle_api_request(
+                        "POST",
+                        "/api/plan-week",
+                        json.dumps(
+                            {
+                                "posts": 2,
+                                "autopilot": True,
+                                "refresh_topics": False,
+                                "topic_limit": 20,
+                                "week_start": "2026-08-17",
+                            }
+                        ),
+                        db_path=db_path,
+                    )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["queued"], [])
+            passed_ideas = plan.call_args.kwargs["topic_ideas"]
+            self.assertEqual([idea.id for idea in passed_ideas], [idea.id for idea in ideas])
 
     def test_autopilot_weekly_task_is_idempotent_when_week_is_already_planned(self):
         with tempfile.TemporaryDirectory() as tmpdir:

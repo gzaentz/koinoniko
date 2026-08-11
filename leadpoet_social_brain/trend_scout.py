@@ -38,8 +38,12 @@ SCRAPINGDOG_NEWS_QUERY = (
 )
 SCRAPINGDOG_NEWS_QUERIES = (
     SCRAPINGDOG_NEWS_QUERY,
+    '("B2B outbound" OR "sales development") '
+    '(deliverability OR prospecting OR "follow-up" OR messaging OR personalization OR qualification)',
     '(Salesforce OR HubSpot OR Apollo OR ZoomInfo OR Clay OR Outreach OR Salesloft) '
     '(AI OR agent OR signals OR intent) (sales OR outbound OR pipeline OR CRM)',
+    '("B2B sales" OR "enterprise sales") '
+    '(discovery OR "objection handling" OR qualification OR demos OR "sales calls")',
     '(site:techcrunch.com OR site:venturebeat.com OR site:news.crunchbase.com OR site:martech.org) '
     '("sales AI" OR RevOps OR CRM OR GTM OR outbound)',
     '(site:salesforce.com/news OR site:hubspot.com/company-news OR site:outreach.io/resources/blog '
