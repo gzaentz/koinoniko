@@ -1875,6 +1875,14 @@ main {
   background: var(--soft);
 }
 
+.settings-row-static {
+  cursor: default;
+}
+
+.settings-row-static:hover {
+  background: var(--white);
+}
+
 .settings-row > div {
   min-width: 0;
 }

@@ -3092,7 +3092,7 @@ function renderVoiceLoading() {
 }
 
 function renderAccountLoading() {
-  ["accountConnectionsSummary", "accountModelSummary", "accountSyncSummary", "accountUserSummary"].forEach((id) => {
+  ["accountConnectionsSummary", "accountModelSummary", "accountAutomationSummary", "accountSyncSummary", "accountUserSummary"].forEach((id) => {
     const node = $(id);
     if (node) node.innerHTML = `<span class="skeleton-line medium"></span>`;
   });
@@ -3647,6 +3647,7 @@ function renderAccount() {
   const sync = account.sync || {};
   const syncStatus = account.sync_status || {};
   const stats = account.stats || {};
+  const scheduledAnalysisPaused = Boolean(settings.scheduled_analysis_paused);
   const connections = account.connections || status.connections || fallbackConnections(status);
   const connectionEntries = accountConnectionEntries(connections);
   const connectedCount = connectionEntries.filter(([, connection]) => connectionStatus(connection) === "connected").length;
@@ -3667,6 +3668,16 @@ function renderAccount() {
   setModelInput("accountEvaluatorModel", models.evaluator, effectiveModels.evaluator || defaultModel);
   setModelInput("accountPolishModel", models.polish, effectiveModels.polish || models.natural_writer || defaultModel);
   $("accountModelSummary").textContent = modelRoutingSummary(models, effectiveModels, defaultModel);
+  $("accountAutomationSummary").textContent = scheduledAnalysisPaused
+    ? "Paused. Manual analysis remains available."
+    : "Scheduled news, trends, patterns, topics, weekly plans, and lead-magnet research are active.";
+  $("accountAutomationSummary").classList.remove("error");
+  $("accountScheduledAnalysisButton").textContent = scheduledAnalysisPaused ? "Resume" : "Pause";
+  $("accountScheduledAnalysisButton").setAttribute(
+    "aria-label",
+    scheduledAnalysisPaused ? "Resume scheduled analysis" : "Pause scheduled analysis"
+  );
+  $("accountScheduledAnalysisButton").disabled = false;
   $("accountSyncSummary").textContent = syncSummary(sync, syncStatus, stats);
   const security = account.security || {};
   $("accountUserSummary").textContent = `Signed in as ${security.username || "configured user"}`;
@@ -3875,6 +3886,31 @@ async function saveAccount() {
   });
   renderAccount();
   showMessage("Account settings saved.");
+}
+
+async function saveScheduledAnalysisSetting() {
+  const button = $("accountScheduledAnalysisButton");
+  const summary = $("accountAutomationSummary");
+  const paused = !Boolean(state.account?.settings?.scheduled_analysis_paused);
+  const originalLabel = button.textContent;
+  let saved = false;
+  button.disabled = true;
+  button.textContent = paused ? "Pausing..." : "Resuming...";
+  try {
+    state.account = await api("/api/account", {
+      method: "PATCH",
+      body: JSON.stringify({ scheduled_analysis_paused: paused }),
+    });
+    renderAccount();
+    saved = true;
+    summary.classList.remove("error");
+  } catch (error) {
+    summary.textContent = `Could not update scheduled analysis: ${error.message}`;
+    summary.classList.add("error");
+  } finally {
+    button.disabled = false;
+    if (!saved) button.textContent = originalLabel;
+  }
 }
 
 async function resetAccountModels() {
@@ -4542,6 +4578,7 @@ function setup() {
   $("createPostPattern").addEventListener("change", syncCreatePostSelectionsFromInputs);
   $("loadTrendsButton").addEventListener("click", (event) => runButton(event.currentTarget, "Loading...", loadTrends));
   $("saveAccountButton").addEventListener("click", (event) => runButton(event.currentTarget, "Saving...", saveAccount));
+  $("accountScheduledAnalysisButton").addEventListener("click", saveScheduledAnalysisSetting);
   $("accountSyncAllButton").addEventListener("click", (event) => runAccountSyncMenuAction(event, "Syncing...", syncAllXData));
   $("accountSyncPostsButton").addEventListener("click", (event) => runAccountSyncMenuAction(event, "Syncing...", syncPosts));
   $("accountSyncMetricsButton").addEventListener("click", (event) => runAccountSyncMenuAction(event, "Syncing...", syncMetrics));

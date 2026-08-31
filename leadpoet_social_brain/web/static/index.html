@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@1,6..72,420&display=swap">
-    <link rel="stylesheet" href="/static/styles.css?v=20260714-double-scout-1">
+    <link rel="stylesheet" href="/static/styles.css?v=20260831-pause-analysis-1">
   </head>
   <body>
     <aside class="sidebar" id="sidebar">
@@ -353,6 +353,16 @@
               </div>
               <div class="settings-row-actions">
                 <button class="settings-row-button icon-only" id="accountModelsManageButton" type="button" aria-label="Manage model routing">&rsaquo;</button>
+              </div>
+            </article>
+
+            <article class="settings-row settings-row-static" id="accountAutomationRow">
+              <div>
+                <h2>Automatic Analysis</h2>
+                <p id="accountAutomationSummary" class="inline-save-status" role="status" aria-live="polite">Scheduled news, trends, patterns, topics, weekly plans, and lead-magnet research are active.</p>
+              </div>
+              <div class="settings-row-actions">
+                <button class="settings-row-button" id="accountScheduledAnalysisButton" type="button" disabled>Pause</button>
               </div>
             </article>
 
@@ -875,6 +885,6 @@
 
     <datalist id="topicOptions"></datalist>
     <datalist id="postTypeOptions"></datalist>
-    <script src="/static/app.js?v=20260720-polish-1"></script>
+    <script src="/static/app.js?v=20260831-pause-analysis-1"></script>
   </body>
 </html>
