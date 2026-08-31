@@ -148,6 +148,18 @@ TOPICS_SYNC_KEY = "topics_sync"
 AUTOPILOT_SYNC_KEY = "autopilot_weekly"
 LEAD_MAGNET_RESEARCH_SYNC_KEY = "lead_magnet_research_sync"
 LEAD_MAGNET_AUTOPILOT_SYNC_KEY = "lead_magnet_autopilot"
+SCHEDULED_ANALYSIS_PAUSED_SETTING = "scheduled_analysis_paused"
+SCHEDULED_ANALYSIS_PAUSED_MESSAGE = (
+    "Automatic analysis is paused in Settings. No provider or network calls were made."
+)
+PAUSABLE_SCHEDULED_TASKS = {
+    "refresh-trends",
+    "refresh-patterns",
+    "refresh-patterns-weekly",
+    "refresh-topics",
+    "autopilot-weekly",
+    "autopilot-lead-magnet",
+}
 TOPIC_REFRESH_PROVIDER_TIMEOUT_SECONDS = 45.0
 TOPIC_REFRESH_PROVIDER_MAX_TOKENS = 2400
 VOICE_CONTEXT_NAME = "learned_from_high_performers"
@@ -696,6 +708,9 @@ def route_api(
     payload: dict[str, Any],
 ) -> tuple[int, dict[str, Any]]:
     parts = [part for part in path.split("/") if part]
+    if method == "POST" and len(parts) == 2 and parts[0] == "tasks" and parts[1] in PAUSABLE_SCHEDULED_TASKS:
+        if scheduled_analysis_paused(store):
+            return 200, paused_task_response(parts[1])
     if method == "POST" and parts == ["tasks", "sync-x-posts"]:
         return 200, sync_x_posts_task_payload(store, payload)
     if method == "POST" and parts == ["tasks", "sync-x-metrics"]:
@@ -730,7 +745,7 @@ def route_api(
     if method == "GET" and parts == ["api", "account", "status"]:
         return 200, account_status_payload(store)
     if method == "PATCH" and parts == ["api", "account"]:
-        save_account_model_settings(store, payload)
+        save_account_settings(store, payload)
         return 200, account_payload(store)
     if method == "POST" and parts == ["api", "account", "test-provider"]:
         return test_provider_response(store)
@@ -1485,6 +1500,15 @@ def refresh_trends_task_payload(store: SQLiteStore, payload: dict[str, Any]) -> 
             )
         )
         raise
+
+
+def paused_task_response(task: str) -> dict[str, Any]:
+    return {
+        "skipped": True,
+        "paused": True,
+        "task": task,
+        "reason": SCHEDULED_ANALYSIS_PAUSED_MESSAGE,
+    }
 
 
 def call_refresh_web_trends(
@@ -3283,6 +3307,7 @@ def account_payload(store: SQLiteStore) -> dict[str, Any]:
             "effective_models": routing.as_dict(),
             "model_env_defaults": model_env_defaults(),
             "x_sync_username": default_x_sync_username_for_store(store),
+            "scheduled_analysis_paused": scheduled_analysis_paused(store),
         },
     }
 
@@ -3435,6 +3460,20 @@ def save_account_model_settings(store: SQLiteStore, payload: dict[str, Any]) -> 
             store.save_app_setting(key, clean_optional(models.get(role)))
     if "default" in models:
         store.save_app_setting(LEGACY_MODEL_SETTING, None)
+
+
+def save_account_settings(store: SQLiteStore, payload: dict[str, Any]) -> None:
+    save_account_model_settings(store, payload)
+    if "scheduled_analysis_paused" in payload:
+        store.save_app_setting(
+            SCHEDULED_ANALYSIS_PAUSED_SETTING,
+            "true" if bool_from_payload(payload, "scheduled_analysis_paused", False) else None,
+        )
+
+
+def scheduled_analysis_paused(store: SQLiteStore) -> bool:
+    value = store.get_app_setting(SCHEDULED_ANALYSIS_PAUSED_SETTING)
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def account_model_settings(store: SQLiteStore | None) -> dict[str, str]:
